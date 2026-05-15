@@ -1,0 +1,18 @@
+experiment_id: runner_fixture_external_snapshots
+runs:
+  - run_id: geometry_001_external
+    task_id: geometry_001_basic_primitives
+    execution_mode: external_snapshot
+    task_path: tasks/geometry/geometry_001_basic_primitives.yaml
+    snapshot_path: tests/fixtures/validation/valid_geometry_snapshot.json
+    artifacts_dir: tests/fixtures/validation
+    output_dir: artifacts/runs/geometry_001_external
+  - run_id: geometry_001_external_2
+    task_id: geometry_001_basic_primitives
+    execution_mode: external_snapshot
+    task_path: tasks/geometry/geometry_001_basic_primitives.yaml
+    snapshot_path: tests/fixtures/validation/valid_geometry_snapshot.json
+    artifacts_dir: tests/fixtures/validation
+    output_dir: artifacts/runs/geometry_001_external_2
+metadata:
+  description: Runner fixture using existing validation SceneSnapshot JSON files.

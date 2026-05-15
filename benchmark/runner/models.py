@@ -1,0 +1,87 @@
+from enum import Enum
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
+
+
+class ExecutionMode(str, Enum):
+    REPLAY = "replay"
+    BLENDER_SMOKE = "blender_smoke"
+    EXTERNAL_SNAPSHOT = "external_snapshot"
+
+
+class RunStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    PASSED = "passed"
+    FAILED = "failed"
+    ERROR = "error"
+
+
+class RunConfig(BaseModel):
+    run_id: str
+    task_id: str
+    execution_mode: ExecutionMode
+    task_path: Path | None = None
+    snapshot_path: Path | None = None
+    artifacts_dir: Path
+    output_dir: Path
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("run_id", "task_id")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value must not be empty")
+        return value
+
+
+class ExperimentConfig(BaseModel):
+    experiment_id: str
+    runs: list[RunConfig]
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("experiment_id")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value must not be empty")
+        return value
+
+
+class RunResult(BaseModel):
+    run_id: str
+    task_id: str
+    status: RunStatus
+    execution_mode: ExecutionMode
+    validation_result_path: Path | None
+    scene_snapshot_path: Path | None
+    artifacts_dir: Path
+    total_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    overall_status: str | None
+    started_at: str
+    finished_at: str | None
+    duration_sec: float | None = Field(default=None, ge=0.0)
+    error: str | None = None
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("run_id", "task_id", "started_at")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value must not be empty")
+        return value
+
+
+class ExperimentResult(BaseModel):
+    experiment_id: str
+    runs: list[RunResult]
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("experiment_id")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value must not be empty")
+        return value

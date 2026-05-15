@@ -1,0 +1,16 @@
+{
+  "run_id": "geometry_001_external",
+  "task_id": "geometry_001_basic_primitives",
+  "status": "passed",
+  "execution_mode": "external_snapshot",
+  "validation_result_path": "artifacts/runs/geometry_001_external/validation_result.json",
+  "scene_snapshot_path": "artifacts/runs/geometry_001_external/scene_snapshot.json",
+  "artifacts_dir": "artifacts/runs/geometry_001_external",
+  "total_score": 1.0,
+  "overall_status": "passed",
+  "started_at": "2026-05-15T10:00:00Z",
+  "finished_at": "2026-05-15T10:00:01Z",
+  "duration_sec": 1.0,
+  "error": null,
+  "summary": {}
+}

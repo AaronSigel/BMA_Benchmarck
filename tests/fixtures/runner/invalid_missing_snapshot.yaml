@@ -1,0 +1,7 @@
+run_id: geometry_001_missing_snapshot
+task_id: geometry_001_basic_primitives
+execution_mode: external_snapshot
+task_path: tasks/geometry/geometry_001_basic_primitives.yaml
+snapshot_path: tests/fixtures/validation/missing_scene_snapshot.json
+artifacts_dir: tests/fixtures/validation
+output_dir: artifacts/runs/geometry_001_missing_snapshot

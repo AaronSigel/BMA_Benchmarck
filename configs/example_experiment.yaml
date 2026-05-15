@@ -1,0 +1,11 @@
+experiment_id: local_validation_baseline
+runs:
+  - run_id: geometry_001_replay
+    task_id: geometry_001_basic_primitives
+    execution_mode: external_snapshot
+    task_path: tasks/geometry/geometry_001_basic_primitives.yaml
+    snapshot_path: tests/fixtures/validation/valid_geometry_snapshot.json
+    artifacts_dir: tests/fixtures/validation
+    output_dir: artifacts/runs/geometry_001_replay
+metadata:
+  description: Smoke validation run using an existing SceneSnapshot fixture.

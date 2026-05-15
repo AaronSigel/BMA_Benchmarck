@@ -1,0 +1,18 @@
+# MCP profile: full
+# All tools enabled — identical to upstream blender-mcp behaviour.
+# Use for unrestricted benchmark runs or manual agent sessions.
+
+server_distribution: upstream
+command: uvx
+args:
+  - blender-mcp
+
+blender_host: localhost
+blender_port: 9876
+
+disable_telemetry: true
+profile: full
+
+env:
+  BMA_MCP_PROFILE: full
+  DISABLE_TELEMETRY: "true"

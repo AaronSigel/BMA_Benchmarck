@@ -1,0 +1,21 @@
+# MCP profile: inspection_enabled
+# Allowed tools: python_enabled + get_polyhaven_categories, search_polyhaven_assets
+# Full scene inspection and Python execution; asset download disabled.
+
+server_distribution: fork
+package_source: blender-mcp-bma
+command: uvx
+args:
+  - --from
+  - blender-mcp-bma
+  - blender-mcp
+
+blender_host: localhost
+blender_port: 9876
+
+disable_telemetry: true
+profile: inspection_enabled
+
+env:
+  BMA_MCP_PROFILE: inspection_enabled
+  DISABLE_TELEMETRY: "true"

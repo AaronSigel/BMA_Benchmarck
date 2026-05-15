@@ -1,0 +1,18 @@
+# MCP profile: minimal
+# Allowed tools: get_bma_profile_info, get_scene_info, get_object_info
+# No Python execution, no screenshots, no external integrations.
+
+server_distribution: upstream
+command: uvx
+args:
+  - blender-mcp
+
+blender_host: localhost
+blender_port: 9876
+
+disable_telemetry: true
+profile: minimal
+
+env:
+  BMA_MCP_PROFILE: minimal
+  DISABLE_TELEMETRY: "true"

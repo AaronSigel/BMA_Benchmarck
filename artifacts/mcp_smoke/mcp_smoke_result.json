@@ -1,0 +1,94 @@
+{
+  "timestamp": "2026-05-15T23:05:02.952646+00:00",
+  "config": "localhost:9876",
+  "profile": "inspection_enabled",
+  "checks": {
+    "config_loaded": true,
+    "telemetry_disabled": true,
+    "profile_valid": true,
+    "blender_socket_available": true,
+    "mcp_server_available": true
+  },
+  "tool_results": {
+    "get_scene_info": {
+      "status": "ok",
+      "result": {
+        "name": "Scene",
+        "object_count": 3,
+        "objects": [
+          {
+            "name": "Cube",
+            "type": "MESH",
+            "location": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "name": "Light",
+            "type": "LIGHT",
+            "location": [
+              4.08,
+              1.01,
+              5.9
+            ]
+          },
+          {
+            "name": "Camera",
+            "type": "CAMERA",
+            "location": [
+              7.36,
+              -6.93,
+              4.96
+            ]
+          }
+        ],
+        "materials_count": 2
+      }
+    },
+    "get_bma_profile_info": {
+      "status": "ok",
+      "result": {
+        "active_profile": "inspection_enabled",
+        "enabled_tools": [
+          "get_bma_profile_info",
+          "get_object_info",
+          "get_scene_info",
+          "get_viewport_screenshot"
+        ],
+        "disabled_tools": [
+          "bma_create_camera",
+          "bma_create_light",
+          "bma_create_object",
+          "bma_export_scene",
+          "bma_get_scene_info",
+          "bma_set_material",
+          "bma_set_transform",
+          "download_polyhaven_asset",
+          "download_sketchfab_model",
+          "execute_blender_code",
+          "generate_hunyuan3d_model",
+          "generate_hyper3d_model_via_images",
+          "generate_hyper3d_model_via_text",
+          "get_hunyuan3d_status",
+          "get_hyper3d_status",
+          "get_polyhaven_categories",
+          "get_polyhaven_status",
+          "get_sketchfab_status",
+          "import_generated_asset",
+          "import_generated_asset_hunyuan",
+          "poll_hunyuan_job_status",
+          "poll_rodin_job_status",
+          "search_polyhaven_assets",
+          "search_sketchfab_models",
+          "set_texture"
+        ],
+        "allow_python_execution": false,
+        "allow_external_assets": false,
+        "telemetry_disabled": true
+      }
+    }
+  },
+  "status": "PASS"
+}

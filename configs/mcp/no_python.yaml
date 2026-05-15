@@ -1,0 +1,19 @@
+# MCP profile: no_python
+# Allowed tools: minimal + get_viewport_screenshot, get_polyhaven_status,
+#                get_hyper3d_status, get_sketchfab_status
+# Read-only scene inspection without Python code execution.
+
+server_distribution: upstream
+command: uvx
+args:
+  - blender-mcp
+
+blender_host: localhost
+blender_port: 9876
+
+disable_telemetry: true
+profile: no_python
+
+env:
+  BMA_MCP_PROFILE: no_python
+  DISABLE_TELEMETRY: "true"

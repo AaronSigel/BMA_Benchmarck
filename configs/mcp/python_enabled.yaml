@@ -1,0 +1,20 @@
+# MCP profile: python_enabled
+# Allowed tools: no_python + execute_blender_code
+# Python execution enabled; external asset integrations remain read-only.
+
+server_distribution: fork
+command: uvx
+args:
+  - --from
+  - blender-mcp-bma
+  - blender-mcp
+
+blender_host: localhost
+blender_port: 9876
+
+disable_telemetry: true
+profile: python_enabled
+
+env:
+  BMA_MCP_PROFILE: python_enabled
+  DISABLE_TELEMETRY: "true"

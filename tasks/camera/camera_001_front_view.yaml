@@ -1,0 +1,50 @@
+id: camera_001_front_view
+title: Front view camera
+category: camera
+difficulty: easy
+prompt: >
+  Create a cube at the center of the scene and place a camera in front of it.
+  The camera should look directly at the cube and use a focal length of 35.
+tags:
+  - camera
+  - front-view
+  - baseline
+allowed_tools:
+  - create_object
+  - create_camera
+  - set_camera
+  - set_transform
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Center_Cube
+      type: MESH
+      primitive: cube
+      location: { x: 0.0, y: 0.0, z: 1.0 }
+      dimensions: { x: 2.0, y: 2.0, z: 2.0 }
+      tolerance: 0.1
+  materials: []
+  lights: []
+  cameras:
+    - name: Front_Camera
+      location: { x: 0.0, y: -6.0, z: 2.0 }
+      rotation: { x: 75.0, y: 0.0, z: 0.0 }
+      focal_length: 35.0
+      target: Center_Cube
+      tolerance: 0.1
+  exports: []
+success_criteria:
+  - metric: camera_existence
+    weight: 0.35
+    required: true
+  - metric: camera_correctness
+    weight: 0.4
+    required: true
+  - metric: target_visibility
+    weight: 0.25
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Baseline camera placement task for a front view of one object.
+

@@ -1,0 +1,52 @@
+id: geometry_004_rotation
+title: Rotated primitives
+category: geometry
+difficulty: medium
+prompt: >
+  Create a cube rotated 45 degrees around the Z axis and a cylinder rotated
+  90 degrees around the X axis. Place the objects apart so their rotations can
+  be inspected without overlap.
+tags:
+  - geometry
+  - rotation
+  - transforms
+allowed_tools:
+  - create_object
+  - set_transform
+  - assign_material
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Rotated_Cube
+      type: MESH
+      primitive: cube
+      location: { x: -1.5, y: 0.0, z: 0.0 }
+      rotation: { x: 0.0, y: 0.0, z: 45.0 }
+      dimensions: { x: 1.5, y: 1.5, z: 1.5 }
+      tolerance: 0.1
+    - name: Rotated_Cylinder
+      type: MESH
+      primitive: cylinder
+      location: { x: 1.5, y: 0.0, z: 0.0 }
+      rotation: { x: 90.0, y: 0.0, z: 0.0 }
+      dimensions: { x: 1.0, y: 1.0, z: 2.0 }
+      tolerance: 0.1
+  materials: []
+  lights: []
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: object_existence
+    weight: 0.3
+    required: true
+  - metric: geometry_accuracy
+    weight: 0.3
+    required: true
+  - metric: object_placement
+    weight: 0.4
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Rotation transform task for simple primitives.
+

@@ -1,0 +1,56 @@
+id: geometry_003_dimensions
+title: Object dimensions
+category: geometry
+difficulty: medium
+prompt: >
+  Create a 2x2x2 cube, an elongated rectangular block with dimensions 1x2x3,
+  and a cylinder with height 3. Arrange the objects so each can be inspected
+  separately.
+tags:
+  - geometry
+  - dimensions
+  - scale
+allowed_tools:
+  - create_object
+  - set_transform
+  - assign_material
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Large_Cube
+      type: MESH
+      primitive: cube
+      location: { x: -3.0, y: 0.0, z: 1.0 }
+      dimensions: { x: 2.0, y: 2.0, z: 2.0 }
+      tolerance: 0.1
+    - name: Rectangular_Block
+      type: MESH
+      primitive: cube
+      location: { x: 0.0, y: 0.0, z: 1.5 }
+      dimensions: { x: 1.0, y: 2.0, z: 3.0 }
+      tolerance: 0.1
+    - name: Tall_Cylinder
+      type: MESH
+      primitive: cylinder
+      location: { x: 3.0, y: 0.0, z: 1.5 }
+      dimensions: { x: 1.0, y: 1.0, z: 3.0 }
+      tolerance: 0.1
+  materials: []
+  lights: []
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: object_existence
+    weight: 0.3
+    required: true
+  - metric: geometry_accuracy
+    weight: 0.5
+    required: true
+  - metric: object_placement
+    weight: 0.2
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Dimension accuracy task for scaled primitives.
+

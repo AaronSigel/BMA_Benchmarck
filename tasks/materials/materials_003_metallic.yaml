@@ -1,0 +1,60 @@
+id: materials_003_metallic
+title: Metallic parameter contrast
+category: materials
+difficulty: easy
+prompt: >
+  Create two cubes with similar neutral colors. Assign one cube a non-metallic
+  material with metallic 0.0 and the other cube a metallic material with
+  metallic 1.0.
+tags:
+  - materials
+  - metallic
+  - parameters
+allowed_tools:
+  - create_object
+  - assign_material
+  - set_material_properties
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Matte_Cube
+      type: MESH
+      primitive: cube
+      location: { x: -1.5, y: 0.0, z: 0.0 }
+      material: Matte_Neutral
+      tolerance: 0.1
+    - name: Metal_Cube
+      type: MESH
+      primitive: cube
+      location: { x: 1.5, y: 0.0, z: 0.0 }
+      material: Metallic_Neutral
+      tolerance: 0.1
+  materials:
+    - name: Matte_Neutral
+      base_color: { r: 0.65, g: 0.65, b: 0.65, a: 1.0 }
+      roughness: 0.4
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Metallic_Neutral
+      base_color: { r: 0.65, g: 0.65, b: 0.65, a: 1.0 }
+      roughness: 0.25
+      metallic: 1.0
+      tolerance: 0.05
+  lights: []
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: object_existence
+    weight: 0.25
+    required: true
+  - metric: material_accuracy
+    weight: 0.35
+    required: true
+  - metric: parameter_correctness
+    weight: 0.4
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Material metallic parameter comparison task.
+

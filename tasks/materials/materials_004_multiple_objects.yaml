@@ -1,0 +1,82 @@
+id: materials_004_multiple_objects
+title: Multiple object material mapping
+category: materials
+difficulty: medium
+prompt: >
+  Create four objects with distinct materials and keep their object-to-material
+  mapping unambiguous. The expected result is checked by material assignment,
+  color, and numeric material properties.
+tags:
+  - materials
+  - mapping
+  - multiple-objects
+allowed_tools:
+  - create_object
+  - assign_material
+  - set_material_properties
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Yellow_Cube
+      type: MESH
+      primitive: cube
+      location: { x: -3.0, y: 0.0, z: 0.0 }
+      material: Yellow
+      tolerance: 0.1
+    - name: Cyan_Sphere
+      type: MESH
+      primitive: sphere
+      location: { x: -1.0, y: 0.0, z: 0.0 }
+      material: Cyan
+      tolerance: 0.1
+    - name: Magenta_Cylinder
+      type: MESH
+      primitive: cylinder
+      location: { x: 1.0, y: 0.0, z: 0.0 }
+      material: Magenta
+      tolerance: 0.1
+    - name: Dark_Cone
+      type: MESH
+      primitive: cone
+      location: { x: 3.0, y: 0.0, z: 0.0 }
+      material: Dark_Gloss
+      tolerance: 0.1
+  materials:
+    - name: Yellow
+      base_color: { r: 1.0, g: 0.9, b: 0.0, a: 1.0 }
+      roughness: 0.55
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Cyan
+      base_color: { r: 0.0, g: 0.8, b: 1.0, a: 1.0 }
+      roughness: 0.35
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Magenta
+      base_color: { r: 1.0, g: 0.0, b: 0.8, a: 1.0 }
+      roughness: 0.45
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Dark_Gloss
+      base_color: { r: 0.05, g: 0.05, b: 0.05, a: 1.0 }
+      roughness: 0.15
+      metallic: 0.0
+      tolerance: 0.05
+  lights: []
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: object_existence
+    weight: 0.3
+    required: true
+  - metric: material_accuracy
+    weight: 0.45
+    required: true
+  - metric: parameter_correctness
+    weight: 0.25
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Multi-object material assignment and mapping task.
+

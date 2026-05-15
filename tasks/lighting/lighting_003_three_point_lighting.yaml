@@ -1,0 +1,63 @@
+id: lighting_003_three_point_lighting
+title: Three point lighting setup
+category: lighting
+difficulty: medium
+prompt: >
+  Create an object at the center of the scene and set up a three point lighting
+  arrangement with a key light, a fill light, and a back light. The task checks
+  the existence and approximate placement of the three light sources.
+tags:
+  - lighting
+  - three-point
+  - composition
+allowed_tools:
+  - create_object
+  - create_light
+  - set_transform
+  - set_light_properties
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Center_Object
+      type: MESH
+      primitive: sphere
+      location: { x: 0.0, y: 0.0, z: 1.0 }
+      dimensions: { x: 1.5, y: 1.5, z: 1.5 }
+      tolerance: 0.1
+  materials: []
+  lights:
+    - name: Key_Light
+      type: AREA
+      location: { x: -3.0, y: -4.0, z: 5.0 }
+      rotation: { x: 60.0, y: 0.0, z: -35.0 }
+      energy: 700.0
+      tolerance: 0.2
+    - name: Fill_Light
+      type: AREA
+      location: { x: 4.0, y: -3.0, z: 3.0 }
+      rotation: { x: 55.0, y: 0.0, z: 45.0 }
+      energy: 250.0
+      tolerance: 0.2
+    - name: Back_Light
+      type: SPOT
+      location: { x: 0.0, y: 4.0, z: 4.0 }
+      rotation: { x: 55.0, y: 0.0, z: 180.0 }
+      energy: 450.0
+      tolerance: 0.2
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: light_existence
+    weight: 0.4
+    required: true
+  - metric: lighting_correctness
+    weight: 0.35
+    required: true
+  - metric: parameter_correctness
+    weight: 0.25
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Multi-light placement task for a three point lighting setup.
+

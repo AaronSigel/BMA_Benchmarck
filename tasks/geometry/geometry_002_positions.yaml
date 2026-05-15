@@ -1,0 +1,56 @@
+id: geometry_002_positions
+title: Three cubes at fixed positions
+category: geometry
+difficulty: easy
+prompt: >
+  Create three identical cubes aligned on the X axis. Place them at (-2, 0, 0),
+  (0, 0, 0), and (2, 0, 0). Use clear object names so the placement can be
+  inspected deterministically.
+tags:
+  - geometry
+  - positions
+  - transforms
+allowed_tools:
+  - create_object
+  - set_transform
+  - assign_material
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Cube_Left
+      type: MESH
+      primitive: cube
+      location: { x: -2.0, y: 0.0, z: 0.0 }
+      dimensions: { x: 1.0, y: 1.0, z: 1.0 }
+      tolerance: 0.05
+    - name: Cube_Center
+      type: MESH
+      primitive: cube
+      location: { x: 0.0, y: 0.0, z: 0.0 }
+      dimensions: { x: 1.0, y: 1.0, z: 1.0 }
+      tolerance: 0.05
+    - name: Cube_Right
+      type: MESH
+      primitive: cube
+      location: { x: 2.0, y: 0.0, z: 0.0 }
+      dimensions: { x: 1.0, y: 1.0, z: 1.0 }
+      tolerance: 0.05
+  materials: []
+  lights: []
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: object_existence
+    weight: 0.3
+    required: true
+  - metric: geometry_accuracy
+    weight: 0.2
+    required: true
+  - metric: object_placement
+    weight: 0.5
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Positioning task for objects along a single axis.
+

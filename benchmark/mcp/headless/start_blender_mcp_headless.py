@@ -5,17 +5,25 @@ rather than installed as a system package.
 
 Usage:
     blender --background --factory-startup \\
-        --python benchmark/mcp/headless/start_blender_mcp_headless.py
+        --python benchmark/mcp/headless/start_blender_mcp_headless.py \\
+        -- \\
+        --addon vendor/blender-mcp-bma/addon.py \\
+        --host 127.0.0.1 \\
+        --port 9876 \\
+        --disable-external-assets
+
+Arguments after '--' override the corresponding environment variables.
 
 Environment variables (all optional):
-    BMA_ADDON_PATH          Explicit path to addon.py (overrides auto-discovery)
-    BMA_SOCKET_HOST         Bind host (default: localhost)
-    BMA_SOCKET_PORT         Bind port (default: 9876)
-    BMA_MCP_PROFILE         Tool-gating profile (default: minimal)
+    BMA_ADDON_PATH              Explicit path to addon.py (overrides auto-discovery)
+    BMA_SOCKET_HOST             Bind host (default: localhost)
+    BMA_SOCKET_PORT             Bind port (default: 9876)
+    BMA_MCP_PROFILE             Tool-gating profile (default: minimal)
     BMA_ENABLE_EXTERNAL_ASSETS  'true' to enable asset integrations (default: false)
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import os
 import signal
@@ -32,27 +40,56 @@ except ImportError:
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Parse CLI args passed after '--' separator (override env vars)
 # ---------------------------------------------------------------------------
-_HOST = os.environ.get("BMA_SOCKET_HOST", "localhost")
-_PORT = int(os.environ.get("BMA_SOCKET_PORT", "9876"))
+def _parse_script_args() -> argparse.Namespace:
+    """Parse args from sys.argv that follow the '--' Blender separator."""
+    parser = argparse.ArgumentParser(prog="start_blender_mcp_headless", add_help=False)
+    parser.add_argument("--addon", default=None, help="Path to addon.py")
+    parser.add_argument("--host", default=None, help="Socket bind host")
+    parser.add_argument("--port", type=int, default=None, help="Socket bind port")
+    parser.add_argument("--disable-external-assets", action="store_true", default=False)
+    # Blender passes everything after '--' into sys.argv; slice past the separator.
+    try:
+        sep_idx = sys.argv.index("--")
+        script_argv = sys.argv[sep_idx + 1:]
+    except ValueError:
+        script_argv = []
+    args, _ = parser.parse_known_args(script_argv)
+    return args
+
+
+_cli = _parse_script_args()
+
+# ---------------------------------------------------------------------------
+# Configuration: CLI args > env vars > defaults
+# ---------------------------------------------------------------------------
+_HOST = _cli.host or os.environ.get("BMA_SOCKET_HOST", "localhost")
+_PORT = _cli.port or int(os.environ.get("BMA_SOCKET_PORT", "9876"))
 _PROFILE = os.environ.get("BMA_MCP_PROFILE", "minimal")
-_EXTERNAL_ASSETS = os.environ.get("BMA_ENABLE_EXTERNAL_ASSETS", "false").lower() in (
-    "1", "true", "yes"
-)
+_EXTERNAL_ASSETS: bool
+if _cli.disable_external_assets:
+    _EXTERNAL_ASSETS = False
+else:
+    _EXTERNAL_ASSETS = os.environ.get("BMA_ENABLE_EXTERNAL_ASSETS", "false").lower() in (
+        "1", "true", "yes"
+    )
 
 # ---------------------------------------------------------------------------
 # Locate addon.py
 # ---------------------------------------------------------------------------
 # Priority:
-#   1. BMA_ADDON_PATH env var — explicit override
-#   2. Vendored fork next to the BMA_Bench root  (blender-mcp-bma/addon.py)
-#   3. vendor/blender-mcp-bma/addon.py  (alternative vendor directory)
+#   1. --addon CLI arg
+#   2. BMA_ADDON_PATH env var
+#   3. Vendored fork next to the BMA_Bench root  (blender-mcp-bma/addon.py)
+#   4. vendor/blender-mcp-bma/addon.py  (alternative vendor directory)
 
 _THIS_FILE = Path(__file__).resolve()
 _PROJECT_ROOT = _THIS_FILE.parent.parent.parent.parent  # BMA_Bench/
 
 _CANDIDATE_PATHS: list[Path] = []
+if _cli.addon:
+    _CANDIDATE_PATHS.append(Path(_cli.addon).resolve())
 if os.environ.get("BMA_ADDON_PATH"):
     _CANDIDATE_PATHS.append(Path(os.environ["BMA_ADDON_PATH"]).resolve())
 _CANDIDATE_PATHS += [

@@ -35,14 +35,27 @@ def _error_result(
     }
 
 
-def _set_engine(scene: Any, requested_engine: str) -> str:
-    try:
-        scene.render.engine = requested_engine
-        return requested_engine
-    except TypeError:
-        fallback = "BLENDER_EEVEE"
-        scene.render.engine = fallback
-        return fallback
+def _set_engine(bpy: Any, scene: Any, requested_engine: str | None) -> str:
+    available_engines = {
+        item.identifier
+        for item in bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items
+    }
+
+    candidates = [
+        requested_engine,
+        "BLENDER_EEVEE_NEXT",
+        "BLENDER_EEVEE",
+        "CYCLES",
+    ]
+
+    for candidate in candidates:
+        if candidate and candidate in available_engines:
+            scene.render.engine = candidate
+            return candidate
+
+    raise RuntimeError(
+        f"No supported render engine found. Available engines: {sorted(available_engines)}"
+    )
 
 
 def _find_camera(bpy: Any, camera_name: str) -> Any | None:
@@ -51,6 +64,36 @@ def _find_camera(bpy: Any, camera_name: str) -> Any | None:
             return obj
     return None
 
+def _configure_color_management(scene: Any) -> None:
+    scene.view_settings.view_transform = "Standard"
+    scene.view_settings.exposure = 0.0
+    scene.view_settings.gamma = 1.0
+
+    try:
+        scene.view_settings.look = "Medium High Contrast"
+    except TypeError:
+        scene.view_settings.look = "None"
+
+
+def _configure_output(render: Any, path: Path, resolution_x: int, resolution_y: int) -> None:
+    render.resolution_x = resolution_x
+    render.resolution_y = resolution_y
+    render.resolution_percentage = 100
+
+    render.filepath = str(path)
+    render.image_settings.file_format = "PNG"
+    render.image_settings.color_mode = "RGBA"
+    render.image_settings.color_depth = "8"
+
+
+def _configure_workbench_material_view(scene: Any) -> None:
+    try:
+        shading = scene.display.shading
+        shading.color_type = "MATERIAL"
+        shading.light = "STUDIO"
+    except Exception:
+        pass
+
 
 def render_scene(payload: dict) -> dict:
     import bpy
@@ -58,7 +101,7 @@ def render_scene(payload: dict) -> dict:
     output_path = payload.get("output_path")
     resolution_x = int(payload.get("resolution_x", 512))
     resolution_y = int(payload.get("resolution_y", 512))
-    requested_engine = str(payload.get("engine", "BLENDER_EEVEE_NEXT"))
+    requested_engine = payload.get("engine", "BLENDER_EEVEE_NEXT")
     camera_name = payload.get("camera_name")
     transparent = bool(payload.get("transparent", False))
 
@@ -67,7 +110,7 @@ def render_scene(payload: dict) -> dict:
             "output_path is required",
             resolution_x=resolution_x,
             resolution_y=resolution_y,
-            engine=requested_engine,
+            engine=str(requested_engine),
         )
 
     path = Path(output_path)
@@ -75,9 +118,23 @@ def render_scene(payload: dict) -> dict:
 
     scene = bpy.context.scene
     render = scene.render
-    render.resolution_x = resolution_x
-    render.resolution_y = resolution_y
-    engine = _set_engine(scene, requested_engine)
+
+    try:
+        engine = _set_engine(bpy, scene, str(requested_engine) if requested_engine else None)
+    except Exception as exc:
+        return _error_result(
+            str(exc),
+            output_path=str(path),
+            resolution_x=resolution_x,
+            resolution_y=resolution_y,
+            engine=str(requested_engine),
+        )
+
+    _configure_color_management(scene)
+    _configure_output(render, path, resolution_x, resolution_y)
+
+    if engine == "BLENDER_WORKBENCH":
+        _configure_workbench_material_view(scene)
 
     if hasattr(render, "film_transparent"):
         render.film_transparent = transparent
@@ -102,9 +159,15 @@ def render_scene(payload: dict) -> dict:
             engine=engine,
         )
 
-    render.filepath = str(path)
-    render.image_settings.file_format = "PNG"
-    bpy.ops.render.render(write_still=True)
+    try:
+        bpy.ops.render.render(write_still=True)
+    except Exception as exc:
+        return _error_result(
+            f"render failed: {exc}",
+            output_path=str(path),
+            resolution_x=resolution_x,
+            resolution_y=resolution_y,
+            engine=engine,
+        )
 
     return _file_result(path, resolution_x, resolution_y, engine)
-

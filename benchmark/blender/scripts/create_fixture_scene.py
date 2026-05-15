@@ -5,9 +5,45 @@ from typing import Any
 from benchmark.blender.scripts.reset_scene import reset_scene
 
 
-def _create_material(bpy: Any, name: str, color: tuple[float, float, float, float]) -> Any:
+def _find_principled_bsdf(material: Any) -> Any | None:
+    nodes = material.node_tree.nodes
+
+    bsdf = nodes.get("Principled BSDF")
+    if bsdf is not None:
+        return bsdf
+
+    for node in nodes:
+        if getattr(node, "type", None) == "BSDF_PRINCIPLED":
+            return node
+
+    return None
+
+
+def _create_material(
+    bpy: Any,
+    name: str,
+    color: tuple[float, float, float, float],
+    roughness: float = 0.5,
+    metallic: float = 0.0,
+) -> Any:
     material = bpy.data.materials.new(name)
+    material.use_nodes = True
+
+    bsdf = _find_principled_bsdf(material)
+
+    if bsdf:
+        if "Base Color" in bsdf.inputs:
+            bsdf.inputs["Base Color"].default_value = color
+        if "Roughness" in bsdf.inputs:
+            bsdf.inputs["Roughness"].default_value = roughness
+        if "Metallic" in bsdf.inputs:
+            bsdf.inputs["Metallic"].default_value = metallic
+        if "Alpha" in bsdf.inputs:
+            bsdf.inputs["Alpha"].default_value = color[3]
+
+    # Синхронизируем viewport/display color с shader color.
     material.diffuse_color = color
+
     return material
 
 
@@ -20,23 +56,12 @@ def _active_object(bpy: Any) -> Any:
 
 
 def _look_at(obj: Any, target: tuple[float, float, float]) -> None:
-    direction = (
-        target[0] - obj.location[0],
-        target[1] - obj.location[1],
-        target[2] - obj.location[2],
-    )
+    from mathutils import Vector
 
-    if hasattr(direction, "to_track_quat"):
-        obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
-        return
+    target_vector = Vector(target)
+    direction = target_vector - obj.location
 
-    dx, dy, dz = direction
-    horizontal = math.sqrt(dx * dx + dy * dy)
-    obj.rotation_euler = (
-        math.atan2(horizontal, dz),
-        0.0,
-        math.atan2(dx, dy),
-    )
+    obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
 
 def create_fixture_scene(payload: dict) -> dict:
@@ -49,9 +74,9 @@ def create_fixture_scene(payload: dict) -> dict:
 
     reset_scene({"scene_name": scene_name})
 
-    red = _create_material(bpy, "RedMaterial", (1.0, 0.05, 0.02, 1.0))
-    blue = _create_material(bpy, "BlueMaterial", (0.05, 0.2, 1.0, 1.0))
-    gray = _create_material(bpy, "GrayMaterial", (0.55, 0.55, 0.55, 1.0))
+    red = _create_material(bpy, "RedMaterial", (1.0, 0.05, 0.02, 1.0), roughness=0.45)
+    blue = _create_material(bpy, "BlueMaterial", (0.05, 0.2, 1.0, 1.0), roughness=0.35)
+    gray = _create_material(bpy, "GrayMaterial", (0.55, 0.55, 0.55, 1.0), roughness=0.75)
 
     bpy.ops.mesh.primitive_cube_add(size=2.0, location=(0.0, 0.0, 1.0))
     cube = _active_object(bpy)
@@ -84,10 +109,13 @@ def create_fixture_scene(payload: dict) -> dict:
 
     camera_name = None
     if add_camera:
-        bpy.ops.object.camera_add(location=(6.0, -6.0, 4.0))
+        bpy.ops.object.camera_add(location=(11.72, -12.4, 7.93))
         camera = _active_object(bpy)
         camera.name = "FixtureCamera"
+
         _look_at(camera, (0.0, 0.0, 1.0))
+
+        camera.data.lens = 35.0
         bpy.context.scene.camera = camera
         camera_name = camera.name
 

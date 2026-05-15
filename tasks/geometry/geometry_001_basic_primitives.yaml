@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: geometry_001_basic_primitives
 title: Basic primitives
 category: geometry

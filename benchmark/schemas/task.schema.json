@@ -5,6 +5,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "schema_version",
     "id",
     "title",
     "category",
@@ -15,6 +16,10 @@
     "success_criteria"
   ],
   "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
     "id": {
       "type": "string",
       "minLength": 1
@@ -159,7 +164,21 @@
           "type": "string"
         },
         "primitive": {
-          "$ref": "#/$defs/NullableString"
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "cube",
+                "sphere",
+                "cylinder",
+                "cone",
+                "plane"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "location": {
           "$ref": "#/$defs/NullableVector3"
@@ -207,13 +226,17 @@
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "minimum": 0,
+          "maximum": 1
         },
         "metallic": {
           "type": [
             "number",
             "null"
-          ]
+          ],
+          "minimum": 0,
+          "maximum": 1
         },
         "tolerance": {
           "type": "number",
@@ -233,7 +256,13 @@
           "$ref": "#/$defs/NullableString"
         },
         "type": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "AREA",
+            "SUN",
+            "POINT",
+            "SPOT"
+          ]
         },
         "location": {
           "$ref": "#/$defs/NullableVector3"
@@ -291,7 +320,12 @@
       ],
       "properties": {
         "format": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "blend",
+            "glb",
+            "fbx"
+          ]
         },
         "filename": {
           "$ref": "#/$defs/NullableString"
@@ -383,4 +417,3 @@
     }
   }
 }
-

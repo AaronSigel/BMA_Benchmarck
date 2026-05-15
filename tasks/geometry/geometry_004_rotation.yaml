@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: geometry_004_rotation
 title: Rotated primitives
 category: geometry

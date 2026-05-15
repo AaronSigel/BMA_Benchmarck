@@ -6,6 +6,9 @@ Each task is represented by the `BenchmarkTask` Pydantic model in `benchmark/tas
 
 ## Top-Level Fields
 
+`schema_version`:
+Format version for the task document. Current value is `"1.0"`.
+
 `id`:
 Unique task identifier. It must be a non-empty string and should start with the task category prefix, for example `geometry_001`.
 
@@ -81,6 +84,8 @@ Fields:
 
 `tolerance` must be positive.
 
+Allowed `primitive` values are `cube`, `sphere`, `cylinder`, `cone`, and `plane`.
+
 ### ExpectedMaterial
 
 Fields:
@@ -93,6 +98,8 @@ Fields:
 
 `base_color` uses RGBA channels in the range `0..1`.
 
+`roughness` and `metallic` must be between `0` and `1` when provided.
+
 ### ExpectedLight
 
 Fields:
@@ -104,7 +111,7 @@ Fields:
 - `energy: float | None`
 - `tolerance: float = 0.05`
 
-Current task files use explicit light types such as `AREA`, `SUN`, `POINT`, or `SPOT`.
+Allowed `type` values are `AREA`, `SUN`, `POINT`, and `SPOT`.
 
 ### ExpectedCamera
 
@@ -127,7 +134,7 @@ Fields:
 - `filename: str | None`
 - `must_exist: bool = true`
 
-Current export tasks use `blend` and `glb` formats with explicit filenames.
+Allowed `format` values are `blend`, `glb`, and `fbx`. Current export tasks use `blend` and `glb` with explicit filenames.
 
 ### Vector3
 
@@ -181,6 +188,7 @@ Short forms like `geometry_001`, `materials_001`, `lighting_001`, `camera_001`, 
 ## Full Geometry Example
 
 ```yaml
+schema_version: "1.0"
 id: geometry_001_basic_primitives
 title: Basic primitives
 category: geometry
@@ -241,7 +249,7 @@ metadata:
 1. Choose the category directory under `tasks/`: `geometry`, `materials`, `lighting`, `camera`, or `export`.
 2. Pick a unique `id` that starts with the category prefix, for example `geometry_006_new_shape`.
 3. Create a `.yaml` file whose filename matches the task id.
-4. Fill all required top-level fields: `id`, `title`, `category`, `difficulty`, `prompt`, `tags`, `allowed_tools`, `expected_scene`, and `success_criteria`.
+4. Fill all required top-level fields: `schema_version`, `id`, `title`, `category`, `difficulty`, `prompt`, `tags`, `allowed_tools`, `expected_scene`, and `success_criteria`.
 5. Fill the category-specific expected scene list.
 6. Use success criteria weights that sum to `1.0`.
 7. Run validation:
@@ -255,4 +263,3 @@ python -m benchmark.tasks.cli validate --tasks-dir tasks
 ```bash
 pytest
 ```
-

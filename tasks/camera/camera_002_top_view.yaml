@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: camera_002_top_view
 title: Top-down camera view
 category: camera

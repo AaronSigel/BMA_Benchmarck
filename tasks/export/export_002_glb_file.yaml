@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: export_002_glb_file
 title: Export low-poly scene as GLB
 category: export

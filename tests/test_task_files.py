@@ -1,8 +1,11 @@
 import subprocess
 import sys
+import json
 from pathlib import Path
 
 import pytest
+import yaml
+from jsonschema import Draft202012Validator
 
 from benchmark.tasks.loader import dump_task, load_tasks_from_dir
 from benchmark.tasks.models import (
@@ -19,11 +22,19 @@ from benchmark.tasks.validator import validate_task, validate_task_set
 
 
 TASKS_DIR = Path(__file__).resolve().parents[1] / "tasks"
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / "benchmark" / "schemas" / "task.schema.json"
 
 
 @pytest.fixture(scope="module")
 def all_task_files() -> list[BenchmarkTask]:
     return load_tasks_from_dir(TASKS_DIR)
+
+
+@pytest.fixture(scope="module")
+def task_schema_validator() -> Draft202012Validator:
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
 
 
 def make_task(
@@ -88,7 +99,7 @@ def test_category_content_checks_accept_matching_scene_content() -> None:
         make_task(
             task_id="lighting_001",
             category=TaskCategory.LIGHTING,
-            expected_scene=ExpectedScene(lights=[ExpectedLight(type="area")]),
+            expected_scene=ExpectedScene(lights=[ExpectedLight(type="AREA")]),
         ),
         make_task(
             task_id="camera_001",
@@ -183,3 +194,11 @@ def test_expected_scene_matches_category(all_task_files: list[BenchmarkTask]) ->
             case TaskCategory.EXPORT:
                 assert scene.exports
 
+
+def test_all_task_files_pass_json_schema_validation(task_schema_validator: Draft202012Validator) -> None:
+    yaml_paths = sorted(TASKS_DIR.rglob("*.yaml"))
+
+    assert yaml_paths
+    for path in yaml_paths:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        task_schema_validator.validate(data)

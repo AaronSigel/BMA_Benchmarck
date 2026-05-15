@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: lighting_002_sun_light
 title: Sun light direction
 category: lighting

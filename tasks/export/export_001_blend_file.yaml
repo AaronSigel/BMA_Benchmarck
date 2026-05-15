@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: export_001_blend_file
 title: Save scene as Blender file
 category: export

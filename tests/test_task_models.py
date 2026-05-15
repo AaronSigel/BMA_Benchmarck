@@ -5,6 +5,8 @@ from benchmark.tasks.models import (
     BenchmarkTask,
     ColorRGBA,
     DifficultyLevel,
+    ExpectedExport,
+    ExpectedLight,
     ExpectedMaterial,
     ExpectedObject,
     ExpectedScene,
@@ -129,3 +131,26 @@ def test_tolerance_must_be_positive(model_factory) -> None:
     with pytest.raises(ValidationError):
         model_factory()
 
+
+def test_invalid_primitive_raises_validation_error() -> None:
+    with pytest.raises(ValidationError):
+        ExpectedObject(type="mesh", primitive="torus")
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1])
+def test_material_numeric_parameters_must_be_between_zero_and_one(value: float) -> None:
+    with pytest.raises(ValidationError):
+        ExpectedMaterial(name="Invalid", roughness=value)
+
+    with pytest.raises(ValidationError):
+        ExpectedMaterial(name="Invalid", metallic=value)
+
+
+def test_invalid_light_type_raises_validation_error() -> None:
+    with pytest.raises(ValidationError):
+        ExpectedLight(type="HEMI")
+
+
+def test_invalid_export_format_raises_validation_error() -> None:
+    with pytest.raises(ValidationError):
+        ExpectedExport(format="obj")

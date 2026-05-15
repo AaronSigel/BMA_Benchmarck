@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: materials_004_multiple_objects
 title: Multiple object material mapping
 category: materials

@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: geometry_002_positions
 title: Three cubes at fixed positions
 category: geometry

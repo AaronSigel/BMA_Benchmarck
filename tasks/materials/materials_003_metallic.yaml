@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: materials_003_metallic
 title: Metallic parameter contrast
 category: materials

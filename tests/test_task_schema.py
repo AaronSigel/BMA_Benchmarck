@@ -11,6 +11,7 @@ from jsonschema.exceptions import ValidationError
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "benchmark" / "schemas" / "task.schema.json"
 
 VALID_TASK_YAML = """
+schema_version: "1.0"
 id: geometry-cube-schema
 title: Create a red cube
 category: geometry
@@ -106,4 +107,3 @@ def test_weight_greater_than_one_fails_jsonschema_validation(
 
     with pytest.raises(ValidationError):
         validator.validate(invalid_task)
-

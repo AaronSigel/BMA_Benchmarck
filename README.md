@@ -10,6 +10,8 @@ Blender, MCP server integration, and LLM execution are intentionally out of scop
 
 The benchmark task YAML format is documented in [docs/task_format.md](docs/task_format.md).
 
+The current task inventory is listed in [TASKS.md](TASKS.md).
+
 ## Common Commands
 
 Install the project in a virtual environment:

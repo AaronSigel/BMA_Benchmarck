@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -33,7 +34,7 @@ class ColorRGBA(BaseModel):
 class ExpectedObject(BaseModel):
     name: str | None = None
     type: str
-    primitive: str | None = None
+    primitive: Literal["cube", "sphere", "cylinder", "cone", "plane"] | None = None
     location: Vector3 | None = None
     rotation: Vector3 | None = None
     scale: Vector3 | None = None
@@ -45,14 +46,14 @@ class ExpectedObject(BaseModel):
 class ExpectedMaterial(BaseModel):
     name: str
     base_color: ColorRGBA | None = None
-    roughness: float | None = None
-    metallic: float | None = None
+    roughness: float | None = Field(default=None, ge=0.0, le=1.0)
+    metallic: float | None = Field(default=None, ge=0.0, le=1.0)
     tolerance: float = Field(default=0.05, gt=0.0)
 
 
 class ExpectedLight(BaseModel):
     name: str | None = None
-    type: str
+    type: Literal["AREA", "SUN", "POINT", "SPOT"]
     location: Vector3 | None = None
     rotation: Vector3 | None = None
     energy: float | None = None
@@ -69,7 +70,7 @@ class ExpectedCamera(BaseModel):
 
 
 class ExpectedExport(BaseModel):
-    format: str
+    format: Literal["blend", "glb", "fbx"]
     filename: str | None = None
     must_exist: bool = True
 
@@ -95,6 +96,7 @@ class TaskMetadata(BaseModel):
 
 
 class BenchmarkTask(BaseModel):
+    schema_version: str = "1.0"
     id: str
     title: str
     category: TaskCategory

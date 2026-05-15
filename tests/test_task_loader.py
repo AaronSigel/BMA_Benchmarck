@@ -17,6 +17,7 @@ from benchmark.tasks.models import (
 
 
 VALID_TASK_YAML = """
+schema_version: "1.0"
 id: geometry-loader-cube
 title: Loader cube task
 category: geometry
@@ -145,4 +146,3 @@ def test_load_tasks_from_dir_error_contains_problem_file_path(tmp_path: Path) ->
 
     with pytest.raises(TaskLoadError, match=str(invalid_path)):
         load_tasks_from_dir(tmp_path)
-

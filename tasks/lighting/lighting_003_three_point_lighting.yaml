@@ -1,3 +1,4 @@
+schema_version: "1.0"
 id: lighting_003_three_point_lighting
 title: Three point lighting setup
 category: lighting

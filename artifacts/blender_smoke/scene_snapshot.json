@@ -1,0 +1,298 @@
+{
+  "blender_version": "5.1.1",
+  "cameras": [
+    {
+      "is_active": true,
+      "lens": 35.0,
+      "location": {
+        "x": 11.720000267028809,
+        "y": -12.399999618530273,
+        "z": 7.929999828338623
+      },
+      "name": "FixtureCamera",
+      "rotation_euler": {
+        "x": 1.1849900484085083,
+        "y": 1.12501012949906e-07,
+        "z": 0.7572134137153625
+      },
+      "sensor_width": 36.0
+    }
+  ],
+  "collections": [
+    "Collection"
+  ],
+  "created_at": "2026-05-15T14:26:34.143365+00:00",
+  "frame_current": 1,
+  "lights": [
+    {
+      "color": {
+        "a": 1.0,
+        "b": 1.0,
+        "g": 1.0,
+        "r": 1.0
+      },
+      "energy": 500.0,
+      "location": {
+        "x": 0.0,
+        "y": -4.0,
+        "z": 6.0
+      },
+      "name": "FixtureAreaLight",
+      "rotation_euler": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "type": "AREA"
+    }
+  ],
+  "materials": [
+    {
+      "base_color": {
+        "a": 1.0,
+        "b": 1.0,
+        "g": 0.20000000298023224,
+        "r": 0.05000000074505806
+      },
+      "metallic": 0.0,
+      "name": "BlueMaterial",
+      "roughness": 0.3499999940395355,
+      "use_nodes": true
+    },
+    {
+      "base_color": {
+        "a": 1.0,
+        "b": 0.550000011920929,
+        "g": 0.550000011920929,
+        "r": 0.550000011920929
+      },
+      "metallic": 0.0,
+      "name": "GrayMaterial",
+      "roughness": 0.75,
+      "use_nodes": true
+    },
+    {
+      "base_color": {
+        "a": 1.0,
+        "b": 0.019999999552965164,
+        "g": 0.05000000074505806,
+        "r": 1.0
+      },
+      "metallic": 0.0,
+      "name": "RedMaterial",
+      "roughness": 0.44999998807907104,
+      "use_nodes": true
+    }
+  ],
+  "objects": [
+    {
+      "collection_names": [
+        "Collection"
+      ],
+      "dimensions": {
+        "x": 8.0,
+        "y": 8.0,
+        "z": 0.0
+      },
+      "location": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "material_slots": [
+        "GrayMaterial"
+      ],
+      "name": "FixtureFloor",
+      "parent": null,
+      "polygon_count": 1,
+      "primitive_hint": null,
+      "rotation_euler": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "type": "MESH",
+      "vertex_count": 4
+    },
+    {
+      "collection_names": [
+        "Collection"
+      ],
+      "dimensions": {
+        "x": 2.0,
+        "y": 2.0,
+        "z": 2.0
+      },
+      "location": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0299999713897705
+      },
+      "material_slots": [
+        "RedMaterial"
+      ],
+      "name": "FixtureCube",
+      "parent": null,
+      "polygon_count": 6,
+      "primitive_hint": "cube",
+      "rotation_euler": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "type": "MESH",
+      "vertex_count": 8
+    },
+    {
+      "collection_names": [
+        "Collection"
+      ],
+      "dimensions": {
+        "x": 1.9999988079071045,
+        "y": 1.9999992847442627,
+        "z": 2.0
+      },
+      "location": {
+        "x": 3.0,
+        "y": 0.0,
+        "z": 1.0299999713897705
+      },
+      "material_slots": [
+        "BlueMaterial"
+      ],
+      "name": "FixtureSphere",
+      "parent": null,
+      "polygon_count": 512,
+      "primitive_hint": "sphere",
+      "rotation_euler": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "type": "MESH",
+      "vertex_count": 482
+    },
+    {
+      "collection_names": [
+        "Collection"
+      ],
+      "dimensions": {
+        "x": 2.0,
+        "y": 2.0,
+        "z": 2.0
+      },
+      "location": {
+        "x": -3.0,
+        "y": 0.0,
+        "z": 1.0299999713897705
+      },
+      "material_slots": [
+        "RedMaterial"
+      ],
+      "name": "FixtureCylinder",
+      "parent": null,
+      "polygon_count": 34,
+      "primitive_hint": "cylinder",
+      "rotation_euler": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "type": "MESH",
+      "vertex_count": 64
+    },
+    {
+      "collection_names": [
+        "Collection"
+      ],
+      "dimensions": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "location": {
+        "x": 0.0,
+        "y": -4.0,
+        "z": 6.0
+      },
+      "material_slots": [],
+      "name": "FixtureAreaLight",
+      "parent": null,
+      "polygon_count": null,
+      "primitive_hint": null,
+      "rotation_euler": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "type": "LIGHT",
+      "vertex_count": null
+    },
+    {
+      "collection_names": [
+        "Collection"
+      ],
+      "dimensions": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "location": {
+        "x": 11.720000267028809,
+        "y": -12.399999618530273,
+        "z": 7.929999828338623
+      },
+      "material_slots": [],
+      "name": "FixtureCamera",
+      "parent": null,
+      "polygon_count": null,
+      "primitive_hint": null,
+      "rotation_euler": {
+        "x": 1.1849900484085083,
+        "y": 1.12501012949906e-07,
+        "z": 0.7572134137153625
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "type": "CAMERA",
+      "vertex_count": null
+    }
+  ],
+  "render_settings": {
+    "engine": "BLENDER_EEVEE",
+    "frame_current": 1,
+    "frame_end": 1,
+    "frame_start": 1,
+    "resolution_x": 1920,
+    "resolution_y": 1080
+  },
+  "scene_name": "BMA Smoke Scene"
+}

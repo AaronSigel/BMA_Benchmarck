@@ -1,4 +1,3 @@
-artifacts/
 venv/
 artifacts-data/
 blender_agent_benchmark.egg-info

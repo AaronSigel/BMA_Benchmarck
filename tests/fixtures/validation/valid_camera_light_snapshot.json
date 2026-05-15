@@ -1,0 +1,66 @@
+{
+  "scene_name": "ValidationFixtureCameraLight",
+  "objects": [
+    {
+      "name": "Center_Cube",
+      "type": "MESH",
+      "primitive_hint": "cube",
+      "location": {"x": 0.0, "y": 0.0, "z": 1.0},
+      "rotation_euler": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+      "dimensions": {"x": 2.0, "y": 2.0, "z": 2.0},
+      "material_slots": [],
+      "parent": null,
+      "collection_names": ["Collection"],
+      "vertex_count": 8,
+      "polygon_count": 6
+    },
+    {
+      "name": "Cube",
+      "type": "MESH",
+      "primitive_hint": "cube",
+      "location": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "rotation_euler": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+      "dimensions": {"x": 2.0, "y": 2.0, "z": 2.0},
+      "material_slots": [],
+      "parent": null,
+      "collection_names": ["Collection"],
+      "vertex_count": 8,
+      "polygon_count": 6
+    }
+  ],
+  "materials": [],
+  "lights": [
+    {
+      "name": "Key_Area_Light",
+      "type": "AREA",
+      "location": {"x": 0.0, "y": -3.0, "z": 5.0},
+      "rotation_euler": {"x": 60.0, "y": 0.0, "z": 0.0},
+      "energy": 500.0,
+      "color": {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0}
+    }
+  ],
+  "cameras": [
+    {
+      "name": "Front_Camera",
+      "location": {"x": 0.0, "y": -6.0, "z": 2.0},
+      "rotation_euler": {"x": 75.0, "y": 0.0, "z": 0.0},
+      "lens": 35.0,
+      "sensor_width": 36.0,
+      "is_active": true
+    }
+  ],
+  "collections": ["Collection"],
+  "render_settings": {
+    "engine": "CYCLES",
+    "resolution_x": 1920,
+    "resolution_y": 1080,
+    "frame_start": 1,
+    "frame_end": 1,
+    "frame_current": 1
+  },
+  "frame_current": 1,
+  "blender_version": "4.0.0",
+  "created_at": "2026-05-15T12:00:00Z"
+}

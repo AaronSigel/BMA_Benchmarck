@@ -1,0 +1,84 @@
+{
+  "scene_name": "ValidationFixtureWrongMaterial",
+  "objects": [
+    {
+      "name": "Red_Cube",
+      "type": "MESH",
+      "primitive_hint": "cube",
+      "location": {"x": -2.0, "y": 0.0, "z": 0.0},
+      "rotation_euler": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+      "dimensions": {"x": 2.0, "y": 2.0, "z": 2.0},
+      "material_slots": ["Blue"],
+      "parent": null,
+      "collection_names": ["Collection"],
+      "vertex_count": 8,
+      "polygon_count": 6
+    },
+    {
+      "name": "Green_Sphere",
+      "type": "MESH",
+      "primitive_hint": "sphere",
+      "location": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "rotation_euler": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+      "dimensions": {"x": 2.0, "y": 2.0, "z": 2.0},
+      "material_slots": ["Green"],
+      "parent": null,
+      "collection_names": ["Collection"],
+      "vertex_count": 482,
+      "polygon_count": 480
+    },
+    {
+      "name": "Blue_Cylinder",
+      "type": "MESH",
+      "primitive_hint": "cylinder",
+      "location": {"x": 2.0, "y": 0.0, "z": 0.0},
+      "rotation_euler": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+      "dimensions": {"x": 2.0, "y": 2.0, "z": 2.0},
+      "material_slots": ["Blue"],
+      "parent": null,
+      "collection_names": ["Collection"],
+      "vertex_count": 64,
+      "polygon_count": 34
+    }
+  ],
+  "materials": [
+    {
+      "name": "Red",
+      "base_color": {"r": 0.0, "g": 0.0, "b": 1.0, "a": 1.0},
+      "roughness": 0.5,
+      "metallic": 0.0,
+      "use_nodes": true
+    },
+    {
+      "name": "Green",
+      "base_color": {"r": 0.0, "g": 1.0, "b": 0.0, "a": 1.0},
+      "roughness": 0.5,
+      "metallic": 0.0,
+      "use_nodes": true
+    },
+    {
+      "name": "Blue",
+      "base_color": {"r": 0.0, "g": 0.0, "b": 1.0, "a": 1.0},
+      "roughness": 0.5,
+      "metallic": 0.0,
+      "use_nodes": true
+    }
+  ],
+  "lights": [],
+  "cameras": [],
+  "collections": ["Collection"],
+  "render_settings": {
+    "engine": "CYCLES",
+    "resolution_x": 1920,
+    "resolution_y": 1080,
+    "frame_start": 1,
+    "frame_end": 1,
+    "frame_current": 1
+  },
+  "frame_current": 1,
+  "blender_version": "4.0.0",
+  "created_at": "2026-05-15T12:00:00Z"
+}

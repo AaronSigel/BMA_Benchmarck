@@ -1,0 +1,62 @@
+{
+  "scene_name": "ValidationFixtureGeometry",
+  "objects": [
+    {
+      "name": "Cube.001",
+      "type": "MESH",
+      "primitive_hint": "cube",
+      "location": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "rotation_euler": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+      "dimensions": {"x": 2.0, "y": 2.0, "z": 2.0},
+      "material_slots": [],
+      "parent": null,
+      "collection_names": ["Collection"],
+      "vertex_count": 8,
+      "polygon_count": 6
+    },
+    {
+      "name": "Sphere",
+      "type": "MESH",
+      "primitive_hint": "sphere",
+      "location": {"x": 3.0, "y": 0.0, "z": 0.0},
+      "rotation_euler": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+      "dimensions": {"x": 2.0, "y": 2.0, "z": 2.0},
+      "material_slots": [],
+      "parent": null,
+      "collection_names": ["Collection"],
+      "vertex_count": 482,
+      "polygon_count": 480
+    },
+    {
+      "name": "Cylinder",
+      "type": "MESH",
+      "primitive_hint": "cylinder",
+      "location": {"x": -3.0, "y": 0.0, "z": 0.0},
+      "rotation_euler": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+      "dimensions": {"x": 2.0, "y": 2.0, "z": 2.0},
+      "material_slots": [],
+      "parent": null,
+      "collection_names": ["Collection"],
+      "vertex_count": 64,
+      "polygon_count": 34
+    }
+  ],
+  "materials": [],
+  "lights": [],
+  "cameras": [],
+  "collections": ["Collection"],
+  "render_settings": {
+    "engine": "CYCLES",
+    "resolution_x": 1920,
+    "resolution_y": 1080,
+    "frame_start": 1,
+    "frame_end": 1,
+    "frame_current": 1
+  },
+  "frame_current": 1,
+  "blender_version": "4.0.0",
+  "created_at": "2026-05-15T12:00:00Z"
+}

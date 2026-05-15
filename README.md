@@ -12,6 +12,9 @@ The benchmark task YAML format is documented in [docs/task_format.md](docs/task_
 
 The current task inventory is listed in [TASKS.md](TASKS.md).
 
+Scene validation usage and result format are documented in
+[docs/scene_validation.md](docs/scene_validation.md).
+
 ## Common Commands
 
 Install the project in a virtual environment:

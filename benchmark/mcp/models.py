@@ -52,7 +52,7 @@ class McpSmokeResult(BaseModel):
 
     def finish(self, finished_at: datetime.datetime | None = None) -> "McpSmokeResult":
         """Return a copy with finished_at and duration_sec filled in."""
-        ts = finished_at or datetime.datetime.utcnow()
+        ts = finished_at or datetime.datetime.now(datetime.timezone.utc)
         duration = None
         if self.started_at:
             duration = (ts - self.started_at).total_seconds()

@@ -209,7 +209,7 @@ def cmd_smoke(
     import datetime
 
     report: dict = {
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "config": cfg.blender_host + ":" + str(cfg.blender_port),
         "profile": cfg.profile,
         "checks": {},

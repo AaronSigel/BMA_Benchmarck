@@ -34,6 +34,7 @@ pythonpath = ["."]
 markers = [
     "blender: tests requiring Blender executable",
     "integration: integration tests",
+    "mcp: tests requiring a running MCP server / Blender with blender-mcp addon",
 ]
 
 [tool.setuptools.packages.find]

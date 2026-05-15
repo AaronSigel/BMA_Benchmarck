@@ -44,7 +44,7 @@ class McpExecutionBackend(ExecutionBackend):
     mode = ExecutionMode.MCP_SMOKE  # primary mode; also handles MCP_EXTERNAL
 
     def execute(self, config: RunConfig) -> ExecutionResult:
-        started_at = datetime.datetime.utcnow()
+        started_at = datetime.datetime.now(datetime.timezone.utc)
         output_dir = Path(config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -79,7 +79,7 @@ class McpExecutionBackend(ExecutionBackend):
                     f"{mcp_cfg.blender_host}:{mcp_cfg.blender_port}"
                 ),
                 started_at=started_at,
-                finished_at=datetime.datetime.utcnow(),
+                finished_at=datetime.datetime.now(datetime.timezone.utc),
             )
             return _save_and_build(result, output_dir)
 

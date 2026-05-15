@@ -9,6 +9,8 @@ class ExecutionMode(str, Enum):
     REPLAY = "replay"
     BLENDER_SMOKE = "blender_smoke"
     EXTERNAL_SNAPSHOT = "external_snapshot"
+    MCP_SMOKE = "mcp_smoke"
+    MCP_EXTERNAL = "mcp_external"
 
 
 class RunStatus(str, Enum):
@@ -27,6 +29,9 @@ class RunConfig(BaseModel):
     snapshot_path: Path | None = None
     artifacts_dir: Path
     output_dir: Path
+    # MCP-specific fields (used when execution_mode is mcp_smoke or mcp_external)
+    mcp_config_path: Path | None = None
+    mcp_profile: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("run_id", "task_id")

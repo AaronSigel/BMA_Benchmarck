@@ -96,7 +96,7 @@ class TaskMetadata(BaseModel):
 
 
 class BenchmarkTask(BaseModel):
-    schema_version: str = "1.0"
+    schema_version: Literal["1.0"] = "1.0"
     id: str
     title: str
     category: TaskCategory

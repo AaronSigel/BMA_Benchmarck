@@ -4,6 +4,7 @@ from pathlib import Path
 from benchmark.tasks.loader import TaskLoadError, load_tasks_from_dir
 from benchmark.tasks.models import BenchmarkTask, TaskCategory
 from benchmark.tasks.registry import TaskRegistry
+from benchmark.tasks.tool_catalog import TOOL_CATALOG
 
 
 def validate_task(task: BenchmarkTask) -> list[str]:
@@ -14,6 +15,14 @@ def validate_task(task: BenchmarkTask) -> list[str]:
 
     if not task.allowed_tools:
         warnings.append(f"{task.id}: task must define at least one allowed tool")
+    else:
+        allowed_tools = set(TOOL_CATALOG[task.category.value])
+        unknown_tools = sorted(set(task.allowed_tools) - allowed_tools)
+        if unknown_tools:
+            warnings.append(
+                f"{task.id}: task contains tools not allowed for category "
+                f"{task.category.value}: {', '.join(unknown_tools)}"
+            )
 
     warnings.extend(_validate_expected_scene_matches_category(task))
 
@@ -96,4 +105,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

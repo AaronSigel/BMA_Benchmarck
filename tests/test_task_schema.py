@@ -107,3 +107,13 @@ def test_weight_greater_than_one_fails_jsonschema_validation(
 
     with pytest.raises(ValidationError):
         validator.validate(invalid_task)
+
+
+def test_task_without_tags_fails_jsonschema_validation(
+    validator: Draft202012Validator, valid_task_data: dict
+) -> None:
+    invalid_task = copy.deepcopy(valid_task_data)
+    invalid_task.pop("tags")
+
+    with pytest.raises(ValidationError):
+        validator.validate(invalid_task)

@@ -52,7 +52,7 @@ def make_task(
         difficulty=DifficultyLevel.EASY,
         prompt=f"Execute task {task_id}.",
         tags=tags if tags is not None else ["smoke"],
-        allowed_tools=allowed_tools if allowed_tools is not None else ["tool.run"],
+        allowed_tools=allowed_tools if allowed_tools is not None else ["create_object"],
         expected_scene=expected_scene
         if expected_scene is not None
         else ExpectedScene(objects=[ExpectedObject(type="mesh")]),
@@ -68,6 +68,14 @@ def test_validator_finds_task_without_allowed_tools() -> None:
     warnings = validate_task(task)
 
     assert any("allowed tool" in warning for warning in warnings)
+
+
+def test_validator_finds_tool_not_allowed_for_category() -> None:
+    task = make_task(allowed_tools=["create_light"])
+
+    warnings = validate_task(task)
+
+    assert any("not allowed for category geometry" in warning for warning in warnings)
 
 
 def test_validator_finds_task_without_success_criteria() -> None:

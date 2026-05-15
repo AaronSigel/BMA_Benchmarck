@@ -11,6 +11,7 @@
     "category",
     "difficulty",
     "prompt",
+    "tags",
     "allowed_tools",
     "expected_scene",
     "success_criteria"

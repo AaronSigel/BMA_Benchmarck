@@ -56,6 +56,12 @@ class CameraSnapshot(BaseModel):
 
 
 class RenderSettingsSnapshot(BaseModel):
+    """Blender scene render settings captured *before* render_scene runs.
+
+    These reflect the scene state at snapshot time, not the final render
+    output.  Use RenderResult for actual output dimensions and engine used.
+    """
+
     engine: str
     resolution_x: int = Field(gt=0)
     resolution_y: int = Field(gt=0)
@@ -75,6 +81,76 @@ class SceneSnapshot(BaseModel):
     frame_current: int
     blender_version: str
     created_at: str
+
+
+# ---------------------------------------------------------------------------
+# Command result models — one per script function that smoke/run executes
+# ---------------------------------------------------------------------------
+
+
+class ResetResult(BaseModel):
+    removed_objects: int
+    remaining_objects: int
+    scene_name: str
+
+
+class FixtureResult(BaseModel):
+    scene_name: str
+    objects: list[str]
+    materials: list[str]
+    light: str | None
+    camera: str | None
+    floor_z: float
+    clearance: float
+    save_path: str | None
+    saved: bool
+
+
+class SaveResult(BaseModel):
+    ok: bool
+    path: str
+    exists: bool
+    file_size_bytes: int
+    error: str | None
+
+
+class RenderResult(BaseModel):
+    """Actual output of render_scene — resolution and engine used for the render."""
+
+    ok: bool
+    output_path: str
+    exists: bool
+    file_size_bytes: int
+    resolution_x: int
+    resolution_y: int
+    engine: str
+    error: str | None
+
+
+class ExportResult(BaseModel):
+    ok: bool
+    output_path: str
+    format: str
+    exists: bool
+    file_size_bytes: int
+    error: str | None
+
+
+class SmokeResults(BaseModel):
+    reset_scene: ResetResult
+    create_fixture_scene: FixtureResult
+    collect_snapshot: SceneSnapshot
+    save_scene: SaveResult
+    render_scene: RenderResult
+    export_scene: ExportResult
+
+
+class SmokeRunOutput(BaseModel):
+    """Schema for smoke_output.json produced by smoke_scene.py."""
+
+    ok: bool
+    results: SmokeResults | None
+    error: str | None
 
 
 class BlenderCommandResult(BaseModel):

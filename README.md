@@ -2,7 +2,7 @@
 
 This project is a benchmark stand for evaluating AI agents that work with Blender through MCP.
 
-The repository currently contains benchmark task definitions, Blender artifact automation, scene validation, and an experiment runner for local-file benchmark runs. MCP server integration and LLM execution remain intentionally out of scope for the implemented pipeline.
+The repository contains benchmark task definitions, Blender artifact automation, scene validation, an experiment runner, and an MCP integration layer for connecting agents to a live Blender session via the Model Context Protocol. LLM execution and agent runtime remain out of scope for the implemented pipeline.
 
 Implemented stages:
 
@@ -10,6 +10,7 @@ Implemented stages:
 - Stage 2: Blender automation artifacts such as `scene_snapshot.json`, renders, exports, and `.blend` files.
 - Stage 3: scene validation and `validation_result.json`.
 - Stage 4: experiment runner, batch runner, run artifacts, and summary metrics.
+- Stage 5: MCP integration layer — blender-mcp fork, tool-gating profiles, headless mode, and MCP smoke checks.
 
 ## Documentation
 
@@ -24,6 +25,15 @@ Scene validation usage and result format are documented in
 
 Experiment runner usage, configs, artifact layout, and summary exports are
 documented in [docs/experiment_runner.md](docs/experiment_runner.md).
+
+MCP integration overview (fork, profiles, telemetry, smoke) is documented in
+[docs/mcp_integration.md](docs/mcp_integration.md).
+
+Headless Blender launch and keep-alive design are documented in
+[docs/mcp_headless.md](docs/mcp_headless.md).
+
+Fork patch notes, env variables, and profile enforcement are documented in
+[docs/blender_mcp_fork_patch.md](docs/blender_mcp_fork_patch.md).
 
 ## Common Commands
 
@@ -135,3 +145,76 @@ Full usage notes are documented in [docs/experiment_runner.md](docs/experiment_r
 
 Stage 4 still does not include MCP integration, LLM calls, agent runtime, or
 tool-call metrics.
+
+## Stage 5: MCP Integration Layer
+
+Stage 5 connects the benchmark pipeline to a live Blender session via the Model Context Protocol. It does not implement an LLM agent or tool-call metrics — it establishes the transport layer that a future agent stage will use.
+
+### blender-mcp fork
+
+Stage 5 does not write an MCP server from scratch. It uses a fork of the open-source [blender-mcp](https://github.com/ahujasid/blender-mcp) server, maintained at `blender-mcp-bma/` on branch `bma-benchmark-profile-support`. The fork adds benchmark-specific features while keeping all upstream tool implementations intact.
+
+Every BMA-specific addition in the fork is tagged with a `# BMA_PATCH` comment. See [docs/blender_mcp_fork_patch.md](docs/blender_mcp_fork_patch.md) for the full list of changes, env variables, and the upstream rebase procedure.
+
+### Tool-gating profiles
+
+The fork enforces five named profiles via the `BMA_MCP_PROFILE` environment variable. Each profile controls which MCP tools are accessible:
+
+| Profile | Python execution | External assets | Notes |
+|---|---|---|---|
+| `minimal` | No | No | Safe read + structured `bma_*` mutations |
+| `inspection_enabled` | No | No | Adds `get_viewport_screenshot` |
+| `no_python` | No | No | All core tools, no Python |
+| `python_enabled` | Yes | No | Adds `execute_blender_code` |
+| `full` | Yes | Yes | Identical to upstream behaviour |
+
+`execute_blender_code` and all external asset tools are **unconditionally blocked** in `minimal`, `no_python`, and `inspection_enabled` — no environment variable can lift these restrictions.
+
+Config files for all five profiles are in `configs/mcp/`. See [docs/mcp_integration.md](docs/mcp_integration.md) for the full profile reference.
+
+### Telemetry
+
+Telemetry is **off by default** in the fork. The `DISABLE_TELEMETRY=true` variable is set automatically by `build_mcp_env()`. The MCP smoke command fails if telemetry is not disabled. To opt back in (not recommended for automated runs), set `BMA_ENABLE_TELEMETRY=true`.
+
+### Headless mode
+
+Benchmark runs do not use a graphical Blender session. Stage 5 provides `HeadlessBlenderMcpLauncher`, which runs:
+
+```bash
+blender --background --factory-startup \
+    --python benchmark/mcp/headless/start_blender_mcp_headless.py \
+    -- --addon blender-mcp-bma/addon.py --host localhost --port 9876
+```
+
+Modal operators cannot run in `--background` mode (no window). The fork replaces them with a `bpy.app.timers`-based keep-alive (`persistent=True`) that keeps Blender alive and processes socket commands in the main thread.
+
+```bash
+# CLI (blocks until Ctrl-C or SIGTERM):
+bma-mcp --config configs/mcp/minimal.yaml start-headless-blender --wait
+```
+
+See [docs/mcp_headless.md](docs/mcp_headless.md) for details on the bootstrap sequence, socket healthcheck, and process shutdown.
+
+### MCP smoke check (no LLM required)
+
+`McpExecutionBackend` integrates with the Stage 4 `ExecutionBackend` ABC and runs a lightweight MCP smoke check without any LLM or agent runtime:
+
+```bash
+bma-mcp --config configs/mcp/minimal.yaml smoke --output /tmp/smoke.json
+```
+
+The smoke command verifies: config loaded → telemetry disabled → profile valid → Blender socket reachable → `get_scene_info` callable → `get_bma_profile_info` callable (fork only). Results are written as `mcp_smoke_result.json` in the run output directory.
+
+```bash
+# Check connectivity only:
+bma-mcp --config configs/mcp/minimal.yaml check
+
+# List tools allowed by a profile:
+bma-mcp --profile minimal list-tools
+
+# Run tests (no Blender required):
+pytest -m "not mcp"
+
+# Run real MCP integration tests (requires Blender running):
+pytest -m mcp
+```

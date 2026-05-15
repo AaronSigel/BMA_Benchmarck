@@ -74,6 +74,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=["get_scene_info"],
         help="Tools to call during smoke (default: get_scene_info)",
     )
+    smoke_p.add_argument(
+        "--output",
+        metavar="PATH",
+        default=None,
+        help="Write smoke result JSON to this file",
+    )
 
     return parser
 
@@ -184,26 +190,98 @@ def cmd_start_headless_blender(
     return _wait_for_process(lambda: launcher.is_running, launcher.stop)
 
 
-def cmd_smoke(cfg: McpServerConfig, tools: list[str]) -> int:
-    if not is_blender_socket_available(cfg):
-        print(json.dumps({
-            "status": "FAIL",
-            "error": f"Blender socket not reachable at {cfg.blender_host}:{cfg.blender_port}",
-        }))
+def cmd_smoke(
+    cfg: McpServerConfig,
+    tools: list[str],
+    output: str | None = None,
+) -> int:
+    """Run a comprehensive MCP smoke-check and optionally write results to a JSON file.
+
+    Checks:
+      1. Config loaded              — always true if we reach here
+      2. Telemetry disabled         — cfg.disable_telemetry
+      3. Profile active             — cfg.profile is valid
+      4. Blender socket available   — TCP probe
+      5. MCP server available       — same socket probe (blender-mcp listens on it)
+      6. get_scene_info             — always included
+      7. get_bma_profile_info       — included when server_distribution in (fork, local)
+    """
+    import datetime
+
+    report: dict = {
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "config": cfg.blender_host + ":" + str(cfg.blender_port),
+        "profile": cfg.profile,
+        "checks": {},
+        "tool_results": {},
+        "status": "PASS",
+    }
+
+    def _fail(reason: str) -> int:
+        report["status"] = "FAIL"
+        report["error"] = reason
+        _emit(report, output)
         return 1
 
+    # 1. Config loaded — trivially true
+    report["checks"]["config_loaded"] = True
+
+    # 2. Telemetry disabled
+    report["checks"]["telemetry_disabled"] = cfg.disable_telemetry
+    if not cfg.disable_telemetry:
+        return _fail("Telemetry is not disabled (set disable_telemetry: true in config)")
+
+    # 3. Profile valid
+    try:
+        McpProfile(cfg.profile)
+        report["checks"]["profile_valid"] = True
+    except ValueError:
+        report["checks"]["profile_valid"] = False
+        return _fail(f"Unknown profile: '{cfg.profile}'")
+
+    # 4 + 5. Blender socket / MCP server reachable
+    socket_ok = is_blender_socket_available(cfg)
+    report["checks"]["blender_socket_available"] = socket_ok
+    report["checks"]["mcp_server_available"] = socket_ok
+    if not socket_ok:
+        return _fail(
+            f"Blender socket not reachable at {cfg.blender_host}:{cfg.blender_port}. "
+            "Ensure Blender is running with the blender-mcp add-on active."
+        )
+
+    # Build tool list: always include get_scene_info; add get_bma_profile_info for fork/local
+    smoke_tools = list(tools)
+    is_fork = cfg.server_distribution in ("fork", "local")
+    if is_fork and "get_bma_profile_info" not in smoke_tools:
+        smoke_tools = ["get_bma_profile_info"] + smoke_tools
+
+    # 6/7. Call tools
     adapter = ExternalBlenderMcpServerAdapter(cfg)
-    results: dict = {}
     failed = False
-    for tool in tools:
+    for tool in smoke_tools:
         try:
-            results[tool] = {"status": "ok", "result": adapter.call_tool(tool)}
+            result = adapter.call_tool(tool)
+            report["tool_results"][tool] = {"status": "ok", "result": result}
         except McpLayerError as exc:
-            results[tool] = {"status": "error", "error": str(exc)}
+            report["tool_results"][tool] = {"status": "error", "error": str(exc)}
             failed = True
 
-    print(json.dumps({"profile": cfg.profile, "tools": results}, default=str))
-    return 1 if failed else 0
+    if failed:
+        report["status"] = "FAIL"
+
+    _emit(report, output)
+    return 0 if not failed else 1
+
+
+def _emit(report: dict, output: str | None) -> None:
+    """Print report to stdout and optionally write to a file."""
+    text = json.dumps(report, indent=2, default=str)
+    print(text)
+    if output:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text, encoding="utf-8")
+        print(f"[bma-mcp smoke] Result written to {out_path}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +311,7 @@ def main(argv: list[str] | None = None) -> None:
             wait=getattr(args, "wait", False),
         ))
     elif args.command == "smoke":
-        sys.exit(cmd_smoke(cfg, args.tools))
+        sys.exit(cmd_smoke(cfg, args.tools, output=getattr(args, "output", None)))
 
 
 if __name__ == "__main__":

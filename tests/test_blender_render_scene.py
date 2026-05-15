@@ -6,14 +6,13 @@ from benchmark.blender.scripts.render_scene import render_scene
 
 
 class FakeRender:
-    def __init__(self, reject_engine: str | None = None) -> None:
+    def __init__(self) -> None:
         self.resolution_x = 0
         self.resolution_y = 0
         self.filepath = ""
         self.image_settings = SimpleNamespace(file_format=None)
         self.film_transparent = False
         self._engine = "BLENDER_EEVEE"
-        self.reject_engine = reject_engine
 
     @property
     def engine(self) -> str:
@@ -21,15 +20,37 @@ class FakeRender:
 
     @engine.setter
     def engine(self, value: str) -> None:
-        if value == self.reject_engine:
-            raise TypeError(f"unsupported engine: {value}")
         self._engine = value
+
+
+class FakeViewSettings:
+    def __init__(self) -> None:
+        self.view_transform = "Standard"
+        self.exposure = 0.0
+        self.gamma = 1.0
+        self.look = "None"
+
+
+def _make_types(available_engines: list[str]) -> SimpleNamespace:
+    items = [SimpleNamespace(identifier=e) for e in available_engines]
+    return SimpleNamespace(
+        RenderSettings=SimpleNamespace(
+            bl_rna=SimpleNamespace(
+                properties={"engine": SimpleNamespace(enum_items=items)}
+            )
+        )
+    )
+
+
+_ALL_ENGINES = ["BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "CYCLES", "BLENDER_WORKBENCH"]
 
 
 def make_fake_bpy(reject_engine: str | None = None, with_camera: bool = True):
     camera = SimpleNamespace(name="FixtureCamera", type="CAMERA") if with_camera else None
-    render = FakeRender(reject_engine=reject_engine)
-    scene = SimpleNamespace(render=render, camera=camera)
+    render = FakeRender()
+    scene = SimpleNamespace(render=render, camera=camera, view_settings=FakeViewSettings())
+
+    available = [e for e in _ALL_ENGINES if e != reject_engine]
 
     def render_op(write_still: bool) -> None:
         assert write_still is True
@@ -39,6 +60,7 @@ def make_fake_bpy(reject_engine: str | None = None, with_camera: bool = True):
         context=SimpleNamespace(scene=scene),
         data=SimpleNamespace(objects=[camera] if camera else []),
         ops=SimpleNamespace(render=SimpleNamespace(render=render_op)),
+        types=_make_types(available),
     )
 
 
@@ -114,4 +136,3 @@ def test_render_scene_requires_output_path(monkeypatch) -> None:
     assert result["ok"] is False
     assert result["output_path"] is None
     assert "output_path" in result["error"]
-

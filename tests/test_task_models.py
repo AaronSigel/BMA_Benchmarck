@@ -19,13 +19,13 @@ from benchmark.tasks.models import (
 
 def make_valid_task() -> BenchmarkTask:
     return BenchmarkTask(
-        id="geometry-cube-basic",
+        id="geometry_001_basic_cube",
         title="Create a basic cube scene",
         category=TaskCategory.GEOMETRY,
         difficulty=DifficultyLevel.EASY,
         prompt="Create a cube at the origin with a red material.",
         tags=["geometry", "cube"],
-        allowed_tools=["mesh.create_cube", "material.create"],
+        allowed_tools=["create_object", "assign_material", "inspect_scene"],
         expected_scene=ExpectedScene(
             objects=[
                 ExpectedObject(
@@ -46,8 +46,8 @@ def make_valid_task() -> BenchmarkTask:
             ],
         ),
         success_criteria=[
-            SuccessCriterion(metric="object_exists", weight=0.5),
-            SuccessCriterion(metric="material_matches", weight=0.5),
+            SuccessCriterion(metric="object_existence", weight=0.5),
+            SuccessCriterion(metric="geometry_accuracy", weight=0.5),
         ],
         metadata=TaskMetadata(author="benchmark", description="Basic geometry task"),
     )
@@ -56,7 +56,7 @@ def make_valid_task() -> BenchmarkTask:
 def test_valid_benchmark_task_can_be_created() -> None:
     task = make_valid_task()
 
-    assert task.id == "geometry-cube-basic"
+    assert task.id == "geometry_001_basic_cube"
     assert task.category is TaskCategory.GEOMETRY
     assert task.expected_scene.objects[0].location == Vector3(x=0.0, y=0.0, z=0.0)
 

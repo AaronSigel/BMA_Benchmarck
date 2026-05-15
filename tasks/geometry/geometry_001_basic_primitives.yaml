@@ -1,0 +1,54 @@
+id: geometry_001_basic_primitives
+title: Basic primitives
+category: geometry
+difficulty: easy
+prompt: >
+  Create three basic mesh primitives: a cube at the origin, a UV sphere to the
+  right, and a cylinder to the left. Use simple default materials and keep the
+  scene focused on object creation and placement.
+tags:
+  - geometry
+  - primitives
+  - baseline
+allowed_tools:
+  - create_object
+  - set_transform
+  - assign_material
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Cube
+      type: MESH
+      primitive: cube
+      location: { x: 0.0, y: 0.0, z: 0.0 }
+      dimensions: { x: 2.0, y: 2.0, z: 2.0 }
+      tolerance: 0.1
+    - name: Sphere
+      type: MESH
+      primitive: sphere
+      location: { x: 3.0, y: 0.0, z: 0.0 }
+      tolerance: 0.1
+    - name: Cylinder
+      type: MESH
+      primitive: cylinder
+      location: { x: -3.0, y: 0.0, z: 0.0 }
+      tolerance: 0.1
+  materials: []
+  lights: []
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: object_existence
+    weight: 0.4
+    required: true
+  - metric: geometry_accuracy
+    weight: 0.3
+    required: true
+  - metric: object_placement
+    weight: 0.3
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Baseline geometry task for primitive creation.
+

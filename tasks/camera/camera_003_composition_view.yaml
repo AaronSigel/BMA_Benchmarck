@@ -1,0 +1,63 @@
+id: camera_003_composition_view
+title: Angled composition camera
+category: camera
+difficulty: medium
+prompt: >
+  Create a simple scene with three objects arranged across the frame. Place a
+  camera at an angle so all three objects are visible together in a composed
+  view.
+tags:
+  - camera
+  - composition-view
+  - framing
+allowed_tools:
+  - create_object
+  - create_camera
+  - set_camera
+  - set_transform
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Left_Cube
+      type: MESH
+      primitive: cube
+      location: { x: -2.0, y: 0.0, z: 0.75 }
+      dimensions: { x: 1.5, y: 1.5, z: 1.5 }
+      tolerance: 0.1
+    - name: Center_Sphere
+      type: MESH
+      primitive: sphere
+      location: { x: 0.0, y: 0.0, z: 0.75 }
+      dimensions: { x: 1.5, y: 1.5, z: 1.5 }
+      tolerance: 0.1
+    - name: Right_Cylinder
+      type: MESH
+      primitive: cylinder
+      location: { x: 2.0, y: 0.0, z: 0.75 }
+      dimensions: { x: 1.2, y: 1.2, z: 1.5 }
+      tolerance: 0.1
+  materials: []
+  lights: []
+  cameras:
+    - name: Composition_Camera
+      location: { x: 4.0, y: -6.0, z: 3.0 }
+      rotation: { x: 63.0, y: 0.0, z: 34.0 }
+      focal_length: 35.0
+      target: Center_Sphere
+      tolerance: 0.15
+  exports: []
+success_criteria:
+  - metric: camera_existence
+    weight: 0.3
+    required: true
+  - metric: camera_correctness
+    weight: 0.35
+    required: true
+  - metric: target_visibility
+    weight: 0.35
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Angled camera framing task for three visible objects.
+

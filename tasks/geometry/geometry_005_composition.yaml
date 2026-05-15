@@ -1,0 +1,92 @@
+id: geometry_005_composition
+title: Simple table composition
+category: geometry
+difficulty: medium
+prompt: >
+  Build a simple scene containing a floor, a table, and three small objects on
+  top of the table. Focus on the presence and basic placement of the objects,
+  not on visual styling or rendering quality.
+tags:
+  - geometry
+  - composition
+  - placement
+allowed_tools:
+  - create_object
+  - set_transform
+  - assign_material
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Floor
+      type: MESH
+      primitive: cube
+      location: { x: 0.0, y: 0.0, z: -0.05 }
+      dimensions: { x: 8.0, y: 8.0, z: 0.1 }
+      tolerance: 0.1
+    - name: Table_Top
+      type: MESH
+      primitive: cube
+      location: { x: 0.0, y: 0.0, z: 1.0 }
+      dimensions: { x: 4.0, y: 2.0, z: 0.2 }
+      tolerance: 0.1
+    - name: Table_Leg_1
+      type: MESH
+      primitive: cube
+      location: { x: -1.7, y: -0.7, z: 0.45 }
+      dimensions: { x: 0.2, y: 0.2, z: 0.9 }
+      tolerance: 0.1
+    - name: Table_Leg_2
+      type: MESH
+      primitive: cube
+      location: { x: 1.7, y: -0.7, z: 0.45 }
+      dimensions: { x: 0.2, y: 0.2, z: 0.9 }
+      tolerance: 0.1
+    - name: Table_Leg_3
+      type: MESH
+      primitive: cube
+      location: { x: -1.7, y: 0.7, z: 0.45 }
+      dimensions: { x: 0.2, y: 0.2, z: 0.9 }
+      tolerance: 0.1
+    - name: Table_Leg_4
+      type: MESH
+      primitive: cube
+      location: { x: 1.7, y: 0.7, z: 0.45 }
+      dimensions: { x: 0.2, y: 0.2, z: 0.9 }
+      tolerance: 0.1
+    - name: Object_Cube
+      type: MESH
+      primitive: cube
+      location: { x: -1.0, y: 0.0, z: 1.35 }
+      dimensions: { x: 0.5, y: 0.5, z: 0.5 }
+      tolerance: 0.1
+    - name: Object_Sphere
+      type: MESH
+      primitive: sphere
+      location: { x: 0.0, y: 0.0, z: 1.35 }
+      dimensions: { x: 0.5, y: 0.5, z: 0.5 }
+      tolerance: 0.1
+    - name: Object_Cylinder
+      type: MESH
+      primitive: cylinder
+      location: { x: 1.0, y: 0.0, z: 1.35 }
+      dimensions: { x: 0.4, y: 0.4, z: 0.6 }
+      tolerance: 0.1
+  materials: []
+  lights: []
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: object_existence
+    weight: 0.4
+    required: true
+  - metric: geometry_accuracy
+    weight: 0.3
+    required: true
+  - metric: object_placement
+    weight: 0.3
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Basic multi-object composition task for placement checks.
+

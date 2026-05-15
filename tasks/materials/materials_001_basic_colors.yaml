@@ -1,0 +1,70 @@
+id: materials_001_basic_colors
+title: Basic RGB materials
+category: materials
+difficulty: easy
+prompt: >
+  Create three simple objects and assign them red, green, and blue materials.
+  Keep the geometry simple so the material colors can be inspected directly.
+tags:
+  - materials
+  - colors
+  - baseline
+allowed_tools:
+  - create_object
+  - assign_material
+  - set_material_properties
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Red_Cube
+      type: MESH
+      primitive: cube
+      location: { x: -2.0, y: 0.0, z: 0.0 }
+      material: Red
+      tolerance: 0.1
+    - name: Green_Sphere
+      type: MESH
+      primitive: sphere
+      location: { x: 0.0, y: 0.0, z: 0.0 }
+      material: Green
+      tolerance: 0.1
+    - name: Blue_Cylinder
+      type: MESH
+      primitive: cylinder
+      location: { x: 2.0, y: 0.0, z: 0.0 }
+      material: Blue
+      tolerance: 0.1
+  materials:
+    - name: Red
+      base_color: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }
+      roughness: 0.5
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Green
+      base_color: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 }
+      roughness: 0.5
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Blue
+      base_color: { r: 0.0, g: 0.0, b: 1.0, a: 1.0 }
+      roughness: 0.5
+      metallic: 0.0
+      tolerance: 0.05
+  lights: []
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: object_existence
+    weight: 0.3
+    required: true
+  - metric: material_accuracy
+    weight: 0.5
+    required: true
+  - metric: parameter_correctness
+    weight: 0.2
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Baseline material task for assigning primary colors.
+

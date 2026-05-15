@@ -1,0 +1,74 @@
+id: materials_005_material_composition
+title: Material composition scene
+category: materials
+difficulty: medium
+prompt: >
+  Create a simple composition with a floor, a table, and one object on the
+  table. Use a wood-like material for the table, a neutral gray material for
+  the floor, and a metallic material for the object.
+tags:
+  - materials
+  - composition
+  - scene
+allowed_tools:
+  - create_object
+  - assign_material
+  - set_material_properties
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Gray_Floor
+      type: MESH
+      primitive: cube
+      location: { x: 0.0, y: 0.0, z: -0.05 }
+      dimensions: { x: 6.0, y: 6.0, z: 0.1 }
+      material: Gray_Floor_Material
+      tolerance: 0.1
+    - name: Wood_Table
+      type: MESH
+      primitive: cube
+      location: { x: 0.0, y: 0.0, z: 0.8 }
+      dimensions: { x: 3.0, y: 1.5, z: 0.2 }
+      material: Wood_Material
+      tolerance: 0.1
+    - name: Metal_Object
+      type: MESH
+      primitive: sphere
+      location: { x: 0.0, y: 0.0, z: 1.15 }
+      dimensions: { x: 0.5, y: 0.5, z: 0.5 }
+      material: Polished_Metal
+      tolerance: 0.1
+  materials:
+    - name: Gray_Floor_Material
+      base_color: { r: 0.45, g: 0.45, b: 0.45, a: 1.0 }
+      roughness: 0.7
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Wood_Material
+      base_color: { r: 0.55, g: 0.32, b: 0.12, a: 1.0 }
+      roughness: 0.55
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Polished_Metal
+      base_color: { r: 0.75, g: 0.72, b: 0.68, a: 1.0 }
+      roughness: 0.18
+      metallic: 1.0
+      tolerance: 0.05
+  lights: []
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: object_existence
+    weight: 0.3
+    required: true
+  - metric: material_accuracy
+    weight: 0.45
+    required: true
+  - metric: parameter_correctness
+    weight: 0.25
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Small scene checking coordinated material assignment.
+

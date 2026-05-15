@@ -1,0 +1,57 @@
+id: lighting_002_sun_light
+title: Sun light direction
+category: lighting
+difficulty: easy
+prompt: >
+  Create a simple scene with a floor plane and a cube. Add a sun light and set
+  its direction through rotation so it illuminates the cube from above and from
+  the side.
+tags:
+  - lighting
+  - sun-light
+  - rotation
+allowed_tools:
+  - create_object
+  - create_light
+  - set_transform
+  - set_light_properties
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Floor
+      type: MESH
+      primitive: plane
+      location: { x: 0.0, y: 0.0, z: 0.0 }
+      dimensions: { x: 6.0, y: 6.0, z: 0.0 }
+      tolerance: 0.1
+    - name: Cube
+      type: MESH
+      primitive: cube
+      location: { x: 0.0, y: 0.0, z: 1.0 }
+      dimensions: { x: 1.5, y: 1.5, z: 1.5 }
+      tolerance: 0.1
+  materials: []
+  lights:
+    - name: Sun_Light
+      type: SUN
+      location: { x: 0.0, y: 0.0, z: 5.0 }
+      rotation: { x: 45.0, y: 0.0, z: 35.0 }
+      energy: 3.0
+      tolerance: 0.1
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: light_existence
+    weight: 0.35
+    required: true
+  - metric: lighting_correctness
+    weight: 0.35
+    required: true
+  - metric: parameter_correctness
+    weight: 0.3
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Directional lighting task using a sun light rotation.
+

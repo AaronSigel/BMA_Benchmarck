@@ -1,0 +1,60 @@
+id: materials_002_roughness
+title: Roughness contrast
+category: materials
+difficulty: easy
+prompt: >
+  Create two spheres with the same base color but different roughness values.
+  The left sphere should have roughness 0.1 and the right sphere should have
+  roughness 0.9.
+tags:
+  - materials
+  - roughness
+  - parameters
+allowed_tools:
+  - create_object
+  - assign_material
+  - set_material_properties
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Smooth_Sphere
+      type: MESH
+      primitive: sphere
+      location: { x: -1.5, y: 0.0, z: 0.0 }
+      material: Smooth_Material
+      tolerance: 0.1
+    - name: Rough_Sphere
+      type: MESH
+      primitive: sphere
+      location: { x: 1.5, y: 0.0, z: 0.0 }
+      material: Rough_Material
+      tolerance: 0.1
+  materials:
+    - name: Smooth_Material
+      base_color: { r: 0.8, g: 0.8, b: 0.8, a: 1.0 }
+      roughness: 0.1
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Rough_Material
+      base_color: { r: 0.8, g: 0.8, b: 0.8, a: 1.0 }
+      roughness: 0.9
+      metallic: 0.0
+      tolerance: 0.05
+  lights: []
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: object_existence
+    weight: 0.25
+    required: true
+  - metric: material_accuracy
+    weight: 0.35
+    required: true
+  - metric: parameter_correctness
+    weight: 0.4
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Material roughness parameter comparison task.
+

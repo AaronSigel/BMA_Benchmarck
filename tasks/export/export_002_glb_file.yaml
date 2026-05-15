@@ -1,0 +1,98 @@
+id: export_002_glb_file
+title: Export low-poly scene as GLB
+category: export
+difficulty: medium
+prompt: >
+  Create a small low-poly scene from several simple objects, assign basic
+  materials, and export the result as result.glb. Use only the provided export
+  scene tool for the final file output.
+tags:
+  - export
+  - glb
+  - low-poly
+allowed_tools:
+  - create_object
+  - assign_material
+  - export_scene
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Lowpoly_Ground
+      type: MESH
+      primitive: cube
+      location: { x: 0.0, y: 0.0, z: -0.05 }
+      dimensions: { x: 5.0, y: 5.0, z: 0.1 }
+      material: Ground_Green
+      tolerance: 0.1
+    - name: Lowpoly_House
+      type: MESH
+      primitive: cube
+      location: { x: -0.8, y: 0.0, z: 0.6 }
+      dimensions: { x: 1.2, y: 1.0, z: 1.2 }
+      material: House_Wall
+      tolerance: 0.1
+    - name: Lowpoly_Roof
+      type: MESH
+      primitive: cone
+      location: { x: -0.8, y: 0.0, z: 1.35 }
+      dimensions: { x: 1.5, y: 1.5, z: 0.8 }
+      material: Roof_Red
+      tolerance: 0.15
+    - name: Lowpoly_Tree_Trunk
+      type: MESH
+      primitive: cylinder
+      location: { x: 1.2, y: 0.0, z: 0.45 }
+      dimensions: { x: 0.25, y: 0.25, z: 0.9 }
+      material: Trunk_Brown
+      tolerance: 0.1
+    - name: Lowpoly_Tree_Crown
+      type: MESH
+      primitive: sphere
+      location: { x: 1.2, y: 0.0, z: 1.15 }
+      dimensions: { x: 1.0, y: 1.0, z: 1.0 }
+      material: Crown_Green
+      tolerance: 0.1
+  materials:
+    - name: Ground_Green
+      base_color: { r: 0.25, g: 0.65, b: 0.25, a: 1.0 }
+      roughness: 0.7
+      metallic: 0.0
+      tolerance: 0.05
+    - name: House_Wall
+      base_color: { r: 0.8, g: 0.68, b: 0.5, a: 1.0 }
+      roughness: 0.6
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Roof_Red
+      base_color: { r: 0.7, g: 0.12, b: 0.08, a: 1.0 }
+      roughness: 0.55
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Trunk_Brown
+      base_color: { r: 0.35, g: 0.18, b: 0.08, a: 1.0 }
+      roughness: 0.65
+      metallic: 0.0
+      tolerance: 0.05
+    - name: Crown_Green
+      base_color: { r: 0.1, g: 0.45, b: 0.16, a: 1.0 }
+      roughness: 0.7
+      metallic: 0.0
+      tolerance: 0.05
+  lights: []
+  cameras: []
+  exports:
+    - format: glb
+      filename: result.glb
+      must_exist: true
+success_criteria:
+  - metric: object_existence
+    weight: 0.4
+    required: true
+  - metric: export_validity
+    weight: 0.6
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Export task requiring a GLB file for a simple low-poly scene.
+

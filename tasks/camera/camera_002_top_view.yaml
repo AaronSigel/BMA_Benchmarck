@@ -1,0 +1,66 @@
+id: camera_002_top_view
+title: Top-down camera view
+category: camera
+difficulty: easy
+prompt: >
+  Create a floor plane and three objects on it. Place the camera above the
+  scene looking straight down, with focal length 50, so the objects are visible
+  in a top-down layout.
+tags:
+  - camera
+  - top-view
+  - composition
+allowed_tools:
+  - create_object
+  - create_camera
+  - set_camera
+  - set_transform
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Floor
+      type: MESH
+      primitive: plane
+      location: { x: 0.0, y: 0.0, z: 0.0 }
+      dimensions: { x: 6.0, y: 6.0, z: 0.0 }
+      tolerance: 0.1
+    - name: Object_Left
+      type: MESH
+      primitive: cube
+      location: { x: -1.5, y: 0.0, z: 0.5 }
+      tolerance: 0.1
+    - name: Object_Center
+      type: MESH
+      primitive: sphere
+      location: { x: 0.0, y: 0.0, z: 0.5 }
+      tolerance: 0.1
+    - name: Object_Right
+      type: MESH
+      primitive: cylinder
+      location: { x: 1.5, y: 0.0, z: 0.5 }
+      tolerance: 0.1
+  materials: []
+  lights: []
+  cameras:
+    - name: Top_Camera
+      location: { x: 0.0, y: 0.0, z: 8.0 }
+      rotation: { x: 0.0, y: 0.0, z: 0.0 }
+      focal_length: 50.0
+      target: Floor
+      tolerance: 0.1
+  exports: []
+success_criteria:
+  - metric: camera_existence
+    weight: 0.3
+    required: true
+  - metric: camera_correctness
+    weight: 0.45
+    required: true
+  - metric: target_visibility
+    weight: 0.25
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: Top-down camera task for multiple objects on a plane.
+

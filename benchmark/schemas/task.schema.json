@@ -1,0 +1,386 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/blender-agent-benchmark/task.schema.json",
+  "title": "BenchmarkTask",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "category",
+    "difficulty",
+    "prompt",
+    "allowed_tools",
+    "expected_scene",
+    "success_criteria"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "geometry",
+        "materials",
+        "lighting",
+        "camera",
+        "export"
+      ]
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": [
+        "easy",
+        "medium",
+        "hard"
+      ]
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "allowed_tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expected_scene": {
+      "$ref": "#/$defs/ExpectedScene"
+    },
+    "success_criteria": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SuccessCriterion"
+      }
+    },
+    "metadata": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TaskMetadata"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "Vector3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        }
+      }
+    },
+    "ColorRGBA": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "r",
+        "g",
+        "b"
+      ],
+      "properties": {
+        "r": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "g": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "b": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "a": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1.0
+        }
+      }
+    },
+    "NullableString": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "NullableVector3": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Vector3"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ExpectedObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/NullableString"
+        },
+        "type": {
+          "type": "string"
+        },
+        "primitive": {
+          "$ref": "#/$defs/NullableString"
+        },
+        "location": {
+          "$ref": "#/$defs/NullableVector3"
+        },
+        "rotation": {
+          "$ref": "#/$defs/NullableVector3"
+        },
+        "scale": {
+          "$ref": "#/$defs/NullableVector3"
+        },
+        "dimensions": {
+          "$ref": "#/$defs/NullableVector3"
+        },
+        "material": {
+          "$ref": "#/$defs/NullableString"
+        },
+        "tolerance": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 0.05
+        }
+      }
+    },
+    "ExpectedMaterial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "base_color": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorRGBA"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "roughness": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "metallic": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tolerance": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 0.05
+        }
+      }
+    },
+    "ExpectedLight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/NullableString"
+        },
+        "type": {
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/NullableVector3"
+        },
+        "rotation": {
+          "$ref": "#/$defs/NullableVector3"
+        },
+        "energy": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tolerance": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 0.05
+        }
+      }
+    },
+    "ExpectedCamera": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/NullableString"
+        },
+        "location": {
+          "$ref": "#/$defs/NullableVector3"
+        },
+        "rotation": {
+          "$ref": "#/$defs/NullableVector3"
+        },
+        "focal_length": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/NullableString"
+        },
+        "tolerance": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 0.05
+        }
+      }
+    },
+    "ExpectedExport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format"
+      ],
+      "properties": {
+        "format": {
+          "type": "string"
+        },
+        "filename": {
+          "$ref": "#/$defs/NullableString"
+        },
+        "must_exist": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "ExpectedScene": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExpectedObject"
+          },
+          "default": []
+        },
+        "materials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExpectedMaterial"
+          },
+          "default": []
+        },
+        "lights": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExpectedLight"
+          },
+          "default": []
+        },
+        "cameras": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExpectedCamera"
+          },
+          "default": []
+        },
+        "exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExpectedExport"
+          },
+          "default": []
+        }
+      }
+    },
+    "SuccessCriterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric",
+        "weight"
+      ],
+      "properties": {
+        "metric": {
+          "type": "string"
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "required": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "TaskMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "$ref": "#/$defs/NullableString"
+        },
+        "version": {
+          "type": "string",
+          "default": "1.0"
+        },
+        "description": {
+          "$ref": "#/$defs/NullableString"
+        }
+      }
+    }
+  }
+}
+

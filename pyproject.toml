@@ -18,11 +18,23 @@ dependencies = [
 test = [
     "pytest",
 ]
+blender = [
+    "numpy",
+    "pillow",
+]
+dev = [
+    "numpy",
+    "pytest",
+    "pillow",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "blender: tests requiring Blender executable",
+    "integration: integration tests",
+]
 
 [tool.setuptools.packages.find]
 include = ["benchmark*"]
-

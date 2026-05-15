@@ -1,2 +1,12 @@
 artifacts/
 venv/
+artifacts-data/
+blender_agent_benchmark.egg-info
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite3
+*.db
+*.env

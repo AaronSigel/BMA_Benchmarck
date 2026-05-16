@@ -230,6 +230,7 @@ def test_empty_choices_raises_parse_error(monkeypatch: pytest.MonkeyPatch) -> No
 # ---------------------------------------------------------------------------
 
 @pytest.mark.llm
+@pytest.mark.api_e2e
 def test_real_openrouter_completion() -> None:
     import os
     if not os.environ.get("OPENROUTER_API_KEY"):

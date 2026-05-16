@@ -175,12 +175,13 @@ def load_run_bundle(run_dir: Path | str) -> RunArtifactBundle:
         except TraceReadError as exc:
             logger.warning("Could not load scene_snapshot from %s: %s", snap_path, exc)
 
-    # metrics — optional raw JSON
+    # metrics — optional raw JSON. Runner writes a list of named metric rows;
+    # analysis consumes a mapping, so normalize rows to {name: value}.
     metrics: dict[str, Any] | None = None
     met_path = d / _METRICS_FILENAME
     if met_path.exists():
         try:
-            metrics = _read_json(met_path)
+            metrics = _normalize_metrics_json(_read_json(met_path))
         except TraceReadError as exc:
             logger.warning("Could not load metrics from %s: %s", met_path, exc)
 
@@ -202,6 +203,18 @@ def load_run_bundle(run_dir: Path | str) -> RunArtifactBundle:
         metrics=metrics,
         summary=summary,
     )
+
+
+def _normalize_metrics_json(data: Any) -> dict[str, Any]:
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list):
+        normalized: dict[str, Any] = {}
+        for item in data:
+            if isinstance(item, dict) and isinstance(item.get("name"), str):
+                normalized[item["name"]] = item.get("value")
+        return normalized
+    return {}
 
 
 # ---------------------------------------------------------------------------

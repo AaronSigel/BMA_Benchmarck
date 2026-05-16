@@ -1,0 +1,23 @@
+matrix_id: e2e_smoke_matrix
+title: E2E smoke matrix
+description: Fixture matrix for local E2E runner tests without Blender, MCP, or API access.
+tasks:
+  ids:
+    - e2e_geometry_task
+agents:
+  ids:
+    - e2e_mock_agent
+  config_root: tests/fixtures/e2e
+mcp_profiles:
+  - minimal
+models:
+  ids:
+    - mock
+execution_modes:
+  - external_snapshot
+repetitions: 1
+output_root: artifacts/experiments/e2e_smoke_fixture
+metadata:
+  tasks_root: tests/fixtures/e2e
+  snapshot_path: tests/fixtures/e2e/scene_snapshot.json
+  artifacts_dir: tests/fixtures/e2e

@@ -33,13 +33,17 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-m 'not llm and not remote_agent and not agent_integration'"
+addopts = "-m 'not llm and not remote_agent and not agent_integration and not e2e and not api_e2e and not mcp_e2e and not remote_agent_e2e'"
 markers = [
     "blender: tests requiring Blender executable",
+    "e2e: full end-to-end benchmark tests",
+    "api_e2e: E2E requiring external API models",
     "integration: integration tests",
     "llm: tests requiring a real external LLM API",
     "mcp: tests requiring a running MCP server / Blender with blender-mcp addon",
+    "mcp_e2e: E2E requiring Blender + MCP",
     "remote_agent: tests requiring a real hosted/server-side agent",
+    "remote_agent_e2e: E2E requiring external hosted agent",
     "agent_integration: tests requiring real MCP + Blender + external API/agent",
 ]
 

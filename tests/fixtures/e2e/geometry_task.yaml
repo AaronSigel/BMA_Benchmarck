@@ -1,0 +1,47 @@
+schema_version: "1.0"
+id: e2e_geometry_task
+title: E2E fixture geometry task
+category: geometry
+difficulty: easy
+prompt: Create a cube, sphere, and cylinder in the expected positions.
+tags:
+  - e2e
+  - geometry
+allowed_tools:
+  - inspect_scene
+expected_scene:
+  objects:
+    - name: Cube
+      type: MESH
+      primitive: cube
+      location: {x: 0.0, y: 0.0, z: 0.0}
+      dimensions: {x: 2.0, y: 2.0, z: 2.0}
+      tolerance: 0.1
+    - name: Sphere
+      type: MESH
+      primitive: sphere
+      location: {x: 3.0, y: 0.0, z: 0.0}
+      tolerance: 0.1
+    - name: Cylinder
+      type: MESH
+      primitive: cylinder
+      location: {x: -3.0, y: 0.0, z: 0.0}
+      tolerance: 0.1
+  materials: []
+  lights: []
+  cameras: []
+  exports: []
+success_criteria:
+  - metric: object_existence
+    weight: 0.4
+    required: true
+  - metric: geometry_accuracy
+    weight: 0.3
+    required: true
+  - metric: object_placement
+    weight: 0.3
+    required: true
+metadata:
+  author: benchmark
+  version: "1.0"
+  description: E2E smoke fixture task.

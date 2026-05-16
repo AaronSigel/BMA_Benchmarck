@@ -266,6 +266,7 @@ def test_empty_choices_raises_parse_error(monkeypatch: pytest.MonkeyPatch) -> No
 # ---------------------------------------------------------------------------
 
 @pytest.mark.llm
+@pytest.mark.api_e2e
 def test_real_openai_compatible_completion() -> None:
     import os
     base_url = os.environ.get("OPENAI_COMPATIBLE_BASE_URL")

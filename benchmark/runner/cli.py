@@ -20,6 +20,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run(args.config)
     if args.command == "experiment":
         return _experiment(args)
+    if args.command == "matrix":
+        return _matrix(args)
     if args.command == "summarize":
         return _summarize(args.results)
 
@@ -55,6 +57,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print a summary for an experiment_result.json file.",
     )
     summarize_parser.add_argument("--results", type=Path, required=True)
+
+    matrix_parser = subparsers.add_parser(
+        "matrix",
+        help="Run a Stage 8 experiment matrix.",
+    )
+    matrix_parser.add_argument("--config", type=Path, required=True)
+    matrix_parser.add_argument(
+        "--analyze",
+        action="store_true",
+        help="Run Stage 7 analysis after the matrix batch run.",
+    )
+    matrix_parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Build Markdown and HTML reports after the matrix batch run (implies --analyze).",
+    )
 
     return parser
 
@@ -139,6 +157,39 @@ def _experiment(args: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"WARNING: post-analysis failed: {exc}")
 
+    return 1 if result.summary.get("error_runs", 0) else 0
+
+
+def _matrix(args: argparse.Namespace) -> int:
+    from benchmark.experiments.e2e_runner import E2EBenchmarkRunner
+
+    config_path: Path = args.config
+    try:
+        runner = E2EBenchmarkRunner()
+        if args.report:
+            report_path = runner.run_and_report(config_path)
+            print(f"report: {report_path}")
+            return 0
+        if args.analyze:
+            analysis = runner.run_and_analyze(config_path)
+            print(
+                "\n".join(
+                    [
+                        f"experiment_id: {analysis.experiment_id}",
+                        f"total_runs: {analysis.summary.total_runs}",
+                        f"passed: {analysis.summary.successful_runs}",
+                        f"failed: {analysis.summary.failed_runs}",
+                        f"error: {analysis.summary.error_runs}",
+                    ]
+                )
+            )
+            return 0
+        result = runner.run(config_path)
+    except (RuntimeError, OSError, ValidationError) as error:
+        print(f"ERROR: {error}")
+        return 1
+
+    print(_format_experiment_result(result))
     return 1 if result.summary.get("error_runs", 0) else 0
 
 

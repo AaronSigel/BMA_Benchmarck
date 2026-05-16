@@ -268,6 +268,17 @@ class TestLoadRunBundle:
         assert bundle.metrics == {"tool_call_count": 3}
         assert bundle.summary == {"strategy": "react"}
 
+    def test_loads_runner_metric_list_as_mapping(self, tmp_path):
+        run_dir = self._make_run_dir(tmp_path, with_run_result=True)
+        (run_dir / "metrics.json").write_text(
+            '[{"name": "total_score", "value": 1.0}, {"name": "error_count", "value": 0}]',
+            encoding="utf-8",
+        )
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            bundle = load_run_bundle(run_dir)
+        assert bundle.metrics == {"total_score": 1.0, "error_count": 0}
+
     def test_invalid_json_in_trace_gracefully_handled(self, tmp_path):
         run_dir = tmp_path / "bad_trace_run"
         run_dir.mkdir()

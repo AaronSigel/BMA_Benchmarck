@@ -211,6 +211,7 @@ def test_start_headless_blender_shows_command():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.mcp
+@pytest.mark.mcp_e2e
 def test_smoke_with_real_blender():
     """Requires Blender running with blender-mcp addon."""
     import tempfile
@@ -228,6 +229,7 @@ def test_smoke_with_real_blender():
 
 
 @pytest.mark.mcp
+@pytest.mark.mcp_e2e
 def test_check_with_real_blender():
     """Requires Blender running with blender-mcp addon."""
     result = run_cli("check", expect_exit=0)

@@ -1,0 +1,18 @@
+matrix_id: smoke_matrix
+title: Smoke matrix
+description: Fast local Stage 8 smoke matrix without external APIs, Blender, or MCP.
+tasks:
+  ids:
+    - geometry_001_basic_primitives
+agents:
+  ids:
+    - mock_agent
+mcp_profiles:
+  - minimal
+execution_modes:
+  - external_snapshot
+repetitions: 1
+output_root: artifacts/experiments/smoke_matrix
+metadata:
+  snapshot_path: tests/fixtures/validation/valid_geometry_snapshot.json
+  artifacts_dir: tests/fixtures/validation

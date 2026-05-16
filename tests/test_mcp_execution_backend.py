@@ -147,6 +147,7 @@ def test_execute_mcp_external_mode_calls_get_object_info(tmp_path):
 
 
 @pytest.mark.mcp
+@pytest.mark.mcp_e2e
 def test_execute_with_real_blender_socket(tmp_path):
     """Real integration test — requires Blender running with blender-mcp addon."""
     cfg = make_run_config(tmp_path, mcp_profile="minimal")

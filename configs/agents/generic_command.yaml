@@ -1,0 +1,16 @@
+agent_id: generic_command
+strategy: remote_agent
+mcp_profile: minimal
+remote_agent:
+  provider: generic_command
+  agent_id: generic_command
+  command: bma-remote-agent
+  args: []
+  timeout_sec: 300
+max_steps: 20
+max_retries: 1
+step_timeout_sec: 120
+allow_python_tools: false
+allow_inspection_tools: true
+metadata:
+  description: Opt-in generic command remote agent config for integration tests.

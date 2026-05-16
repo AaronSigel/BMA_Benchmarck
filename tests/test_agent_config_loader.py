@@ -126,6 +126,8 @@ def test_builtin_agent_configs_are_valid() -> None:
         "react_anthropic.yaml",
         "remote_agent_codex.yaml",
         "remote_agent_claude.yaml",
+        "generic_http.yaml",
+        "generic_command.yaml",
     }
     assert not list(config_dir.glob("*ollama*.yaml"))
 

@@ -1,0 +1,13 @@
+agent_id: e2e_mock_agent
+strategy: direct_tool_calling
+mcp_profile: minimal
+llm:
+  provider: mock
+  model: mock
+max_steps: 5
+max_retries: 0
+step_timeout_sec: 30
+allow_python_tools: false
+allow_inspection_tools: true
+metadata:
+  description: E2E fixture mock agent; no external API required.

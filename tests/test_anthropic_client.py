@@ -373,6 +373,7 @@ def test_split_multiple_system_messages_joined() -> None:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.llm
+@pytest.mark.api_e2e
 def test_real_anthropic_completion() -> None:
     import os
     if not os.environ.get("ANTHROPIC_API_KEY"):

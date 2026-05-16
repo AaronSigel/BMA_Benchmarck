@@ -13,6 +13,7 @@ Implemented stages:
 - Stage 5: MCP integration layer — blender-mcp fork, tool-gating profiles, headless mode, and MCP smoke checks.
 - Stage 6: Agent Runtime — LLM clients, agent strategies, trace recording, and `AgentExecutionBackend`.
 - Stage 7: Trace Metrics and Benchmark Reporting — analysis package, tool-call metrics, agent metrics, validation metrics, error taxonomy, comparative reports, and Markdown/HTML/CSV/JSON exports.
+- Stage 8: Experimental Matrix and E2E Benchmark Runs — matrix configs, ExperimentConfig generation, readiness checks, run manifests, smoke/baseline/API/remote-agent matrices, run-and-report workflow, and E2E CLI.
 
 ## Documentation
 
@@ -305,6 +306,139 @@ python -m benchmark.agent.cli list-providers
 ```
 
 Agent configs are in [`configs/agents/`](configs/agents/). Full documentation is in [docs/agent_runtime.md](docs/agent_runtime.md).
+
+## Stage 8: Experimental Matrix and E2E Benchmark Runs
+
+Stage 8 closes the practical part of the benchmark stand. It adds a declarative
+experimental matrix system and a full end-to-end pipeline from matrix config to
+analysis report.
+
+Full documentation is in [docs/experimental_matrix.md](docs/experimental_matrix.md).
+
+### Matrix configs
+
+Experiment matrices live in `configs/matrices/`. Each YAML file describes a
+Cartesian product of benchmark axes:
+
+```
+model / remote-agent
+    × agent strategy
+    × MCP profile
+    × task category
+    × difficulty
+    × repetitions
+```
+
+| File | Purpose |
+|---|---|
+| `smoke_matrix.yaml` | Fast local check — no API, no Blender |
+| `baseline_matrix.yaml` | Main series: Direct vs ReAct vs Plan-and-Execute |
+| `api_models_matrix.yaml` | Opt-in: compare API providers (OpenRouter, Anthropic, …) |
+| `remote_agents_matrix.yaml` | Opt-in: external server-side agents |
+
+### ExperimentConfig generation
+
+`generate_experiment_config(matrix)` expands the matrix into a flat list of
+`RunConfig` objects. Each run gets a stable ID of the form:
+
+```
+<matrix_id>__<task_id>__<agent_id>__<mcp_profile>__r<repetition>
+```
+
+```bash
+python -m benchmark.experiments.cli generate \
+  --matrix configs/matrices/smoke_matrix.yaml \
+  --output experiment.yaml
+```
+
+### Readiness checks
+
+Before any batch run the system validates the environment:
+
+```bash
+python -m benchmark.experiments.cli readiness \
+  --matrix configs/matrices/baseline_matrix.yaml \
+  --output readiness.json
+```
+
+Checks include: task IDs found, agent and MCP configs present, API key env vars
+set (warning if missing, error if `strict_readiness: true`), Blender executable
+available (for `agent_mcp` mode), and MCP socket reachable. Missing required
+items abort the run before any API call is made.
+
+### Run manifests
+
+At the start of every batch run `manifest.json` is written to `output_root/`.
+The manifest records git commit, Python version, platform, config hash (SHA-256
+of the sanitised matrix dump), environment requirements, and readiness outcome.
+Secret keys are stripped automatically. The config hash lets you verify that two
+runs used identical configurations.
+
+### Smoke matrix
+
+The smoke matrix runs without external services, API keys, or Blender:
+
+```bash
+python -m benchmark.experiments.cli run-and-report \
+  --matrix configs/matrices/smoke_matrix.yaml
+```
+
+Uses `execution_modes: [external_snapshot]` and `provider: mock`. Suitable for
+CI and local development.
+
+### Baseline, API, and remote-agent matrices
+
+**Baseline** — requires Blender + MCP + provider API keys:
+
+```bash
+python -m benchmark.experiments.cli run-and-report \
+  --matrix configs/matrices/baseline_matrix.yaml
+```
+
+**API models** (opt-in) — paid API quota consumed, run outside CI:
+
+```bash
+python -m benchmark.experiments.cli run-and-report \
+  --matrix configs/matrices/api_models_matrix.yaml
+```
+
+**Remote agents** (opt-in) — requires a configured external agent runtime:
+
+```bash
+python -m benchmark.experiments.cli run-and-report \
+  --matrix configs/matrices/remote_agents_matrix.yaml
+```
+
+### run-and-report workflow
+
+`run-and-report` executes the full pipeline in one command:
+
+1. Load and validate matrix
+2. Readiness check — abort on errors
+3. Generate `ExperimentConfig`
+4. Write `manifest.json`
+5. Run all experiments via `BatchRunner`
+6. Write `experiment_result.json`
+7. Analyse results → `experiment_analysis.json`, `metrics.csv`, `summary.*`
+8. Build `report.md` and `report.html`
+
+### Test markers
+
+| Marker | Requires |
+|---|---|
+| `api_e2e` | Live API keys (api_models_matrix) |
+| `remote_agent_e2e` | Running remote agent (remote_agents_matrix) |
+| `llm` | Live LLM API key |
+| `mcp` | Running Blender + MCP server |
+| `blender` | Blender executable |
+
+```bash
+# Default — no external services:
+pytest
+
+# Run E2E with real APIs:
+OPENROUTER_API_KEY=... pytest -m api_e2e
+```
 
 ## Stage 7: Trace Metrics and Benchmark Reporting
 

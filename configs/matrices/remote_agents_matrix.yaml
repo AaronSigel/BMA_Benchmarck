@@ -1,0 +1,33 @@
+matrix_id: remote_agents_matrix
+title: Remote agents matrix
+description: Opt-in Stage 8 matrix for external server-side agents.
+tasks:
+  ids:
+    - geometry_001_basic_primitives
+agents:
+  ids:
+    - remote_agent_codex
+    - remote_agent_claude
+    - generic_http
+    - generic_command
+  include_remote_agents: true
+mcp_profiles:
+  - minimal
+models:
+  ids:
+    - remote_agent
+execution_modes:
+  - remote_agent
+repetitions: 1
+output_root: artifacts/experiments/remote_agents_matrix
+metadata:
+  opt_in: true
+  requires_remote_agent: true
+  pytest_marker: remote_agent_e2e
+  remote_agent_providers:
+    - codex
+    - claude_code
+    - generic_http
+    - generic_command
+  api_key_policy: Remote-agent credentials must be supplied only through environment variables or the external agent runtime.
+  warning: Running this matrix requires externally configured server-side agents and must not be part of ordinary unit tests.

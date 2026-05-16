@@ -41,6 +41,25 @@ def run_config(output_dir: Path, run_id: str = "geometry_001_external") -> dict:
     }
 
 
+def write_smoke_matrix(path: Path, output_root: Path) -> None:
+    write_yaml(
+        path,
+        {
+            "matrix_id": "runner_cli_matrix",
+            "tasks": {"ids": ["geometry_001_basic_primitives"]},
+            "agents": {"ids": ["mock_agent"]},
+            "mcp_profiles": ["minimal"],
+            "execution_modes": ["external_snapshot"],
+            "repetitions": 1,
+            "output_root": str(output_root),
+            "metadata": {
+                "snapshot_path": "tests/fixtures/validation/valid_geometry_snapshot.json",
+                "artifacts_dir": "tests/fixtures/validation",
+            },
+        },
+    )
+
+
 def test_runner_cli_run_creates_run_result(
     monkeypatch,
     tmp_path: Path,
@@ -151,3 +170,68 @@ def test_runner_cli_summarize_reports_missing_result(capsys, tmp_path: Path) -> 
     assert exit_code == 1
     assert "ERROR:" in captured.out
     assert "Failed to read experiment result" in captured.out
+
+
+def test_runner_cli_matrix_runs_stage8_smoke_matrix(tmp_path: Path, capsys) -> None:
+    matrix_path = tmp_path / "matrix.yaml"
+    output_root = tmp_path / "matrix_out"
+    write_smoke_matrix(matrix_path, output_root)
+
+    exit_code = cli.main(["matrix", "--config", str(matrix_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "experiment_id: runner_cli_matrix" in captured.out
+    assert "total_runs: 1" in captured.out
+    assert (output_root / "manifest.json").is_file()
+    assert (output_root / "experiment_result.json").is_file()
+
+
+def test_runner_cli_matrix_analyze_uses_stage7_analysis(tmp_path: Path, capsys) -> None:
+    matrix_path = tmp_path / "matrix.yaml"
+    output_root = tmp_path / "matrix_out"
+    write_smoke_matrix(matrix_path, output_root)
+
+    exit_code = cli.main(["matrix", "--config", str(matrix_path), "--analyze"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "experiment_id: matrix_out" in captured.out
+    assert (output_root / "experiment_analysis.json").is_file()
+
+
+def test_runner_cli_matrix_report_builds_stage7_reports(tmp_path: Path, capsys) -> None:
+    matrix_path = tmp_path / "matrix.yaml"
+    output_root = tmp_path / "matrix_out"
+    write_smoke_matrix(matrix_path, output_root)
+
+    exit_code = cli.main(["matrix", "--config", str(matrix_path), "--report"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert f"report: {output_root / 'report.md'}" in captured.out
+    assert (output_root / "experiment_analysis.json").is_file()
+    assert (output_root / "report.md").is_file()
+    assert (output_root / "report.html").is_file()
+
+
+def test_runner_cli_matrix_readiness_error_returns_one(tmp_path: Path, capsys) -> None:
+    matrix_path = tmp_path / "bad_matrix.yaml"
+    write_yaml(
+        matrix_path,
+        {
+            "matrix_id": "bad_matrix",
+            "tasks": {"ids": ["missing_task"]},
+            "agents": {"ids": ["mock_agent"]},
+            "mcp_profiles": ["minimal"],
+            "execution_modes": ["external_snapshot"],
+            "output_root": str(tmp_path / "out"),
+        },
+    )
+
+    exit_code = cli.main(["matrix", "--config", str(matrix_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "ERROR:" in captured.out
+    assert "missing_task" in captured.out

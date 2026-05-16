@@ -51,14 +51,20 @@ expected_scene:
   cameras: []
   exports: []
 success_criteria:
+  - metric: object_existence
+    weight: 0.10
+    required: false
+  - metric: object_placement
+    weight: 0.05
+    required: false
   - metric: light_existence
-    weight: 0.4
-    required: true
-  - metric: lighting_correctness
     weight: 0.35
     required: true
+  - metric: lighting_correctness
+    weight: 0.30
+    required: true
   - metric: parameter_correctness
-    weight: 0.25
+    weight: 0.20
     required: true
 metadata:
   author: benchmark

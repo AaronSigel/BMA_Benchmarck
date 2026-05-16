@@ -49,15 +49,20 @@ expected_scene:
       location: { x: 0.0, y: 0.0, z: 8.0 }
       rotation: { x: 0.0, y: 0.0, z: 0.0 }
       focal_length: 50.0
-      target: Floor
       tolerance: 0.1
   exports: []
 success_criteria:
+  - metric: object_existence
+    weight: 0.10
+    required: false
+  - metric: object_placement
+    weight: 0.05
+    required: false
   - metric: camera_existence
-    weight: 0.35
+    weight: 0.30
     required: true
   - metric: camera_correctness
-    weight: 0.65
+    weight: 0.55
     required: true
 metadata:
   author: benchmark

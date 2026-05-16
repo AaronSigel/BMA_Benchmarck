@@ -67,10 +67,13 @@ expected_scene:
   exports: []
 success_criteria:
   - metric: object_existence
-    weight: 0.3
+    weight: 0.25
     required: true
+  - metric: object_placement
+    weight: 0.10
+    required: false
   - metric: material_accuracy
-    weight: 0.45
+    weight: 0.40
     required: true
   - metric: parameter_correctness
     weight: 0.25

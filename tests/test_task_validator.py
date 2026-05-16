@@ -79,7 +79,7 @@ def test_warns_when_object_has_dimensions_but_no_set_transform() -> None:
     assert any("set_transform" in w for w in warnings)
 
 
-def test_no_set_transform_warning_when_only_location_checked() -> None:
+def test_warns_when_object_has_location_but_no_set_transform() -> None:
     scene = ExpectedScene(
         objects=[ExpectedObject(type="MESH", location=_vec(1, 0, 0))]
     )
@@ -87,7 +87,7 @@ def test_no_set_transform_warning_when_only_location_checked() -> None:
 
     warnings = validate_task(task)
 
-    assert not any("set_transform" in w for w in warnings)
+    assert any("set_transform" in w for w in warnings)
 
 
 def test_no_set_transform_warning_when_tool_present() -> None:

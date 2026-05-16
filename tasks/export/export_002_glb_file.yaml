@@ -18,7 +18,7 @@ prompt: >
   (0.35, 0.18, 0.08, 1.0), roughness 0.65, metallic 0.0. Object named
   Lowpoly_Tree_Crown: a sphere at location (1.2, 0, 1.15) with dimensions
   (1.0, 1.0, 1.0), material named Crown_Green, base_color (0.1, 0.45, 0.16,
-  1.0), roughness 0.7, metallic 0.0. Export the scene as result.glb.
+  1.0), roughness 0.7, metallic 0.0. Export the scene as exports/result.glb.
 tags:
   - export
   - glb
@@ -97,7 +97,7 @@ expected_scene:
   cameras: []
   exports:
     - format: glb
-      filename: result.glb
+      filename: exports/result.glb
       must_exist: true
 success_criteria:
   - metric: object_existence

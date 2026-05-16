@@ -1,0 +1,44 @@
+matrix_id: final_core_matrix
+title: Final core benchmark matrix
+description: >
+  Curated 13-task set for the definitive benchmark run. Covers all five
+  categories with tasks whose prompts and expected_scene are fully consistent
+  (every validated field stated numerically in the prompt).
+tasks:
+  ids:
+    - geometry_001_basic_primitives
+    - geometry_002_positions
+    - geometry_003_dimensions
+    - geometry_005_composition
+    - materials_001_basic_colors
+    - materials_002_roughness
+    - materials_004_multiple_objects
+    - lighting_001_area_light
+    - lighting_003_three_point_lighting
+    - camera_001_front_view
+    - camera_003_composition_view
+    - export_001_blend_file
+    - export_002_glb_file
+agents:
+  ids:
+    - direct_openrouter
+    - react_openrouter
+    - plan_execute_openrouter
+mcp_profiles:
+  - minimal
+  - no_python
+  - inspection_enabled
+models:
+  ids:
+    - default
+execution_modes:
+  - agent_mcp
+repetitions: 3
+output_root: artifacts/experiments/final_core_matrix
+metadata:
+  notes:
+    - Extended task set compared to baseline_matrix: adds lighting_003, camera_003, export_002.
+    - Excludes optional/extended tasks: geometry_004_rotation, materials_003_metallic,
+      materials_005_material_composition, lighting_002_sun_light, camera_002_top_view.
+    - All tasks have prompt/expected_scene fully consistent; all validators have
+      explicit success_criteria weights (no default-weight surprises).

@@ -272,7 +272,7 @@ The conversion is: `radians = degrees × π / 180`.
 
 `allowed_tools` must cover every action required to satisfy the `expected_scene`. Rules:
 
-- `set_transform` is required if any expected object, light, or camera has a `rotation` or `dimensions` field checked.
+- `set_transform` is required if any expected object, light, or camera has a `location`, `rotation`, `scale`, or `dimensions` field checked.
 - `assign_material` is required if any expected material or object-material assignment is checked.
 - `set_material_properties` is required if any expected material has `base_color`, `roughness`, or `metallic`.
 - `create_light` is required if `expected_scene.lights` is non-empty.
@@ -314,7 +314,7 @@ Export tasks must:
 - Include `export_scene` in `allowed_tools`.
 - Include `create_light` and `set_light_properties` in `allowed_tools` if the task defines expected lights.
 - Include `set_material_properties` in `allowed_tools` if the task defines expected materials.
-- Include `set_transform` in `allowed_tools` if the task defines expected object dimensions or transforms.
+- Include `set_transform` in `allowed_tools` if the task defines expected object location, rotation, scale, or dimensions.
 - List `success_criteria` that cover all validated groups: `object_existence`, `geometry_accuracy`, `material_accuracy`, `lighting_correctness`, and `export_validity` as applicable.
 
 ## Adding a New Task

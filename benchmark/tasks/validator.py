@@ -64,12 +64,15 @@ def _validate_tool_consistency(task: BenchmarkTask) -> list[str]:
     tools = set(task.allowed_tools)
 
     objects_need_transform = any(
-        obj.rotation is not None or obj.dimensions is not None
+        obj.location is not None
+        or obj.rotation is not None
+        or obj.scale is not None
+        or obj.dimensions is not None
         for obj in scene.objects
     )
     if objects_need_transform and "set_transform" not in tools:
         warnings.append(
-            f"{task.id}: expected_scene has objects with rotation/dimensions "
+            f"{task.id}: expected_scene has objects with location/rotation/scale/dimensions "
             "but allowed_tools does not include set_transform"
         )
 

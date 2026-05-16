@@ -32,15 +32,20 @@ expected_scene:
       location: { x: 0.0, y: -6.0, z: 2.0 }
       rotation: { x: 75.0, y: 0.0, z: 0.0 }
       focal_length: 35.0
-      target: Center_Cube
       tolerance: 0.1
   exports: []
 success_criteria:
+  - metric: object_existence
+    weight: 0.10
+    required: false
+  - metric: object_placement
+    weight: 0.05
+    required: false
   - metric: camera_existence
-    weight: 0.4
+    weight: 0.35
     required: true
   - metric: camera_correctness
-    weight: 0.6
+    weight: 0.50
     required: true
 metadata:
   author: benchmark

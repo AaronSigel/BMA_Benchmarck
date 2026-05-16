@@ -17,6 +17,7 @@ tags:
   - baseline
 allowed_tools:
   - create_object
+  - set_transform
   - assign_material
   - set_material_properties
   - inspect_scene
@@ -61,13 +62,16 @@ expected_scene:
   exports: []
 success_criteria:
   - metric: object_existence
-    weight: 0.3
+    weight: 0.20
     required: true
+  - metric: object_placement
+    weight: 0.15
+    required: false
   - metric: material_accuracy
-    weight: 0.5
+    weight: 0.40
     required: true
   - metric: parameter_correctness
-    weight: 0.2
+    weight: 0.25
     required: true
 metadata:
   author: benchmark

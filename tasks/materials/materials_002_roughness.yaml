@@ -4,9 +4,12 @@ title: Roughness contrast
 category: materials
 difficulty: easy
 prompt: >
-  Create two spheres with the same base color but different roughness values.
-  The left sphere should have roughness 0.1 and the right sphere should have
-  roughness 0.9.
+  Create two spheres. Name the first sphere Smooth_Sphere, place it at location
+  (-1.5, 0, 0), and assign it a material named Smooth_Material with base_color
+  (0.8, 0.8, 0.8, 1.0), roughness 0.1, metallic 0.0. Name the second sphere
+  Rough_Sphere, place it at location (1.5, 0, 0), and assign it a material
+  named Rough_Material with base_color (0.8, 0.8, 0.8, 1.0), roughness 0.9,
+  metallic 0.0.
 tags:
   - materials
   - roughness

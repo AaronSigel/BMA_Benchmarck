@@ -4,16 +4,30 @@ title: Export low-poly scene as GLB
 category: export
 difficulty: medium
 prompt: >
-  Create a small low-poly scene from several simple objects, assign basic
-  materials, and export the result as result.glb. Use only the provided export
-  scene tool for the final file output.
+  Create the following five objects with exact locations, dimensions, and
+  materials. Object named Lowpoly_Ground: a cube at location (0, 0, -0.05)
+  with dimensions (5, 5, 0.1), material named Ground_Green, base_color
+  (0.25, 0.65, 0.25, 1.0), roughness 0.7, metallic 0.0. Object named
+  Lowpoly_House: a cube at location (-0.8, 0, 0.6) with dimensions
+  (1.2, 1.0, 1.2), material named House_Wall, base_color (0.8, 0.68, 0.5,
+  1.0), roughness 0.6, metallic 0.0. Object named Lowpoly_Roof: a cone at
+  location (-0.8, 0, 1.35) with dimensions (1.5, 1.5, 0.8), material named
+  Roof_Red, base_color (0.7, 0.12, 0.08, 1.0), roughness 0.55, metallic 0.0.
+  Object named Lowpoly_Tree_Trunk: a cylinder at location (1.2, 0, 0.45) with
+  dimensions (0.25, 0.25, 0.9), material named Trunk_Brown, base_color
+  (0.35, 0.18, 0.08, 1.0), roughness 0.65, metallic 0.0. Object named
+  Lowpoly_Tree_Crown: a sphere at location (1.2, 0, 1.15) with dimensions
+  (1.0, 1.0, 1.0), material named Crown_Green, base_color (0.1, 0.45, 0.16,
+  1.0), roughness 0.7, metallic 0.0. Export the scene as result.glb.
 tags:
   - export
   - glb
   - low-poly
 allowed_tools:
   - create_object
+  - set_transform
   - assign_material
+  - set_material_properties
   - export_scene
   - inspect_scene
 expected_scene:
@@ -87,10 +101,16 @@ expected_scene:
       must_exist: true
 success_criteria:
   - metric: object_existence
-    weight: 0.4
+    weight: 0.25
+    required: true
+  - metric: geometry_accuracy
+    weight: 0.2
+    required: true
+  - metric: material_accuracy
+    weight: 0.2
     required: true
   - metric: export_validity
-    weight: 0.6
+    weight: 0.35
     required: true
 metadata:
   author: benchmark

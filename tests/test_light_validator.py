@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from benchmark.blender.models import (
@@ -101,7 +103,7 @@ def test_light_validator_passes_matching_area_light() -> None:
                 name="Key Light",
                 type="AREA",
                 location=vector(0.0, -3.0, 4.0),
-                rotation=vector(1.0, 0.0, 0.0),
+                rotation=vector(math.degrees(1.0), 0.0, 0.0),
                 energy=500.0,
                 tolerance=0.1,
             )

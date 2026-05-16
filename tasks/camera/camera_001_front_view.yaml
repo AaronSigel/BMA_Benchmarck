@@ -4,8 +4,9 @@ title: Front view camera
 category: camera
 difficulty: easy
 prompt: >
-  Create a cube at the center of the scene and place a camera in front of it.
-  The camera should look directly at the cube and use a focal length of 35.
+  Create a cube named Center_Cube at location (0, 0, 1) with dimensions
+  (2, 2, 2). Place a camera named Front_Camera at location (0, -6, 2) with
+  rotation (75, 0, 0) degrees and focal length 35.
 tags:
   - camera
   - front-view
@@ -36,13 +37,10 @@ expected_scene:
   exports: []
 success_criteria:
   - metric: camera_existence
-    weight: 0.35
-    required: true
-  - metric: camera_correctness
     weight: 0.4
     required: true
-  - metric: target_visibility
-    weight: 0.25
+  - metric: camera_correctness
+    weight: 0.6
     required: true
 metadata:
   author: benchmark

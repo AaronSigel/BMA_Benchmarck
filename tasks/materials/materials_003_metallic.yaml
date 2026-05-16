@@ -4,8 +4,11 @@ title: Metallic parameter contrast
 category: materials
 difficulty: easy
 prompt: >
-  Create two cubes with similar neutral colors. Assign one cube a non-metallic
-  material with metallic 0.0 and the other cube a metallic material with
+  Create two cubes. Name the first cube Matte_Cube, place it at location
+  (-1.5, 0, 0), and assign it a material named Matte_Neutral with base_color
+  (0.65, 0.65, 0.65, 1.0), roughness 0.4, metallic 0.0. Name the second cube
+  Metal_Cube, place it at location (1.5, 0, 0), and assign it a material named
+  Metallic_Neutral with base_color (0.65, 0.65, 0.65, 1.0), roughness 0.25,
   metallic 1.0.
 tags:
   - materials

@@ -4,8 +4,8 @@ title: Area light above cube
 category: lighting
 difficulty: easy
 prompt: >
-  Create a cube at the origin and add an area light above and in front of it.
-  Set the light energy to 500 and place it at coordinates (0, -3, 5).
+  Create a cube at location (0, 0, 0). Add an AREA light named Key_Area_Light
+  at location (0, -3, 5) with rotation (60, 0, 0) degrees and energy 500.
 tags:
   - lighting
   - area-light

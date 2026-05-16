@@ -4,9 +4,12 @@ title: Object dimensions
 category: geometry
 difficulty: medium
 prompt: >
-  Create a 2x2x2 cube, an elongated rectangular block with dimensions 1x2x3,
-  and a cylinder with height 3. Arrange the objects so each can be inspected
-  separately.
+  Create three objects with precise names, locations, and dimensions.
+  Name the first object Large_Cube, make it a cube with dimensions (2, 2, 2),
+  and place it at location (-3, 0, 1). Name the second object Rectangular_Block,
+  make it a cube with dimensions (1, 2, 3), and place it at location (0, 0, 1.5).
+  Name the third object Tall_Cylinder, make it a cylinder with dimensions
+  (1, 1, 3), and place it at location (3, 0, 1.5).
 tags:
   - geometry
   - dimensions

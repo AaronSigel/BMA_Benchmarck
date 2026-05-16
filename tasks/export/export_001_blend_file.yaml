@@ -4,15 +4,25 @@ title: Save scene as Blender file
 category: export
 difficulty: easy
 prompt: >
-  Create a simple scene with a cube, a sphere, and one light source. Save the
-  completed scene as result.blend using the export scene tool.
+  Create the following objects and light. Object named Export_Cube: a cube at
+  location (-1.2, 0, 0.5), material named Cube_Material, base_color
+  (0.8, 0.2, 0.2, 1.0), roughness 0.5, metallic 0.0. Object named
+  Export_Sphere: a sphere at location (1.2, 0, 0.5), material named
+  Sphere_Material, base_color (0.2, 0.4, 0.9, 1.0), roughness 0.45,
+  metallic 0.0. Add an AREA light named Export_Area_Light at location
+  (0, -3, 4) with rotation (60, 0, 0) degrees and energy 400. Save the scene
+  as result.blend.
 tags:
   - export
   - blend
   - baseline
 allowed_tools:
   - create_object
+  - create_light
+  - set_transform
   - assign_material
+  - set_material_properties
+  - set_light_properties
   - export_scene
   - inspect_scene
 expected_scene:
@@ -54,10 +64,16 @@ expected_scene:
       must_exist: true
 success_criteria:
   - metric: object_existence
-    weight: 0.45
+    weight: 0.25
+    required: true
+  - metric: material_accuracy
+    weight: 0.2
+    required: true
+  - metric: lighting_correctness
+    weight: 0.2
     required: true
   - metric: export_validity
-    weight: 0.55
+    weight: 0.35
     required: true
 metadata:
   author: benchmark

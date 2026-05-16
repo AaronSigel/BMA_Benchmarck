@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from benchmark.blender.models import (
@@ -99,7 +101,7 @@ def test_camera_validator_passes_matching_active_camera() -> None:
             ExpectedCamera(
                 name="Render Camera",
                 location=vector(0.0, -5.0, 3.0),
-                rotation=vector(1.0, 0.0, 0.0),
+                rotation=vector(math.degrees(1.0), 0.0, 0.0),
                 focal_length=50.0,
                 tolerance=0.1,
             )

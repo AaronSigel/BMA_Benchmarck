@@ -4,9 +4,18 @@ title: Simple table composition
 category: geometry
 difficulty: medium
 prompt: >
-  Build a simple scene containing a floor, a table, and three small objects on
-  top of the table. Focus on the presence and basic placement of the objects,
-  not on visual styling or rendering quality.
+  Build a scene with the following nine named objects and exact locations and
+  dimensions. Floor: a cube at location (0, 0, -0.05) with dimensions
+  (8, 8, 0.1). Table_Top: a cube at location (0, 0, 1.0) with dimensions
+  (4, 2, 0.2). Table_Leg_1: a cube at location (-1.7, -0.7, 0.45) with
+  dimensions (0.2, 0.2, 0.9). Table_Leg_2: a cube at location (1.7, -0.7,
+  0.45) with dimensions (0.2, 0.2, 0.9). Table_Leg_3: a cube at location
+  (-1.7, 0.7, 0.45) with dimensions (0.2, 0.2, 0.9). Table_Leg_4: a cube at
+  location (1.7, 0.7, 0.45) with dimensions (0.2, 0.2, 0.9). Object_Cube: a
+  cube at location (-1.0, 0, 1.35) with dimensions (0.5, 0.5, 0.5).
+  Object_Sphere: a sphere at location (0, 0, 1.35) with dimensions
+  (0.5, 0.5, 0.5). Object_Cylinder: a cylinder at location (1.0, 0, 1.35)
+  with dimensions (0.4, 0.4, 0.6).
 tags:
   - geometry
   - composition

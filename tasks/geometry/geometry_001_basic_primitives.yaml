@@ -4,9 +4,11 @@ title: Basic primitives
 category: geometry
 difficulty: easy
 prompt: >
-  Create three basic mesh primitives: a cube at the origin, a UV sphere to the
-  right, and a cylinder to the left. Use simple default materials and keep the
-  scene focused on object creation and placement.
+  Create three basic mesh primitives with the following names and positions.
+  Name the first object Cube, make it a cube, place it at location (0, 0, 0)
+  with dimensions (2, 2, 2). Name the second object Sphere, make it a UV sphere,
+  and place it at location (3, 0, 0). Name the third object Cylinder, make it a
+  cylinder, and place it at location (-3, 0, 0).
 tags:
   - geometry
   - primitives

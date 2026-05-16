@@ -4,9 +4,11 @@ title: Rotated primitives
 category: geometry
 difficulty: medium
 prompt: >
-  Create a cube rotated 45 degrees around the Z axis and a cylinder rotated
-  90 degrees around the X axis. Place the objects apart so their rotations can
-  be inspected without overlap.
+  Create a cube named Rotated_Cube at location (-1.5, 0, 0) with dimensions
+  (1.5, 1.5, 1.5) and rotate it 45 degrees around the Z axis (rotation
+  x=0, y=0, z=45 degrees). Create a cylinder named Rotated_Cylinder at
+  location (1.5, 0, 0) with dimensions (1, 1, 2) and rotate it 90 degrees
+  around the X axis (rotation x=90, y=0, z=0 degrees).
 tags:
   - geometry
   - rotation

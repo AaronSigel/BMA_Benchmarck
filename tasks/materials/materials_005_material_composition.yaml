@@ -4,15 +4,22 @@ title: Material composition scene
 category: materials
 difficulty: medium
 prompt: >
-  Create a simple composition with a floor, a table, and one object on the
-  table. Use a wood-like material for the table, a neutral gray material for
-  the floor, and a metallic material for the object.
+  Create three objects with the following exact specifications. Object named
+  Gray_Floor: a cube at location (0, 0, -0.05) with dimensions (6, 6, 0.1),
+  material named Gray_Floor_Material, base_color (0.45, 0.45, 0.45, 1.0),
+  roughness 0.7, metallic 0.0. Object named Wood_Table: a cube at location
+  (0, 0, 0.8) with dimensions (3, 1.5, 0.2), material named Wood_Material,
+  base_color (0.55, 0.32, 0.12, 1.0), roughness 0.55, metallic 0.0. Object
+  named Metal_Object: a sphere at location (0, 0, 1.15) with dimensions
+  (0.5, 0.5, 0.5), material named Polished_Metal, base_color
+  (0.75, 0.72, 0.68, 1.0), roughness 0.18, metallic 1.0.
 tags:
   - materials
   - composition
   - scene
 allowed_tools:
   - create_object
+  - set_transform
   - assign_material
   - set_material_properties
   - inspect_scene

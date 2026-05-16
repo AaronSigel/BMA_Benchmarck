@@ -4,8 +4,13 @@ title: Basic RGB materials
 category: materials
 difficulty: easy
 prompt: >
-  Create three simple objects and assign them red, green, and blue materials.
-  Keep the geometry simple so the material colors can be inspected directly.
+  Create three objects with the following specifications. Object named Red_Cube:
+  a cube at location (-2, 0, 0), assign material named Red with base_color
+  (1.0, 0.0, 0.0, 1.0), roughness 0.5, metallic 0.0. Object named
+  Green_Sphere: a sphere at location (0, 0, 0), assign material named Green
+  with base_color (0.0, 1.0, 0.0, 1.0), roughness 0.5, metallic 0.0. Object
+  named Blue_Cylinder: a cylinder at location (2, 0, 0), assign material named
+  Blue with base_color (0.0, 0.0, 1.0, 1.0), roughness 0.5, metallic 0.0.
 tags:
   - materials
   - colors

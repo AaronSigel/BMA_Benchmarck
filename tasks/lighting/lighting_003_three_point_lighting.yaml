@@ -4,9 +4,12 @@ title: Three point lighting setup
 category: lighting
 difficulty: medium
 prompt: >
-  Create an object at the center of the scene and set up a three point lighting
-  arrangement with a key light, a fill light, and a back light. The task checks
-  the existence and approximate placement of the three light sources.
+  Create a sphere named Center_Object at location (0, 0, 1) with dimensions
+  (1.5, 1.5, 1.5). Set up three lights: an AREA light named Key_Light at
+  location (-3, -4, 5) with rotation (60, 0, -35) degrees and energy 700;
+  an AREA light named Fill_Light at location (4, -3, 3) with rotation
+  (55, 0, 45) degrees and energy 250; a SPOT light named Back_Light at
+  location (0, 4, 4) with rotation (55, 0, 180) degrees and energy 450.
 tags:
   - lighting
   - three-point

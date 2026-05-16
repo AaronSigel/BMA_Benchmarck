@@ -4,9 +4,12 @@ title: Angled composition camera
 category: camera
 difficulty: medium
 prompt: >
-  Create a simple scene with three objects arranged across the frame. Place a
-  camera at an angle so all three objects are visible together in a composed
-  view.
+  Create three objects: a cube named Left_Cube at location (-2, 0, 0.75) with
+  dimensions (1.5, 1.5, 1.5); a sphere named Center_Sphere at location
+  (0, 0, 0.75) with dimensions (1.5, 1.5, 1.5); a cylinder named
+  Right_Cylinder at location (2, 0, 0.75) with dimensions (1.2, 1.2, 1.5).
+  Place a camera named Composition_Camera at location (4, -6, 3) with rotation
+  (63, 0, 34) degrees and focal length 35.
 tags:
   - camera
   - composition-view
@@ -49,13 +52,10 @@ expected_scene:
   exports: []
 success_criteria:
   - metric: camera_existence
-    weight: 0.3
+    weight: 0.35
     required: true
   - metric: camera_correctness
-    weight: 0.35
-    required: true
-  - metric: target_visibility
-    weight: 0.35
+    weight: 0.65
     required: true
 metadata:
   author: benchmark

@@ -1,7 +1,13 @@
 """Validation of expected lights."""
 
-from benchmark.blender.models import LightSnapshot, SceneSnapshot
-from benchmark.tasks.models import BenchmarkTask, ExpectedLight
+import math
+
+from benchmark.blender.models import LightSnapshot, SceneSnapshot, Vector3 as BlenderVector3
+from benchmark.tasks.models import BenchmarkTask, ExpectedLight, Vector3
+
+
+def _deg_to_rad_v3(v: Vector3) -> BlenderVector3:
+    return BlenderVector3(x=math.radians(v.x), y=math.radians(v.y), z=math.radians(v.z))
 from benchmark.validation.matcher import SceneMatcher
 from benchmark.validation.models import (
     MetricScore,
@@ -96,7 +102,9 @@ class LightValidator:
             scores.append(vector_tolerance_score(expected.location, actual.location, expected.tolerance))
         if expected.rotation is not None:
             scores.append(
-                vector_tolerance_score(expected.rotation, actual.rotation_euler, expected.tolerance)
+                vector_tolerance_score(
+                    _deg_to_rad_v3(expected.rotation), actual.rotation_euler, expected.tolerance
+                )
             )
         return sum(scores) / len(scores) if scores else 1.0
 
@@ -124,13 +132,15 @@ class LightValidator:
                 )
 
         if expected.rotation is not None:
-            score = vector_tolerance_score(expected.rotation, actual.rotation_euler, expected.tolerance)
+            score = vector_tolerance_score(
+                _deg_to_rad_v3(expected.rotation), actual.rotation_euler, expected.tolerance
+            )
             if score < 1.0:
                 issues.append(
                     self._vector_mismatch_issue(
                         code="light_rotation_mismatch",
                         field="rotation",
-                        expected_value=expected.rotation,
+                        expected_value=_deg_to_rad_v3(expected.rotation),
                         actual_value=actual.rotation_euler,
                         tolerance=expected.tolerance,
                         expected_path=expected_path,

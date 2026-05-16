@@ -1,9 +1,15 @@
 """Validation of expected object transforms."""
 
+import math
 from typing import Literal
 
-from benchmark.blender.models import ObjectSnapshot, SceneSnapshot
+from benchmark.blender.models import ObjectSnapshot, SceneSnapshot, Vector3 as BlenderVector3
 from benchmark.tasks.models import BenchmarkTask, ExpectedObject, Vector3
+
+
+def _deg_to_rad_v3(v: Vector3) -> BlenderVector3:
+    """Convert a Vector3 in degrees to a BlenderVector3 in radians."""
+    return BlenderVector3(x=math.radians(v.x), y=math.radians(v.y), z=math.radians(v.z))
 from benchmark.validation.matcher import SceneMatcher
 from benchmark.validation.models import (
     MetricScore,
@@ -108,6 +114,8 @@ class TransformValidator:
     ) -> float:
         expected_value = self._expected_value(expected, field)
         actual_value = self._actual_value(actual, field)
+        if field == "rotation":
+            expected_value = _deg_to_rad_v3(expected_value)
         return vector_tolerance_score(expected_value, actual_value, expected.tolerance)
 
     def _expected_value(self, expected: ExpectedObject, field: TransformField) -> Vector3:
@@ -143,12 +151,17 @@ class TransformValidator:
         expected_value = self._expected_value(expected, field)
         actual_value = self._actual_value(actual, field)
         actual_field = "rotation_euler" if field == "rotation" else field
+        expected_display = (
+            _deg_to_rad_v3(expected_value).model_dump(mode="json")
+            if field == "rotation"
+            else expected_value.model_dump(mode="json")
+        )
         return ValidationIssue(
             code=f"{field}_mismatch",
             message=f"Expected {field} within tolerance {expected.tolerance}, got a different value.",
             severity=ValidationSeverity.ERROR,
             expected_path=f"{expected_path}.{field}",
             actual_path=f"{actual_path}.{actual_field}",
-            expected_value=expected_value.model_dump(mode="json"),
+            expected_value=expected_display,
             actual_value=actual_value.model_dump(mode="json"),
         )

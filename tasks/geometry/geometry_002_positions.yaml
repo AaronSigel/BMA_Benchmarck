@@ -4,9 +4,10 @@ title: Three cubes at fixed positions
 category: geometry
 difficulty: easy
 prompt: >
-  Create three identical cubes aligned on the X axis. Place them at (-2, 0, 0),
-  (0, 0, 0), and (2, 0, 0). Use clear object names so the placement can be
-  inspected deterministically.
+  Create three cubes, each with dimensions (1, 1, 1), aligned on the X axis.
+  Name the first cube Cube_Left and place it at location (-2, 0, 0). Name the
+  second cube Cube_Center and place it at location (0, 0, 0). Name the third
+  cube Cube_Right and place it at location (2, 0, 0).
 tags:
   - geometry
   - positions

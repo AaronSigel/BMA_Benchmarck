@@ -4,9 +4,11 @@ title: Top-down camera view
 category: camera
 difficulty: easy
 prompt: >
-  Create a floor plane and three objects on it. Place the camera above the
-  scene looking straight down, with focal length 50, so the objects are visible
-  in a top-down layout.
+  Create a plane named Floor at location (0, 0, 0) with dimensions (6, 6, 0).
+  Create a cube named Object_Left at location (-1.5, 0, 0.5), a sphere named
+  Object_Center at location (0, 0, 0.5), and a cylinder named Object_Right at
+  location (1.5, 0, 0.5). Place a camera named Top_Camera at location
+  (0, 0, 8) with rotation (0, 0, 0) degrees and focal length 50.
 tags:
   - camera
   - top-view
@@ -52,13 +54,10 @@ expected_scene:
   exports: []
 success_criteria:
   - metric: camera_existence
-    weight: 0.3
+    weight: 0.35
     required: true
   - metric: camera_correctness
-    weight: 0.45
-    required: true
-  - metric: target_visibility
-    weight: 0.25
+    weight: 0.65
     required: true
 metadata:
   author: benchmark

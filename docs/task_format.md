@@ -244,6 +244,79 @@ metadata:
   description: Baseline geometry task for primitive creation.
 ```
 
+## Prompt and expected_scene Consistency
+
+Every field that is verified in `expected_scene` must be explicitly stated in `prompt`. This is the primary contract rule:
+
+- If `expected_scene` checks `location`, `rotation`, `scale`, or `dimensions` for an object, the prompt must give the exact numeric values.
+- If `expected_scene` checks `base_color`, `roughness`, or `metallic` for a material, the prompt must include those exact values.
+- If `expected_scene` checks `energy`, `location`, or `rotation` for a light, the prompt must state those values.
+- If `expected_scene` checks `location`, `rotation`, or `focal_length` for a camera, the prompt must state those values.
+- If `expected_scene` requires an exported file, the prompt must name the file explicitly (e.g. `result.glb`).
+
+Do not use subjective descriptions such as "wood-like", "nice lighting", or "good camera angle" as the sole specification for a field that is later validated numerically.
+
+## Rotation Units
+
+All `rotation` values in `expected_scene` are specified in **degrees** (human-readable). Validators convert expected degrees to Blender radians internally before comparing with `rotation_euler` from the scene snapshot.
+
+When writing a task:
+
+- Use degrees in `expected_scene.*.rotation` and in the `prompt`.
+- Example: `rotation: { x: 90.0, y: 0.0, z: 45.0 }` means 90° around X and 45° around Z.
+- Do **not** write radians in YAML task files.
+
+The conversion is: `radians = degrees × π / 180`.
+
+## Allowed Tools Consistency
+
+`allowed_tools` must cover every action required to satisfy the `expected_scene`. Rules:
+
+- `set_transform` is required if any expected object, light, or camera has a `rotation` or `dimensions` field checked.
+- `assign_material` is required if any expected material or object-material assignment is checked.
+- `set_material_properties` is required if any expected material has `base_color`, `roughness`, or `metallic`.
+- `create_light` is required if `expected_scene.lights` is non-empty.
+- `set_light_properties` is required if any expected light has an `energy` field.
+- `create_camera` or `set_camera` is required if `expected_scene.cameras` is non-empty.
+- `export_scene` is required if `expected_scene.exports` is non-empty.
+
+The task validator (`benchmark/tasks/validator.py`) reports warnings for any missing tools.
+
+## Material Parameters
+
+All material parameter values use a 0..1 range:
+
+- `base_color`: RGBA where each channel is 0..1. Example: pure red is `{ r: 1.0, g: 0.0, b: 0.0, a: 1.0 }`.
+- `roughness`: 0.0 (perfectly smooth / mirror) to 1.0 (fully rough / matte).
+- `metallic`: 0.0 (dielectric / non-metal) to 1.0 (fully metallic).
+
+Always include all three parameters in the `prompt` when `expected_scene.materials` checks them.
+
+## Camera Tasks
+
+Two modes are supported:
+
+**Exact-transform mode** (preferred for benchmark tasks):
+- The `prompt` specifies `location`, `rotation` (degrees), and `focal_length` for the camera.
+- The validator checks the camera's numeric transform.
+- Use this mode for all core benchmark camera tasks.
+
+**Target-based mode** (not yet implemented in validators):
+- The `prompt` refers to a target object the camera should face.
+- View-frustum checking is not currently implemented.
+- Do not add `target_visibility` to `success_criteria` unless the validator actually tests frustum visibility.
+
+## Export Tasks
+
+Export tasks must:
+
+- Name the output file explicitly in both `prompt` and `expected_scene.exports[*].filename` (e.g. `result.blend`, `result.glb`).
+- Include `export_scene` in `allowed_tools`.
+- Include `create_light` and `set_light_properties` in `allowed_tools` if the task defines expected lights.
+- Include `set_material_properties` in `allowed_tools` if the task defines expected materials.
+- Include `set_transform` in `allowed_tools` if the task defines expected object dimensions or transforms.
+- List `success_criteria` that cover all validated groups: `object_existence`, `geometry_accuracy`, `material_accuracy`, `lighting_correctness`, and `export_validity` as applicable.
+
 ## Adding a New Task
 
 1. Choose the category directory under `tasks/`: `geometry`, `materials`, `lighting`, `camera`, or `export`.

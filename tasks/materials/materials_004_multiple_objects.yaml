@@ -4,9 +4,15 @@ title: Multiple object material mapping
 category: materials
 difficulty: medium
 prompt: >
-  Create four objects with distinct materials and keep their object-to-material
-  mapping unambiguous. The expected result is checked by material assignment,
-  color, and numeric material properties.
+  Create four objects with the following exact specifications. Object named
+  Yellow_Cube: a cube at location (-3, 0, 0), material named Yellow,
+  base_color (1.0, 0.9, 0.0, 1.0), roughness 0.55, metallic 0.0. Object named
+  Cyan_Sphere: a sphere at location (-1, 0, 0), material named Cyan,
+  base_color (0.0, 0.8, 1.0, 1.0), roughness 0.35, metallic 0.0. Object named
+  Magenta_Cylinder: a cylinder at location (1, 0, 0), material named Magenta,
+  base_color (1.0, 0.0, 0.8, 1.0), roughness 0.45, metallic 0.0. Object named
+  Dark_Cone: a cone at location (3, 0, 0), material named Dark_Gloss,
+  base_color (0.05, 0.05, 0.05, 1.0), roughness 0.15, metallic 0.0.
 tags:
   - materials
   - mapping

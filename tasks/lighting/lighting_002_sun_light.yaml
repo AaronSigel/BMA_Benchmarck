@@ -4,9 +4,10 @@ title: Sun light direction
 category: lighting
 difficulty: easy
 prompt: >
-  Create a simple scene with a floor plane and a cube. Add a sun light and set
-  its direction through rotation so it illuminates the cube from above and from
-  the side.
+  Create a plane named Floor at location (0, 0, 0) with dimensions (6, 6, 0)
+  and a cube named Cube at location (0, 0, 1) with dimensions (1.5, 1.5, 1.5).
+  Add a SUN light named Sun_Light at location (0, 0, 5) with rotation
+  (45, 0, 35) degrees and energy 3.0.
 tags:
   - lighting
   - sun-light

@@ -108,16 +108,22 @@ def test_category_content_checks_accept_matching_scene_content() -> None:
             task_id="lighting_001",
             category=TaskCategory.LIGHTING,
             expected_scene=ExpectedScene(lights=[ExpectedLight(type="AREA")]),
+            allowed_tools=["create_object", "create_light", "set_transform", "set_light_properties", "inspect_scene"],
+            success_criteria=[SuccessCriterion(metric="light_existence", weight=1.0)],
         ),
         make_task(
             task_id="camera_001",
             category=TaskCategory.CAMERA,
             expected_scene=ExpectedScene(cameras=[ExpectedCamera(name="Camera")]),
+            allowed_tools=["create_object", "create_camera", "set_camera", "set_transform", "inspect_scene"],
+            success_criteria=[SuccessCriterion(metric="camera_existence", weight=1.0)],
         ),
         make_task(
             task_id="materials_001",
             category=TaskCategory.MATERIALS,
             expected_scene=ExpectedScene(objects=[ExpectedObject(type="mesh", material="Red")]),
+            allowed_tools=["create_object", "assign_material", "inspect_scene"],
+            success_criteria=[SuccessCriterion(metric="material_accuracy", weight=1.0)],
         ),
     ]
 

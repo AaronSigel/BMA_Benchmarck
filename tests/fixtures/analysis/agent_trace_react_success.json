@@ -1,0 +1,125 @@
+{
+  "run_id": "run_react_001",
+  "task_id": "materials_set_roughness_medium",
+  "agent_id": "react_agent_v1",
+  "strategy": "react",
+  "model": "claude-3-5-sonnet-20241022",
+  "steps": [
+    {
+      "step_index": 0,
+      "step_type": "llm_call",
+      "thought": "I need to get the scene objects first to find the target.",
+      "action": null,
+      "tool_name": null,
+      "tool_arguments": {},
+      "observation": null,
+      "error": null,
+      "raw_llm_response": {
+        "usage": {
+          "prompt_tokens": 200,
+          "completion_tokens": 60,
+          "total_tokens": 260
+        }
+      },
+      "started_at": "2026-05-16T10:01:00Z",
+      "finished_at": "2026-05-16T10:01:01.2Z",
+      "duration_sec": 1.2,
+      "metadata": {}
+    },
+    {
+      "step_index": 1,
+      "step_type": "tool_call",
+      "thought": null,
+      "action": "get_scene_objects",
+      "tool_name": "get_scene_objects",
+      "tool_arguments": {},
+      "observation": "{\"objects\": [{\"name\": \"Sphere\", \"type\": \"MESH\"}]}",
+      "error": null,
+      "raw_llm_response": null,
+      "started_at": "2026-05-16T10:01:01Z",
+      "finished_at": "2026-05-16T10:01:01.8Z",
+      "duration_sec": 0.8,
+      "metadata": {}
+    },
+    {
+      "step_index": 2,
+      "step_type": "observation",
+      "thought": "Found Sphere. Now set material roughness.",
+      "action": null,
+      "tool_name": null,
+      "tool_arguments": {},
+      "observation": "Scene has one mesh: Sphere",
+      "error": null,
+      "raw_llm_response": null,
+      "started_at": "2026-05-16T10:01:02Z",
+      "finished_at": "2026-05-16T10:01:02Z",
+      "duration_sec": 0.0,
+      "metadata": {}
+    },
+    {
+      "step_index": 3,
+      "step_type": "llm_call",
+      "thought": "Set roughness on Sphere material.",
+      "action": null,
+      "tool_name": null,
+      "tool_arguments": {},
+      "observation": null,
+      "error": null,
+      "raw_llm_response": {
+        "usage": {
+          "prompt_tokens": 280,
+          "completion_tokens": 50,
+          "total_tokens": 330
+        }
+      },
+      "started_at": "2026-05-16T10:01:02Z",
+      "finished_at": "2026-05-16T10:01:03Z",
+      "duration_sec": 1.0,
+      "metadata": {}
+    },
+    {
+      "step_index": 4,
+      "step_type": "tool_call",
+      "thought": null,
+      "action": "set_material_property",
+      "tool_name": "set_material_property",
+      "tool_arguments": {
+        "object_name": "Sphere",
+        "property": "roughness",
+        "value": 0.3
+      },
+      "observation": "{\"status\": \"ok\"}",
+      "error": null,
+      "raw_llm_response": null,
+      "started_at": "2026-05-16T10:01:03Z",
+      "finished_at": "2026-05-16T10:01:03.4Z",
+      "duration_sec": 0.4,
+      "metadata": {}
+    },
+    {
+      "step_index": 5,
+      "step_type": "final",
+      "thought": "Material roughness set to 0.3.",
+      "action": null,
+      "tool_name": null,
+      "tool_arguments": {},
+      "observation": null,
+      "error": null,
+      "raw_llm_response": null,
+      "started_at": "2026-05-16T10:01:04Z",
+      "finished_at": "2026-05-16T10:01:04Z",
+      "duration_sec": 0.0,
+      "metadata": {}
+    }
+  ],
+  "final_message": "Set Sphere material roughness to 0.3.",
+  "success": true,
+  "error": null,
+  "started_at": "2026-05-16T10:01:00Z",
+  "finished_at": "2026-05-16T10:01:04Z",
+  "duration_sec": 4.0,
+  "metadata": {
+    "mcp_profile": "inspection_enabled",
+    "retry_count": 0
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "run_id": "run_direct_001",
+  "task_id": "geometry_add_cube_easy",
+  "status": "passed",
+  "execution_mode": "agent_mcp",
+  "validation_result_path": null,
+  "scene_snapshot_path": null,
+  "artifacts_dir": "/tmp/artifacts/run_direct_001",
+  "total_score": 1.0,
+  "overall_status": "passed",
+  "started_at": "2026-05-16T10:00:00Z",
+  "finished_at": "2026-05-16T10:00:02Z",
+  "duration_sec": 2.0,
+  "error": null,
+  "summary": {
+    "strategy": "direct_tool_calling",
+    "agent_id": "direct_agent_v1",
+    "model": "claude-3-5-sonnet-20241022",
+    "mcp_profile": "minimal",
+    "tool_call_count": 1,
+    "llm_call_count": 1
+  }
+}

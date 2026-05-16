@@ -1,0 +1,109 @@
+{
+  "run_id": "run_plan_001",
+  "task_id": "export_gltf_medium",
+  "agent_id": "plan_agent_v1",
+  "strategy": "plan_and_execute",
+  "model": "claude-3-5-sonnet-20241022",
+  "steps": [
+    {
+      "step_index": 0,
+      "step_type": "plan",
+      "thought": "Plan: 1) Check scene has objects. 2) Export to GLTF.",
+      "action": null,
+      "tool_name": null,
+      "tool_arguments": {},
+      "observation": null,
+      "error": null,
+      "raw_llm_response": {
+        "usage": {
+          "prompt_tokens": 300,
+          "completion_tokens": 90,
+          "total_tokens": 390
+        }
+      },
+      "started_at": "2026-05-16T10:03:00Z",
+      "finished_at": "2026-05-16T10:03:01.5Z",
+      "duration_sec": 1.5,
+      "metadata": {}
+    },
+    {
+      "step_index": 1,
+      "step_type": "tool_call",
+      "thought": null,
+      "action": "get_scene_objects",
+      "tool_name": "get_scene_objects",
+      "tool_arguments": {},
+      "observation": "{\"objects\": [{\"name\": \"Cube\", \"type\": \"MESH\"}, {\"name\": \"Camera\", \"type\": \"CAMERA\"}]}",
+      "error": null,
+      "raw_llm_response": null,
+      "started_at": "2026-05-16T10:03:02Z",
+      "finished_at": "2026-05-16T10:03:02.3Z",
+      "duration_sec": 0.3,
+      "metadata": {}
+    },
+    {
+      "step_index": 2,
+      "step_type": "llm_call",
+      "thought": "Scene is ready. Execute export step.",
+      "action": null,
+      "tool_name": null,
+      "tool_arguments": {},
+      "observation": null,
+      "error": null,
+      "raw_llm_response": {
+        "usage": {
+          "prompt_tokens": 350,
+          "completion_tokens": 70,
+          "total_tokens": 420
+        }
+      },
+      "started_at": "2026-05-16T10:03:03Z",
+      "finished_at": "2026-05-16T10:03:04Z",
+      "duration_sec": 1.0,
+      "metadata": {}
+    },
+    {
+      "step_index": 3,
+      "step_type": "tool_call",
+      "thought": null,
+      "action": "export_scene",
+      "tool_name": "export_scene",
+      "tool_arguments": {
+        "format": "GLTF",
+        "filepath": "/tmp/output.glb"
+      },
+      "observation": "{\"status\": \"ok\", \"path\": \"/tmp/output.glb\", \"size_bytes\": 4096}",
+      "error": null,
+      "raw_llm_response": null,
+      "started_at": "2026-05-16T10:03:04Z",
+      "finished_at": "2026-05-16T10:03:04.9Z",
+      "duration_sec": 0.9,
+      "metadata": {}
+    },
+    {
+      "step_index": 4,
+      "step_type": "final",
+      "thought": "Export completed successfully.",
+      "action": null,
+      "tool_name": null,
+      "tool_arguments": {},
+      "observation": null,
+      "error": null,
+      "raw_llm_response": null,
+      "started_at": "2026-05-16T10:03:05Z",
+      "finished_at": "2026-05-16T10:03:05Z",
+      "duration_sec": 0.0,
+      "metadata": {}
+    }
+  ],
+  "final_message": "Exported scene to /tmp/output.glb (GLTF format).",
+  "success": true,
+  "error": null,
+  "started_at": "2026-05-16T10:03:00Z",
+  "finished_at": "2026-05-16T10:03:05Z",
+  "duration_sec": 5.0,
+  "metadata": {
+    "mcp_profile": "full",
+    "retry_count": 0
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "task_id": "geometry_add_cube_easy",
+  "overall_status": "passed",
+  "total_score": 1.0,
+  "validators": [
+    {
+      "name": "object_validator",
+      "status": "passed",
+      "score": 1.0,
+      "max_score": 1.0,
+      "issues": [],
+      "metrics": []
+    },
+    {
+      "name": "transform_validator",
+      "status": "passed",
+      "score": 1.0,
+      "max_score": 1.0,
+      "issues": [],
+      "metrics": []
+    }
+  ],
+  "issues": [],
+  "summary": {
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "total_score": 1.0
+  }
+}

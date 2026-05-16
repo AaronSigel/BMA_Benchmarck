@@ -1,0 +1,58 @@
+{
+  "task_id": "materials_set_roughness_medium",
+  "overall_status": "warning",
+  "total_score": 0.6,
+  "validators": [
+    {
+      "name": "object_validator",
+      "status": "passed",
+      "score": 1.0,
+      "max_score": 1.0,
+      "issues": [],
+      "metrics": []
+    },
+    {
+      "name": "material_validator",
+      "status": "failed",
+      "score": 0.2,
+      "max_score": 1.0,
+      "issues": [
+        {
+          "code": "material_roughness_mismatch",
+          "message": "Sphere material roughness expected 0.3 but got 0.7",
+          "severity": "error",
+          "expected_path": "objects.Sphere.material.roughness",
+          "actual_path": "objects.Sphere.material.roughness",
+          "expected_value": 0.3,
+          "actual_value": 0.7
+        }
+      ],
+      "metrics": []
+    },
+    {
+      "name": "transform_validator",
+      "status": "skipped",
+      "score": 0.0,
+      "max_score": 1.0,
+      "issues": [],
+      "metrics": []
+    }
+  ],
+  "issues": [
+    {
+      "code": "material_roughness_mismatch",
+      "message": "Sphere material roughness expected 0.3 but got 0.7",
+      "severity": "error",
+      "expected_path": "objects.Sphere.material.roughness",
+      "actual_path": "objects.Sphere.material.roughness",
+      "expected_value": 0.3,
+      "actual_value": 0.7
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 1,
+    "skipped": 1,
+    "total_score": 0.6
+  }
+}

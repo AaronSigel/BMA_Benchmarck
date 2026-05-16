@@ -1,0 +1,24 @@
+{
+  "run_id": "run_error_001",
+  "task_id": "lighting_add_point_hard",
+  "status": "error",
+  "execution_mode": "agent_mcp",
+  "validation_result_path": null,
+  "scene_snapshot_path": null,
+  "artifacts_dir": "/tmp/artifacts/run_error_001",
+  "total_score": null,
+  "overall_status": null,
+  "started_at": "2026-05-16T10:02:00Z",
+  "finished_at": "2026-05-16T10:02:10Z",
+  "duration_sec": 10.0,
+  "error": "AgentStepLimitError: max_steps reached after 10 steps",
+  "summary": {
+    "strategy": "react",
+    "agent_id": "react_agent_v1",
+    "model": "claude-3-5-sonnet-20241022",
+    "mcp_profile": "minimal",
+    "tool_call_count": 8,
+    "llm_call_count": 5,
+    "error_type": "step_limit"
+  }
+}

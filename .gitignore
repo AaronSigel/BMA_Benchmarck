@@ -2,6 +2,7 @@ venv/
 artifacts/
 artifacts-data/
 blender_agent_benchmark.egg-info
+blender-mcp-bma/
 __pycache__/
 *.pyc
 *.pyo

@@ -8,7 +8,8 @@ from benchmark.runner.batch_runner import BatchRunner
 from benchmark.runner.config_loader import load_experiment_config, load_run_config
 from benchmark.runner.errors import RunnerConfigError
 from benchmark.runner.experiment_runner import ExperimentRunner
-from benchmark.runner.models import ExperimentResult, RunResult, RunStatus
+from benchmark.runner.models import ExperimentConfig, ExperimentResult, RunResult, RunStatus
+from benchmark.runner.paths import RunArtifactLayout
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -18,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         return _run(args.config)
     if args.command == "experiment":
-        return _experiment(args.config)
+        return _experiment(args)
     if args.command == "summarize":
         return _summarize(args.results)
 
@@ -38,6 +39,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run all runs from an experiment config.",
     )
     experiment_parser.add_argument("--config", type=Path, required=True)
+    experiment_parser.add_argument(
+        "--analyze",
+        action="store_true",
+        help="Run analysis layer after batch run; writes experiment_analysis.json.",
+    )
+    experiment_parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Build Markdown and HTML summary report (implies --analyze).",
+    )
 
     summarize_parser = subparsers.add_parser(
         "summarize",
@@ -46,6 +57,53 @@ def _build_parser() -> argparse.ArgumentParser:
     summarize_parser.add_argument("--results", type=Path, required=True)
 
     return parser
+
+
+def _experiment_output_dir(config: ExperimentConfig) -> Path:
+    """Derive the experiment-level output directory from run configs."""
+    if not config.runs:
+        return Path("artifacts") / "experiments"
+    roots = {
+        RunArtifactLayout.from_run_output_dir(run.output_dir, run.run_id).root
+        for run in config.runs
+    }
+    return roots.pop() if len(roots) == 1 else RunArtifactLayout.from_run_output_dir(
+        config.runs[0].output_dir, config.runs[0].run_id
+    ).root
+
+
+def _run_post_analysis(output_dir: Path, experiment_id: str, build_report: bool) -> None:
+    """Run analysis layer and optionally build Markdown/HTML reports."""
+    from benchmark.analysis.comparison import analyze_experiment
+    from benchmark.analysis.export import write_experiment_analysis_json
+    from benchmark.analysis.models import ReportConfig
+    from benchmark.analysis.report_builder import build_html_report, build_markdown_report
+
+    print("Running post-experiment analysis…")
+    analysis = analyze_experiment(output_dir)
+    out_json = output_dir / "experiment_analysis.json"
+    write_experiment_analysis_json(analysis, out_json)
+    print(f"  experiment_analysis.json → {out_json}")
+    print(
+        f"  runs={analysis.summary.total_runs}"
+        f"  passed={analysis.summary.successful_runs}"
+        f"  avg_score={analysis.summary.average_scene_score}"
+    )
+
+    if build_report:
+        config = ReportConfig(
+            title=f"Experiment: {experiment_id}",
+            input_dir=output_dir,
+            output_dir=output_dir,
+            formats=["markdown", "html"],
+        )
+        md_path = output_dir / "report.md"
+        md_path.write_text(build_markdown_report(analysis, config), encoding="utf-8")
+        print(f"  report.md        → {md_path}")
+
+        html_path = output_dir / "report.html"
+        html_path.write_text(build_html_report(analysis, config), encoding="utf-8")
+        print(f"  report.html      → {html_path}")
 
 
 def _run(config_path: Path) -> int:
@@ -60,7 +118,11 @@ def _run(config_path: Path) -> int:
     return 1 if result.status is RunStatus.ERROR else 0
 
 
-def _experiment(config_path: Path) -> int:
+def _experiment(args: argparse.Namespace) -> int:
+    config_path: Path = args.config
+    do_analyze: bool = args.analyze or args.report
+    do_report: bool = args.report
+
     try:
         config = load_experiment_config(config_path)
         result = BatchRunner().run_experiment(config)
@@ -69,6 +131,14 @@ def _experiment(config_path: Path) -> int:
         return 1
 
     print(_format_experiment_result(result))
+
+    if do_analyze:
+        output_dir = _experiment_output_dir(config)
+        try:
+            _run_post_analysis(output_dir, config.experiment_id, do_report)
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING: post-analysis failed: {exc}")
+
     return 1 if result.summary.get("error_runs", 0) else 0
 
 

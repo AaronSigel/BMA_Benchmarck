@@ -1,0 +1,16 @@
+report_id: default
+title: "Benchmark Report"
+input_dir: "./results"
+output_dir: "./reports"
+
+formats:
+  - json
+  - csv
+  - markdown
+  - html
+
+include_runs: true
+include_group_comparison: true
+include_error_taxonomy: true
+include_trace_details: true
+include_artifact_links: true

@@ -1,0 +1,77 @@
+{
+  "run_id": "run_direct_001",
+  "task_id": "geometry_add_cube_easy",
+  "agent_id": "direct_agent_v1",
+  "strategy": "direct_tool_calling",
+  "model": "claude-3-5-sonnet-20241022",
+  "steps": [
+    {
+      "step_index": 0,
+      "step_type": "llm_call",
+      "thought": "I need to add a cube at the origin.",
+      "action": null,
+      "tool_name": null,
+      "tool_arguments": {},
+      "observation": null,
+      "error": null,
+      "raw_llm_response": {
+        "usage": {
+          "prompt_tokens": 120,
+          "completion_tokens": 40,
+          "total_tokens": 160
+        }
+      },
+      "started_at": "2026-05-16T10:00:00Z",
+      "finished_at": "2026-05-16T10:00:01Z",
+      "duration_sec": 1.0,
+      "metadata": {}
+    },
+    {
+      "step_index": 1,
+      "step_type": "tool_call",
+      "thought": null,
+      "action": "add_object",
+      "tool_name": "add_object",
+      "tool_arguments": {
+        "type": "MESH",
+        "name": "Cube",
+        "location": [
+          0,
+          0,
+          0
+        ]
+      },
+      "observation": "{\"status\": \"ok\", \"object_name\": \"Cube\"}",
+      "error": null,
+      "raw_llm_response": null,
+      "started_at": "2026-05-16T10:00:01Z",
+      "finished_at": "2026-05-16T10:00:01.5Z",
+      "duration_sec": 0.5,
+      "metadata": {}
+    },
+    {
+      "step_index": 2,
+      "step_type": "final",
+      "thought": "Cube added successfully.",
+      "action": null,
+      "tool_name": null,
+      "tool_arguments": {},
+      "observation": null,
+      "error": null,
+      "raw_llm_response": null,
+      "started_at": "2026-05-16T10:00:02Z",
+      "finished_at": "2026-05-16T10:00:02Z",
+      "duration_sec": 0.0,
+      "metadata": {}
+    }
+  ],
+  "final_message": "Added Cube at origin.",
+  "success": true,
+  "error": null,
+  "started_at": "2026-05-16T10:00:00Z",
+  "finished_at": "2026-05-16T10:00:02Z",
+  "duration_sec": 2.0,
+  "metadata": {
+    "mcp_profile": "minimal"
+  }
+}

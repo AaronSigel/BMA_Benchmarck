@@ -12,6 +12,7 @@ Implemented stages:
 - Stage 4: experiment runner, batch runner, run artifacts, and summary metrics.
 - Stage 5: MCP integration layer — blender-mcp fork, tool-gating profiles, headless mode, and MCP smoke checks.
 - Stage 6: Agent Runtime — LLM clients, agent strategies, trace recording, and `AgentExecutionBackend`.
+- Stage 7: Trace Metrics and Benchmark Reporting — analysis package, tool-call metrics, agent metrics, validation metrics, error taxonomy, comparative reports, and Markdown/HTML/CSV/JSON exports.
 
 ## Documentation
 
@@ -304,3 +305,135 @@ python -m benchmark.agent.cli list-providers
 ```
 
 Agent configs are in [`configs/agents/`](configs/agents/). Full documentation is in [docs/agent_runtime.md](docs/agent_runtime.md).
+
+## Stage 7: Trace Metrics and Benchmark Reporting
+
+Stage 7 adds the `benchmark.analysis` package, which converts raw run artifacts
+(`agent_trace.json`, `validation_result.json`, `run_result.json`) into structured
+metrics, comparison tables, and human-readable reports.
+
+Full documentation is in [docs/benchmark_reporting.md](docs/benchmark_reporting.md).
+
+### Analysis package
+
+The `benchmark.analysis` package is organized into the following modules:
+
+| Module | Responsibility |
+|---|---|
+| `tool_metrics` | Per-tool and aggregate tool-call statistics |
+| `agent_metrics` | Step-level agent behaviour (LLM calls, retries, tokens) |
+| `validation_metrics` | Validator scores, issue counts, per-validator breakdowns |
+| `error_taxonomy` | Classify and aggregate errors from traces and validation results |
+| `comparison` | Group runs by dimension, rank results, build experiment summaries |
+| `run_analysis` | Combine all metrics into a single `RunAnalysisResult` |
+| `report_builder` | Build Markdown and HTML reports from `ExperimentAnalysisResult` |
+| `export` | Write JSON, CSV, Markdown, and HTML files |
+| `cli` | Command-line interface for analysis and report generation |
+
+### Tool-call metrics
+
+Extracted from `AgentTrace` by `compute_tool_summary()`. Key metrics include
+`tool_call_count`, `unique_tool_count`, `invalid_tool_call_count`,
+`disabled_tool_call_count`, `tool_error_count`, `inspection_tool_count`,
+`mutation_tool_count`, `python_tool_call_count`, `tool_repetition_count`, and
+`average_tool_duration_sec`. Tool categories follow the `ToolCategory` enum from
+`benchmark.mcp.tool_contract`.
+
+### Agent metrics
+
+Extracted by `compute_agent_summary()`. Key metrics include `llm_call_count`,
+`planning_step_count`, `observation_count`, `final_step_present`, `retry_count`,
+`step_limit_reached`, `self_correction_attempts`, `tool_error_recovery_count`,
+`error_count`, `prompt_tokens`, `completion_tokens`, and `total_tokens`.
+
+### Validation metrics
+
+Extracted by `compute_validation_summary()`. Covers `scene_total_score`,
+`scene_overall_status`, passed/failed/skipped validator counts, error and
+warning counts, and per-validator scores (`object_score`, `transform_score`,
+`material_score`, `light_score`, `camera_score`, `export_score`).
+
+### Error taxonomy
+
+Errors are classified into 16 categories (`ErrorCategory`) covering tool errors
+(disabled, unknown, invalid arguments, runtime), LLM errors (parse, timeout),
+agent errors (step limit), scene validation mismatches (object, transform,
+material, light, camera, export), and connectivity errors.
+
+```python
+from benchmark.analysis.error_taxonomy import extract_errors, aggregate_errors
+
+errors = extract_errors(trace)             # list[ErrorRecord]
+counts = aggregate_errors(bundle)          # dict[str, int] — category → count
+```
+
+### Comparative reports
+
+Runs can be grouped and compared along eight dimensions: `strategy`, `model`,
+`mcp_profile`, `run`, `agent_id`, `task_category`, `difficulty`, and
+`remote_provider`. Each group exposes `run_count`, `success_rate`, `avg_score`,
+`avg_tool_calls`, and `avg_duration_sec`. Runs and groups can be ranked by
+score, success rate, or time efficiency (`score / duration`).
+
+```python
+from benchmark.analysis.comparison import analyze_experiment, compare_runs
+from benchmark.analysis.models import ComparisonDimension
+
+analysis = analyze_experiment(Path("artifacts/experiments/exp_001"))
+report   = compare_runs(analysis.runs, ComparisonDimension.STRATEGY)
+```
+
+### Markdown/HTML/CSV/JSON exports
+
+```python
+from benchmark.analysis.export import (
+    write_experiment_analysis_json,
+    write_run_metrics_csv,
+    write_group_comparison_csv,
+    write_error_taxonomy_csv,
+)
+from benchmark.analysis.report_builder import build_markdown_report, build_html_report
+```
+
+Report generation is controlled by `ReportConfig`, which selects output formats
+(`json`, `csv`, `markdown`, `html`) and toggles report sections
+(`include_runs`, `include_group_comparison`, `include_error_taxonomy`,
+`include_artifact_links`).
+
+### CLI examples
+
+```bash
+# Analyse a single run directory:
+python -m benchmark.analysis.cli analyze-run \
+    --run-dir artifacts/runs/run_001
+
+# Analyse all runs under an experiment directory:
+python -m benchmark.analysis.cli analyze-experiment \
+    --experiment-dir artifacts/experiments/exp_001
+
+# Build reports from a YAML config (JSON + CSV + Markdown + HTML):
+python -m benchmark.analysis.cli build-report \
+    --config configs/reports/default_report.yaml \
+    --input  artifacts/experiments/exp_001 \
+    --output reports/exp_001
+
+# Compare runs grouped by a dimension (printed to stdout):
+python -m benchmark.analysis.cli compare \
+    --input    artifacts/experiments/exp_001 \
+    --group-by strategy
+```
+
+Analysis and report generation can also be triggered automatically after an
+experiment run:
+
+```bash
+# Run experiment then analyse:
+python -m benchmark.runner.cli experiment \
+    --config configs/example_experiment.yaml \
+    --analyze
+
+# Run experiment then build Markdown and HTML reports:
+python -m benchmark.runner.cli experiment \
+    --config configs/example_experiment.yaml \
+    --report
+```

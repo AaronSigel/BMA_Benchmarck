@@ -1,0 +1,104 @@
+{
+  "experiment_id": "baseline_experiment_001",
+  "runs": [
+    {
+      "run_id": "run_direct_001",
+      "task_id": "geometry_add_cube_easy",
+      "status": "passed",
+      "execution_mode": "agent_mcp",
+      "validation_result_path": null,
+      "scene_snapshot_path": null,
+      "artifacts_dir": "/tmp/artifacts/run_direct_001",
+      "total_score": 1.0,
+      "overall_status": "passed",
+      "started_at": "2026-05-16T10:00:00Z",
+      "finished_at": "2026-05-16T10:00:02Z",
+      "duration_sec": 2.0,
+      "error": null,
+      "summary": {
+        "strategy": "direct_tool_calling",
+        "agent_id": "direct_agent_v1",
+        "model": "claude-3-5-sonnet-20241022",
+        "mcp_profile": "minimal",
+        "tool_call_count": 1,
+        "llm_call_count": 1
+      }
+    },
+    {
+      "run_id": "run_react_001",
+      "task_id": "materials_set_roughness_medium",
+      "status": "failed",
+      "execution_mode": "agent_mcp",
+      "validation_result_path": null,
+      "scene_snapshot_path": null,
+      "artifacts_dir": "/tmp/artifacts/run_react_001",
+      "total_score": 0.6,
+      "overall_status": "warning",
+      "started_at": "2026-05-16T10:01:00Z",
+      "finished_at": "2026-05-16T10:01:04Z",
+      "duration_sec": 4.0,
+      "error": null,
+      "summary": {
+        "strategy": "react",
+        "agent_id": "react_agent_v1",
+        "model": "claude-3-5-sonnet-20241022",
+        "mcp_profile": "inspection_enabled",
+        "tool_call_count": 2,
+        "llm_call_count": 2
+      }
+    },
+    {
+      "run_id": "run_plan_001",
+      "task_id": "export_gltf_medium",
+      "status": "passed",
+      "execution_mode": "agent_mcp",
+      "validation_result_path": null,
+      "scene_snapshot_path": null,
+      "artifacts_dir": "/tmp/artifacts/run_plan_001",
+      "total_score": 0.9,
+      "overall_status": "passed",
+      "started_at": "2026-05-16T10:03:00Z",
+      "finished_at": "2026-05-16T10:03:05Z",
+      "duration_sec": 5.0,
+      "error": null,
+      "summary": {
+        "strategy": "plan_and_execute",
+        "agent_id": "plan_agent_v1",
+        "model": "claude-3-5-sonnet-20241022",
+        "mcp_profile": "full",
+        "tool_call_count": 2,
+        "llm_call_count": 2
+      }
+    },
+    {
+      "run_id": "run_error_001",
+      "task_id": "lighting_add_point_hard",
+      "status": "error",
+      "execution_mode": "agent_mcp",
+      "validation_result_path": null,
+      "scene_snapshot_path": null,
+      "artifacts_dir": "/tmp/artifacts/run_error_001",
+      "total_score": null,
+      "overall_status": null,
+      "started_at": "2026-05-16T10:02:00Z",
+      "finished_at": "2026-05-16T10:02:10Z",
+      "duration_sec": 10.0,
+      "error": "AgentStepLimitError: max_steps reached after 10 steps",
+      "summary": {
+        "strategy": "react",
+        "agent_id": "react_agent_v1",
+        "model": "claude-3-5-sonnet-20241022",
+        "mcp_profile": "minimal",
+        "tool_call_count": 8,
+        "llm_call_count": 5
+      }
+    }
+  ],
+  "summary": {
+    "total_runs": 4,
+    "passed_runs": 2,
+    "failed_runs": 1,
+    "error_runs": 1,
+    "average_score": 0.833
+  }
+}

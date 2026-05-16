@@ -55,16 +55,16 @@ def _messages() -> list[LlmMessage]:
 # Constructor validation
 # ---------------------------------------------------------------------------
 
-def test_missing_base_url_raises_at_construction() -> None:
+def test_missing_base_url_raises_on_complete() -> None:
     config = LlmConfig(provider=LlmProvider.OPENAI_COMPATIBLE, model="x", base_url=None)
     with pytest.raises(LlmClientError, match="base_url"):
-        OpenAICompatibleClient(config)
+        OpenAICompatibleClient(config).complete(_messages())
 
 
-def test_empty_base_url_raises_at_construction() -> None:
+def test_empty_base_url_raises_on_complete() -> None:
     config = LlmConfig(provider=LlmProvider.OPENAI_COMPATIBLE, model="x", base_url="")
     with pytest.raises(LlmClientError, match="base_url"):
-        OpenAICompatibleClient(config)
+        OpenAICompatibleClient(config).complete(_messages())
 
 
 # ---------------------------------------------------------------------------

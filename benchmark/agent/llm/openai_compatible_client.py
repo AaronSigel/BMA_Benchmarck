@@ -24,10 +24,6 @@ class OpenAICompatibleClient:
     """
 
     def __init__(self, config: LlmConfig) -> None:
-        if not config.base_url:
-            raise LlmClientError(
-                "OpenAICompatibleClient requires base_url to be set in LlmConfig"
-            )
         self.config = config
 
     def complete(
@@ -36,8 +32,12 @@ class OpenAICompatibleClient:
         tools: list[dict[str, Any]] | None = None,
         timeout_sec: int | float | None = None,
     ) -> LlmResponse:
+        if not self.config.base_url:
+            raise LlmClientError(
+                "OpenAICompatibleClient requires base_url to be set in LlmConfig"
+            )
         api_key = self._resolve_api_key()
-        base_url = self.config.base_url.rstrip("/")  # type: ignore[union-attr]  # checked in __init__
+        base_url = self.config.base_url.rstrip("/")
         timeout = timeout_sec if timeout_sec is not None else self.config.timeout_sec
 
         payload: dict[str, Any] = {

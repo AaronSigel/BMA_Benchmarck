@@ -28,6 +28,7 @@ def _make_run_dir(tmp_path: Path, trace_name: str = "agent_trace_react_success.j
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     shutil.copy(FIXTURES / trace_name, run_dir / "agent_trace.json")
+    shutil.copy(FIXTURES / "validation_result_success.json", run_dir / "validation_result.json")
     return run_dir
 
 

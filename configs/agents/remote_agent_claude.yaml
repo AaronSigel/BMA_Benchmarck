@@ -1,0 +1,14 @@
+agent_id: remote_agent_claude
+strategy: remote_agent
+mcp_profile: minimal
+remote_agent:
+  provider: claude_code
+  agent_id: claude_code
+  timeout_sec: 300
+max_steps: 20
+max_retries: 1
+step_timeout_sec: 120
+allow_python_tools: false
+allow_inspection_tools: true
+metadata:
+  description: Reserved Claude Code remote agent config.

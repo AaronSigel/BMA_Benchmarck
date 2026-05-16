@@ -1,0 +1,19 @@
+agent_id: direct_openai_compatible
+strategy: direct_tool_calling
+mcp_profile: minimal
+llm:
+  provider: openai_compatible
+  model: gpt-4.1-mini
+  base_url: https://api.openai.com/v1
+  api_key_env: OPENAI_API_KEY
+  temperature: 0.2
+  top_p: 0.9
+  max_tokens: 2048
+  timeout_sec: 120
+max_steps: 20
+max_retries: 1
+step_timeout_sec: 120
+allow_python_tools: false
+allow_inspection_tools: true
+metadata:
+  description: Direct tool-calling agent using an OpenAI-compatible API.

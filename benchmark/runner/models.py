@@ -11,6 +11,8 @@ class ExecutionMode(str, Enum):
     EXTERNAL_SNAPSHOT = "external_snapshot"
     MCP_SMOKE = "mcp_smoke"
     MCP_EXTERNAL = "mcp_external"
+    AGENT_MCP = "agent_mcp"
+    REMOTE_AGENT = "remote_agent"
 
 
 class RunStatus(str, Enum):
@@ -32,6 +34,9 @@ class RunConfig(BaseModel):
     # MCP-specific fields (used when execution_mode is mcp_smoke or mcp_external)
     mcp_config_path: Path | None = None
     mcp_profile: str | None = None
+    # Agent-specific fields (used when execution_mode is agent_mcp or remote_agent)
+    agent_config_path: Path | None = None
+    agent_output_dir: Path | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("run_id", "task_id")

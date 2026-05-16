@@ -1,0 +1,13 @@
+agent_id: mock_agent
+strategy: direct_tool_calling
+mcp_profile: minimal
+llm:
+  provider: mock
+  model: mock
+max_steps: 20
+max_retries: 1
+step_timeout_sec: 120
+allow_python_tools: false
+allow_inspection_tools: true
+metadata:
+  description: Mock agent config for local tests without API credentials.

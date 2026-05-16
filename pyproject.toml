@@ -31,10 +31,14 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-m 'not llm and not remote_agent and not agent_integration'"
 markers = [
     "blender: tests requiring Blender executable",
     "integration: integration tests",
+    "llm: tests requiring a real external LLM API",
     "mcp: tests requiring a running MCP server / Blender with blender-mcp addon",
+    "remote_agent: tests requiring a real hosted/server-side agent",
+    "agent_integration: tests requiring real MCP + Blender + external API/agent",
 ]
 
 [tool.setuptools.packages.find]

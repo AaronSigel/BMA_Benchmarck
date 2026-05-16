@@ -2,7 +2,7 @@
 
 This project is a benchmark stand for evaluating AI agents that work with Blender through MCP.
 
-The repository contains benchmark task definitions, Blender artifact automation, scene validation, an experiment runner, and an MCP integration layer for connecting agents to a live Blender session via the Model Context Protocol. LLM execution and agent runtime remain out of scope for the implemented pipeline.
+The repository contains benchmark task definitions, Blender artifact automation, scene validation, an experiment runner, an MCP integration layer, and an agent runtime for running benchmark tasks through external LLM APIs and remote agents.
 
 Implemented stages:
 
@@ -11,6 +11,7 @@ Implemented stages:
 - Stage 3: scene validation and `validation_result.json`.
 - Stage 4: experiment runner, batch runner, run artifacts, and summary metrics.
 - Stage 5: MCP integration layer — blender-mcp fork, tool-gating profiles, headless mode, and MCP smoke checks.
+- Stage 6: Agent Runtime — LLM clients, agent strategies, trace recording, and `AgentExecutionBackend`.
 
 ## Documentation
 
@@ -34,6 +35,9 @@ Headless Blender launch and keep-alive design are documented in
 
 Fork patch notes, env variables, and profile enforcement are documented in
 [docs/blender_mcp_fork_patch.md](docs/blender_mcp_fork_patch.md).
+
+Agent Runtime architecture, provider formats, strategies, trace format, and CLI
+usage are documented in [docs/agent_runtime.md](docs/agent_runtime.md).
 
 ## Common Commands
 
@@ -218,3 +222,85 @@ pytest -m "not mcp"
 # Run real MCP integration tests (requires Blender running):
 pytest -m mcp
 ```
+
+## Stage 6: Agent Runtime
+
+Stage 6 adds a complete agent execution layer that connects `BenchmarkTask` definitions to external LLM APIs and remote agents, records structured traces, and integrates with the Stage 4 `ExperimentRunner` via `AgentExecutionBackend`.
+
+### Local models and Ollama
+
+Stage 6 uses **API-based models only**. Local inference (Ollama, llama.cpp, GGUF/ONNX) is not supported. `provider: ollama` is rejected at config load time with a `ValidationError`. Local model support can be added in a separate stage as an independent `LlmClient`.
+
+### Supported providers
+
+| Provider | Description |
+|---|---|
+| `openrouter` | OpenAI-compatible endpoint at `openrouter.ai` |
+| `openai_compatible` | Any OpenAI-compatible API (OpenAI, Azure, vLLM, …); `base_url` required |
+| `anthropic` | Anthropic Messages API; uses `x-api-key` header and `input_schema` tool format |
+| `remote_agent` | Delegates the full task to an external agent via HTTP or subprocess |
+| `mock` | Deterministic in-process client for tests; no API key required |
+
+API keys are read from environment variables specified in `api_key_env` and are never stored in traces or config files.
+
+### Agent strategies
+
+| Strategy | Description |
+|---|---|
+| `direct_tool_calling` | Single LLM call → parse `tool_calls` → execute → repeat until no more calls |
+| `react` | Iterative Reason + Act loop; tool errors are fed back as observations |
+| `plan_and_execute` | LLM generates a JSON plan; steps are executed sequentially |
+| `remote_agent` | No local LLM; full task sent to an external agent |
+
+### Artifact layout
+
+Each agent run writes artifacts to a stable directory:
+
+```
+artifacts/agent_runs/<run_id>/
+├── agent_trace.json      ← full step-by-step execution trace
+├── agent_config.yaml
+├── task.yaml
+├── tool_results.json
+├── scene_snapshot.json
+├── run_result.json
+└── logs/
+```
+
+### Testing
+
+Real API tests are separated from the default test suite using pytest markers:
+
+| Marker | Requires |
+|---|---|
+| `llm` | Live LLM API key |
+| `remote_agent` | Running hosted agent |
+| `agent_integration` | MCP + Blender + external API |
+
+```bash
+# Default run — no external APIs needed:
+pytest
+
+# Run with a real LLM:
+ANTHROPIC_API_KEY=sk-ant-... pytest -m llm
+```
+
+### Agent CLI
+
+```bash
+# Run an agent on a single task:
+python -m benchmark.agent.cli run \
+  --task tasks/geometry/geometry_001_basic_primitives.yaml \
+  --agent-config configs/agents/react_anthropic.yaml \
+  --output-dir artifacts/
+
+# Print a trace summary:
+python -m benchmark.agent.cli trace-summary \
+  --trace artifacts/agent_runs/<run_id>/agent_trace.json
+
+# List available strategies and providers:
+python -m benchmark.agent.cli list-strategies
+python -m benchmark.agent.cli list-providers
+```
+
+Agent configs are in [`configs/agents/`](configs/agents/). Full documentation is in [docs/agent_runtime.md](docs/agent_runtime.md).

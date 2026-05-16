@@ -20,6 +20,7 @@ from benchmark.tasks.loader import load_task
 from benchmark.tasks.registry import TaskRegistry
 from benchmark.validation.models import SceneValidationResult, ValidationStatus
 from benchmark.validation.scene_validator import SceneValidator
+from benchmark.agent.execution_backend import AgentExecutionBackend, RemoteAgentExecutionBackend
 
 
 class ExperimentRunner:
@@ -33,6 +34,8 @@ class ExperimentRunner:
             ExecutionMode.EXTERNAL_SNAPSHOT: ExternalSnapshotBackend(),
             ExecutionMode.REPLAY: ReplayBackend(),
             ExecutionMode.BLENDER_SMOKE: BlenderSmokeBackend(),
+            ExecutionMode.AGENT_MCP: AgentExecutionBackend(),
+            ExecutionMode.REMOTE_AGENT: RemoteAgentExecutionBackend(),
         }
 
     def run(self, config: RunConfig) -> RunResult:

@@ -61,6 +61,7 @@ def _experiment(
     *runs: RunAnalysisResult,
     exp_id: str = "exp1",
     summary: ExperimentSummary | None = None,
+    metadata: dict | None = None,
 ) -> ExperimentAnalysisResult:
     s = summary or ExperimentSummary(
         total_runs=len(runs),
@@ -72,6 +73,7 @@ def _experiment(
         experiment_id=exp_id,
         runs=list(runs),
         summary=s,
+        metadata=metadata or {},
     )
 
 
@@ -178,6 +180,34 @@ class TestBuildMarkdownReportStructure:
         md = build_markdown_report(exp, _default_config())
         assert "## 1. Summary" in md
 
+    def test_artifact_freshness_section_from_metadata(self):
+        exp = _experiment(
+            _run(mcp_profile="no_python"),
+            metadata={
+                "artifact_freshness": {
+                    "output_root": "artifacts/experiments/pilot",
+                    "created_at": "2026-05-17T00:00:00Z",
+                    "clean_output": True,
+                    "removed_existing_output": True,
+                },
+                "runtime": {
+                    "mcp_profile": "no_python",
+                    "tool_contract_hash": "abc123",
+                    "latest_run_file_mtime": "2026-05-17T00:01:00Z",
+                    "mcp_socket": {"host": "localhost", "port": 9876},
+                    "blender_process": {"pid": 123, "addon_path": "blender-mcp-bma/addon.py"},
+                },
+                "mcp_contract_smoke": {"ok": True},
+            },
+        )
+
+        md = build_markdown_report(exp, _default_config())
+
+        assert "## Artifact Freshness" in md
+        assert "artifacts/experiments/pilot" in md
+        assert "abc123" in md
+        assert "Contract smoke" in md
+
 
 # ---------------------------------------------------------------------------
 # build_markdown_report — content correctness
@@ -214,6 +244,13 @@ class TestBuildMarkdownReportContent:
         assert "r1" in md
         assert "r2" in md
         assert "r3" in md
+
+    def test_run_details_include_mcp_profile_and_llm_calls(self):
+        exp = _experiment(_run(mcp_profile="no_python", llm_call_count=7))
+        md = build_markdown_report(exp, _default_config())
+        assert "MCP Profile" in md
+        assert "LLM Calls" in md
+        assert "no_python" in md
 
 
 # ---------------------------------------------------------------------------

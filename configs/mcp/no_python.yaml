@@ -1,11 +1,13 @@
 # MCP profile: no_python
-# Allowed tools: minimal + get_viewport_screenshot, get_polyhaven_status,
-#                get_hyper3d_status, get_sketchfab_status
-# Read-only scene inspection without Python code execution.
+# Allowed tools: structured bma_* tools + inspection helpers.
+# Python execution and external asset integrations are blocked.
 
-server_distribution: upstream
+server_distribution: fork
+package_source: blender-mcp-bma
 command: uvx
 args:
+  - --from
+  - blender-mcp-bma
   - blender-mcp
 
 blender_host: localhost

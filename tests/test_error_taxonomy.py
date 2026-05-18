@@ -145,7 +145,10 @@ class TestClassifyValidationIssue:
         assert classify_validation_issue(_issue("object_type_mismatch")) == ErrorCategory.SCENE_OBJECT_MISSING
 
     def test_primitive_mismatch(self):
-        assert classify_validation_issue(_issue("primitive_mismatch")) == ErrorCategory.SCENE_OBJECT_MISSING
+        assert classify_validation_issue(_issue("primitive_mismatch")) == ErrorCategory.SCENE_TRANSFORM_MISMATCH
+
+    def test_dimensions_mismatch(self):
+        assert classify_validation_issue(_issue("dimensions_mismatch")) == ErrorCategory.SCENE_TRANSFORM_MISMATCH
 
     def test_transform_location_mismatch(self):
         assert classify_validation_issue(_issue("location_mismatch")) == ErrorCategory.SCENE_TRANSFORM_MISMATCH
@@ -270,6 +273,37 @@ class TestAggregateErrors:
         bundle = RunArtifactBundle(run_dir=FIXTURES, agent_trace=trace)
         counts = aggregate_errors(bundle)
         assert all(isinstance(k, str) for k in counts)
+
+    def test_deduplicates_top_level_and_validator_validation_issues(self):
+        from benchmark.validation.models import SceneValidationResult, ValidationStatus, ValidatorResult
+
+        issue = ValidationIssue(
+            code="dimensions_mismatch",
+            message="bad dimensions",
+            severity=ValidationSeverity.ERROR,
+            expected_path="expected_scene.objects[0].dimensions",
+            actual_path="snapshot.objects[0].dimensions",
+        )
+        val = SceneValidationResult(
+            task_id="t1",
+            overall_status=ValidationStatus.FAILED,
+            total_score=0.5,
+            validators=[
+                ValidatorResult(
+                    name="transform_validator",
+                    status=ValidationStatus.FAILED,
+                    score=0.0,
+                    issues=[issue],
+                )
+            ],
+            issues=[issue],
+            summary={},
+        )
+        bundle = RunArtifactBundle(run_dir=FIXTURES, validation_result=val)
+
+        counts = aggregate_errors(bundle)
+
+        assert counts == {ErrorCategory.SCENE_TRANSFORM_MISMATCH.value: 1}
 
 
 # ---------------------------------------------------------------------------

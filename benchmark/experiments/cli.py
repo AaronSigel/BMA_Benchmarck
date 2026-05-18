@@ -6,6 +6,7 @@ from pathlib import Path
 from benchmark.experiments.e2e_runner import E2EBenchmarkRunner
 from benchmark.experiments.generator import generate_experiment_config
 from benchmark.experiments.matrix import load_matrix
+from benchmark.experiments.preflight import PreflightError
 from benchmark.experiments.readiness import check_matrix_readiness, write_readiness_result
 from benchmark.runner.config_loader import dump_experiment_config
 
@@ -44,7 +45,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run-and-report":
-        report_path = E2EBenchmarkRunner().run_and_report(args.matrix)
+        try:
+            report_path = E2EBenchmarkRunner().run_and_report(
+                args.matrix,
+                clean_output=args.clean_output,
+            )
+        except PreflightError as exc:
+            print(f"ERROR: {exc}")
+            return 1
         print(f"report: {report_path}")
         return 0
 
@@ -84,6 +92,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run a matrix, analyze results, and build reports.",
     )
     run_and_report.add_argument("--matrix", type=Path, required=True)
+    run_and_report.add_argument(
+        "--clean-output",
+        action="store_true",
+        help="Remove an existing output_root before running to avoid stale artifacts.",
+    )
 
     list_matrices = subparsers.add_parser("list-matrices", help="List matrix YAML files.")
     list_matrices.add_argument("--directory", type=Path, default=Path("configs/matrices"))

@@ -155,6 +155,9 @@ def test_scene_validator_returns_scene_validation_result_for_passed_scene() -> N
     assert result.total_score == 1.0
     assert result.summary["validators_total"] == 6
     assert result.summary["validators_skipped"] == 4
+    assert result.summary["actual_object_count"] == 1
+    assert result.summary["expected_object_count"] == 1
+    assert result.summary["extra_object_count"] == 0
 
 
 def test_scene_validator_failed_or_warning_when_object_is_missing() -> None:
@@ -172,6 +175,46 @@ def test_scene_validator_failed_or_warning_when_object_is_missing() -> None:
     assert result.overall_status in {ValidationStatus.FAILED, ValidationStatus.WARNING}
     assert result.total_score < 1.0
     assert any(issue.code == "object_missing" for issue in result.issues)
+
+
+def test_scene_validator_warns_when_scene_contains_unexpected_objects() -> None:
+    task = task_with_scene(
+        ExpectedScene(objects=[ExpectedObject(name="Cube", type="MESH", primitive="cube")])
+    )
+
+    result = SceneValidator().validate(
+        task,
+        scene_snapshot([object_snapshot("Cube"), object_snapshot("OldCube")]),
+    )
+
+    assert result.summary["actual_object_count"] == 2
+    assert result.summary["expected_object_count"] == 1
+    assert result.summary["extra_object_count"] == 1
+    assert any(issue.code == "scene_contains_unexpected_objects" for issue in result.issues)
+
+
+def test_scene_validator_counts_duplicate_blender_base_names() -> None:
+    task = task_with_scene(
+        ExpectedScene(
+            objects=[
+                ExpectedObject(name="Cube", type="MESH", primitive="cube"),
+                ExpectedObject(name="Sphere", type="MESH", primitive="sphere"),
+            ]
+        )
+    )
+
+    result = SceneValidator().validate(
+        task,
+        scene_snapshot(
+            [
+                object_snapshot("Cube"),
+                object_snapshot("Cube.001"),
+                object_snapshot("Sphere"),
+            ]
+        ),
+    )
+
+    assert result.summary["duplicate_name_count"] == 1
 
 
 def test_scene_validator_ignores_skipped_validators_in_total_score() -> None:

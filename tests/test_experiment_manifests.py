@@ -99,6 +99,29 @@ def test_manifest_json_does_not_include_secret_like_env_values(tmp_path: Path) -
     assert "secret_env_manifest" in manifest_json
 
 
+def test_manifest_accepts_preflight_metadata_without_secrets(tmp_path: Path) -> None:
+    matrix = ExperimentMatrix(
+        matrix_id="preflight_manifest",
+        output_root=tmp_path,
+    )
+
+    manifest = build_manifest(
+        matrix,
+        metadata={
+            "runtime": {
+                "mcp_profile": "no_python",
+                "api_key_env": "SECRET_SHOULD_NOT_APPEAR",
+            },
+            "tool_contract_hash": "abc123",
+        },
+    )
+    manifest_json = manifest.model_dump_json()
+
+    assert "no_python" in manifest_json
+    assert "abc123" in manifest_json
+    assert "SECRET_SHOULD_NOT_APPEAR" not in manifest_json
+
+
 def test_write_manifest_writes_json(tmp_path: Path) -> None:
     manifest = GeneratedExperimentManifest(
         matrix_id="manual",

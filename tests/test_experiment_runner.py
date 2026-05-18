@@ -2,8 +2,9 @@ import json
 from pathlib import Path
 
 from benchmark.runner.config_loader import load_run_config
+from benchmark.runner.execution import ExecutionBackend, ExecutionResult
 from benchmark.runner.experiment_runner import ExperimentRunner
-from benchmark.runner.models import RunConfig, RunResult, RunStatus
+from benchmark.runner.models import ExecutionMode, RunConfig, RunResult, RunStatus
 from benchmark.runner.paths import RunArtifactLayout
 from benchmark.validation.models import SceneValidationResult, ValidationStatus
 
@@ -24,6 +25,22 @@ class PassingSceneValidator:
                 "issues_total": 0,
                 "artifacts_dir": str(artifacts_dir),
             },
+        )
+
+
+class ErrorWithSnapshotBackend(ExecutionBackend):
+    mode = ExecutionMode.EXTERNAL_SNAPSHOT
+
+    def __init__(self, snapshot_path: Path) -> None:
+        self.snapshot_path = snapshot_path
+
+    def execute(self, config: RunConfig) -> ExecutionResult:
+        return ExecutionResult(
+            ok=False,
+            scene_snapshot_path=self.snapshot_path,
+            artifacts_dir=config.output_dir,
+            error="agent failed after mutating scene",
+            metadata={"mode": "test"},
         )
 
 
@@ -90,6 +107,26 @@ def test_experiment_runner_returns_error_when_snapshot_is_missing(tmp_path: Path
     assert "scene snapshot does not exist" in result.error
     assert result.validation_result_path is None
     assert layout.run_result_json().is_file()
+
+
+def test_experiment_runner_writes_partial_validation_for_error_with_snapshot(
+    tmp_path: Path,
+) -> None:
+    config = make_external_snapshot_config(tmp_path)
+    layout = RunArtifactLayout.from_run_output_dir(config.output_dir, config.run_id)
+    snapshot_path = Path("tests/fixtures/validation/valid_geometry_snapshot.json")
+
+    result = ExperimentRunner(
+        backends={
+            ExecutionMode.EXTERNAL_SNAPSHOT: ErrorWithSnapshotBackend(snapshot_path),
+        }
+    ).run(config)
+
+    assert result.status is RunStatus.ERROR
+    assert result.scene_snapshot_path == layout.scene_snapshot_json()
+    assert result.validation_result_path == layout.validation_result_json()
+    assert layout.scene_snapshot_json().is_file()
+    assert layout.validation_result_json().is_file()
 
 
 def test_experiment_runner_uses_task_registry_when_task_path_is_absent(

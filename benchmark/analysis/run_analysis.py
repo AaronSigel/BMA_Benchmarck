@@ -65,6 +65,11 @@ def _collect_artifacts(bundle: RunArtifactBundle) -> list[str]:
         p = bundle.run_dir / name
         if p.exists():
             paths.append(str(p))
+    for trace_path in sorted(bundle.run_dir.glob("agent_runs/*/agent_trace.json")):
+        paths.append(str(trace_path))
+    for export_path in sorted((bundle.run_dir / "exports").glob("*")):
+        if export_path.is_file():
+            paths.append(str(export_path))
     return paths
 
 
@@ -79,10 +84,25 @@ def _mcp_profile_from_bundle(bundle: RunArtifactBundle) -> str | None:
         profile = bundle.run_result.summary.get("mcp_profile")
         if profile:
             return str(profile)
+        execution = bundle.run_result.summary.get("execution")
+        if isinstance(execution, dict):
+            profile = execution.get("mcp_profile")
+            if profile:
+                return str(profile)
     if bundle.summary is not None:
         profile = bundle.summary.get("mcp_profile")
         if profile:
             return str(profile)
+        execution = bundle.summary.get("execution")
+        if isinstance(execution, dict):
+            profile = execution.get("mcp_profile")
+            if profile:
+                return str(profile)
+    if bundle.run_result is not None:
+        parts = bundle.run_result.run_id.split("__")
+        for candidate in ("minimal", "no_python", "inspection_enabled", "python_enabled", "full"):
+            if candidate in parts:
+                return candidate
     return None
 
 

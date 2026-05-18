@@ -1,8 +1,16 @@
+import json
 from pathlib import Path
 
 import yaml
 
-from benchmark.agent.execution_backend import AgentExecutionBackend, RemoteAgentExecutionBackend
+from benchmark.agent.execution_backend import (
+    AgentExecutionBackend,
+    RemoteAgentExecutionBackend,
+    _prepare_blender_scene,
+    _wrap_export_paths,
+)
+from benchmark.agent.models import AgentRunResult, AgentRunStatus
+from benchmark.agent.tool_executor import McpToolExecutor
 from benchmark.runner.models import ExecutionMode, RunConfig
 
 
@@ -80,6 +88,7 @@ def test_mock_agent_mcp_runs_without_blender_or_api_and_writes_trace(tmp_path: P
     assert result.metadata["trace_path"] is not None
     assert Path(result.metadata["trace_path"]).exists()
     assert result.output_files == [Path(result.metadata["trace_path"])]
+    assert Path(result.metadata["trace_path"]).is_relative_to(config.output_dir)
 
 
 def test_remote_agent_backend_runs_without_api_and_writes_trace(tmp_path: Path) -> None:
@@ -103,3 +112,138 @@ def test_agent_backend_uses_run_config_agent_config_path(tmp_path: Path) -> None
 
     assert result.metadata["trace_path"] is not None
     assert Path(result.metadata["trace_path"]).exists()
+
+
+class FakeHarnessAdapter:
+    def __init__(self, *, objects: list[dict] | None = None, reset_result: dict | None = None) -> None:
+        self.objects = objects or []
+        self.reset_result = reset_result or {"ok": True}
+        self.calls: list[tuple[str, dict]] = []
+
+    def reset_scene(self) -> dict:
+        return self.reset_result
+
+    def collect_scene_snapshot(self, output_path: Path) -> dict:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(_snapshot_payload(self.objects)), encoding="utf-8")
+        return {"ok": True}
+
+    def call_tool(self, tool_name: str, arguments: dict | None = None) -> dict:
+        self.calls.append((tool_name, arguments or {}))
+        return {"ok": True, "arguments": arguments or {}}
+
+
+def _snapshot_payload(objects: list[dict]) -> dict:
+    return {
+        "scene_name": "Scene",
+        "objects": objects,
+        "materials": [],
+        "lights": [],
+        "cameras": [],
+        "collections": ["Collection"],
+        "render_settings": {
+            "engine": "CYCLES",
+            "resolution_x": 1920,
+            "resolution_y": 1080,
+            "frame_start": 1,
+            "frame_end": 1,
+            "frame_current": 1,
+        },
+        "frame_current": 1,
+        "blender_version": "4.0.0",
+        "created_at": "2026-05-15T12:00:00Z",
+    }
+
+
+def _object_payload(name: str = "Cube") -> dict:
+    vector = {"x": 0.0, "y": 0.0, "z": 0.0}
+    return {
+        "name": name,
+        "type": "MESH",
+        "primitive_hint": "cube",
+        "location": vector,
+        "rotation_euler": vector,
+        "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+        "dimensions": {"x": 2.0, "y": 2.0, "z": 2.0},
+        "material_slots": [],
+        "parent": None,
+        "collection_names": ["Collection"],
+        "vertex_count": None,
+        "polygon_count": None,
+    }
+
+
+def test_pre_run_lifecycle_fails_when_reset_fails(tmp_path: Path) -> None:
+    executor = McpToolExecutor(
+        FakeHarnessAdapter(reset_result={"warning": "socket refused"}),
+        profile="no_python",
+    )
+
+    error, snapshot_path = _prepare_blender_scene(executor, tmp_path, "task-1")
+
+    assert error == "scene reset failed: socket refused"
+    assert snapshot_path is None
+
+
+def test_pre_run_lifecycle_fails_when_scene_remains_contaminated(tmp_path: Path) -> None:
+    executor = McpToolExecutor(
+        FakeHarnessAdapter(objects=[_object_payload("OldCube")]),
+        profile="no_python",
+    )
+
+    error, snapshot_path = _prepare_blender_scene(executor, tmp_path, "task-1")
+
+    assert error == "pre-run scene is not clean after reset: object_count=1"
+    assert snapshot_path == tmp_path / "pre_run_scene_snapshot.json"
+    assert snapshot_path.exists()
+
+
+def test_export_wrapper_rewrites_relative_export_path_under_artifacts_dir(tmp_path: Path) -> None:
+    adapter = FakeHarnessAdapter()
+    executor = McpToolExecutor(adapter, profile="no_python")
+    wrapped = _wrap_export_paths(executor, tmp_path)
+
+    result = wrapped.call_tool("bma_export_scene", {"filepath": "exports/result.glb"})
+
+    assert result.error is None
+    assert adapter.calls == [
+        ("bma_export_scene", {"filepath": str(tmp_path / "exports/result.glb")})
+    ]
+
+
+def test_agent_run_metadata_includes_auto_captured_snapshot_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    agent_config_path = make_agent_config(tmp_path / "agent.yaml")
+    config = make_run_config(tmp_path, agent_config_path, ExecutionMode.AGENT_MCP)
+    executor = McpToolExecutor(FakeHarnessAdapter(), profile="no_python")
+
+    class FakeRuntime:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def run(self, *, task_id: str, task: dict, artifacts_dir: Path) -> AgentRunResult:
+            return AgentRunResult(
+                ok=True,
+                run_id="agent-run-1",
+                task_id=task_id,
+                agent_id="mock-agent",
+                status=AgentRunStatus.PASSED,
+                scene_snapshot_path=None,
+                artifacts_dir=artifacts_dir,
+                summary={"execution": {"scene_snapshot_path": None}},
+            )
+
+    monkeypatch.setattr("benchmark.agent.execution_backend.AgentRuntime", FakeRuntime)
+
+    result = AgentExecutionBackend(tool_executor=executor).execute(config)
+
+    assert result.ok is True
+    assert result.scene_snapshot_path == config.output_dir / "scene_snapshot.json"
+    expected_snapshot_path = str(config.output_dir / "scene_snapshot.json")
+    assert result.metadata["agent_run"]["scene_snapshot_path"] == expected_snapshot_path
+    assert (
+        result.metadata["agent_run"]["summary"]["execution"]["scene_snapshot_path"]
+        == expected_snapshot_path
+    )

@@ -123,6 +123,30 @@ def test_react_strategy_final_answer_completes_trace() -> None:
     assert trace.steps[-1].step_type == AgentStepType.FINAL
 
 
+def test_react_strategy_rejects_plain_text_pseudo_tool_call_as_final() -> None:
+    llm = MockLlmClient(
+        [
+            LlmResponse(
+                content='Tool: bma_create_object\nArguments: {"name": "Cube", "type": "cube"}'
+            )
+        ]
+    )
+
+    trace = ReactStrategy().run(
+        {"id": "task-1", "prompt": "Create a cube"},
+        make_config(),
+        llm,
+        MockToolExecutor(),
+        AgentToolContext(run_id="run-1", task_id="task-1"),
+        Path("."),
+    )
+
+    assert trace.success is False
+    assert trace.final_message is None
+    assert trace.error == "ReAct response did not include action or final_answer"
+    assert trace.steps[-1].step_type == AgentStepType.ERROR
+
+
 def test_runtime_selects_react_strategy() -> None:
     runtime = AgentRuntime(
         make_config(),

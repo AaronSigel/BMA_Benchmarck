@@ -1,9 +1,11 @@
-"""CLI for MCP layer: check, list-tools, start-server, start-headless-blender, smoke."""
+"""CLI for MCP layer: check, list-tools, start-server, start/stop headless Blender, smoke."""
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -64,6 +66,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--wait",
         action="store_true",
         help="Block until SIGINT/SIGTERM, then stop Blender",
+    )
+
+    # stop-headless-blender
+    stop_hb = sub.add_parser(
+        "stop-headless-blender",
+        help="Terminate old BMA headless Blender and blender-mcp processes for the configured socket.",
+    )
+    stop_hb.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List matching processes without sending signals.",
+    )
+    stop_hb.add_argument(
+        "--timeout-sec",
+        type=float,
+        default=5.0,
+        help="Seconds to wait after SIGTERM before SIGKILL (default: 5).",
     )
 
     # smoke
@@ -165,6 +184,18 @@ def cmd_start_headless_blender(
     wait: bool = False,
 ) -> int:
     from benchmark.mcp.headless.launcher import HeadlessBlenderMcpLauncher
+    from benchmark.mcp.headless.healthcheck import wait_for_blender_socket
+
+    if is_blender_socket_available(cfg):
+        print(json.dumps({
+            "status": "FAIL",
+            "error": (
+                f"Blender socket is already reachable at "
+                f"{cfg.blender_host}:{cfg.blender_port}. Stop the existing "
+                "Blender/MCP process before starting a new headless instance."
+            ),
+        }))
+        return 1
 
     addon = Path(addon_path) if addon_path else None
     launcher = HeadlessBlenderMcpLauncher(cfg, addon_path=addon)
@@ -182,12 +213,82 @@ def cmd_start_headless_blender(
         print(json.dumps({"status": "FAIL", "error": str(exc)}))
         return 1
 
+    try:
+        wait_for_blender_socket(cfg)
+    except McpLayerError as exc:
+        launcher.stop()
+        print(json.dumps({"status": "FAIL", "error": str(exc)}))
+        return 1
+
     print(json.dumps({"status": "started"}))
 
     if not wait:
         return 0
 
     return _wait_for_process(lambda: launcher.is_running, launcher.stop)
+
+
+def cmd_stop_headless_blender(
+    cfg: McpServerConfig,
+    *,
+    dry_run: bool = False,
+    timeout_sec: float = 5.0,
+) -> int:
+    matches = _find_bma_processes(cfg)
+    result: dict = {
+        "status": "dry_run" if dry_run else "stopped",
+        "host": cfg.blender_host,
+        "port": cfg.blender_port,
+        "matched_count": len(matches),
+        "processes": matches,
+    }
+
+    if dry_run or not matches:
+        print(json.dumps(result))
+        return 0
+
+    terminated: list[int] = []
+    killed: list[int] = []
+    errors: list[dict[str, str | int]] = []
+
+    for proc in matches:
+        pid = int(proc["pid"])
+        try:
+            os.kill(pid, signal.SIGTERM)
+            terminated.append(pid)
+        except ProcessLookupError:
+            continue
+        except OSError as exc:
+            errors.append({"pid": pid, "error": str(exc)})
+
+    deadline = time.time() + max(timeout_sec, 0.0)
+    while time.time() < deadline:
+        alive = [pid for pid in terminated if _pid_exists(pid)]
+        if not alive:
+            break
+        time.sleep(0.2)
+
+    for pid in terminated:
+        if not _pid_exists(pid):
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+            killed.append(pid)
+        except ProcessLookupError:
+            continue
+        except OSError as exc:
+            errors.append({"pid": pid, "error": str(exc)})
+
+    result.update(
+        {
+            "terminated_pids": terminated,
+            "killed_pids": killed,
+            "errors": errors,
+            "status": "FAIL" if errors else "stopped",
+        }
+    )
+    print(json.dumps(result))
+    return 1 if errors else 0
 
 
 def cmd_smoke(
@@ -285,6 +386,98 @@ def _emit(report: dict, output: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Internal helper
+# ---------------------------------------------------------------------------
+
+def _wait_for_process(is_running_fn, stop_fn) -> int:
+    """Block until SIGINT/SIGTERM, then call stop_fn."""
+    _stop_requested = False
+
+    def _handler(signum, frame):  # noqa: ARG001
+        nonlocal _stop_requested
+        print(f"\n[bma-mcp] Signal {signum} received, stopping…", file=sys.stderr)
+        _stop_requested = True
+
+    signal.signal(signal.SIGINT, _handler)
+    signal.signal(signal.SIGTERM, _handler)
+
+    try:
+        while not _stop_requested and is_running_fn():
+            time.sleep(0.5)
+    finally:
+        stop_fn()
+
+    return 0
+
+
+def _find_bma_processes(cfg: McpServerConfig) -> list[dict[str, str | int]]:
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "pid=,args="],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return []
+
+    current_pid = os.getpid()
+    matches: list[dict[str, str | int]] = []
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        pid_text, _, args = stripped.partition(" ")
+        if not pid_text.isdigit():
+            continue
+        pid = int(pid_text)
+        if pid == current_pid:
+            continue
+        kind = _classify_bma_process(args, cfg)
+        if kind is None:
+            continue
+        matches.append({"pid": pid, "kind": kind, "argv": args})
+    return matches
+
+
+def _classify_bma_process(args: str, cfg: McpServerConfig) -> str | None:
+    text = args.lower()
+    port = str(cfg.blender_port)
+
+    if "benchmark.mcp.cli" in text and "start-headless-blender" in text:
+        if port in text or "--port" not in text:
+            return "headless_blender_wrapper"
+
+    headless_markers = (
+        "start_headless_blocking.py",
+        "start_blender_mcp_headless.py",
+        "blender-mcp-bma/addon.py",
+    )
+    if "blender" in text and any(marker in text for marker in headless_markers):
+        if port in text:
+            return "headless_blender"
+
+    if (
+        "blender-mcp" in text
+        and "start-headless-blender" not in text
+        and not any(marker in text for marker in headless_markers)
+    ):
+        return "blender_mcp_server"
+
+    return None
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -310,34 +503,15 @@ def main(argv: list[str] | None = None) -> None:
             addon_path=getattr(args, "addon", None),
             wait=getattr(args, "wait", False),
         ))
+    elif args.command == "stop-headless-blender":
+        sys.exit(cmd_stop_headless_blender(
+            cfg,
+            dry_run=getattr(args, "dry_run", False),
+            timeout_sec=getattr(args, "timeout_sec", 5.0),
+        ))
     elif args.command == "smoke":
         sys.exit(cmd_smoke(cfg, args.tools, output=getattr(args, "output", None)))
 
 
 if __name__ == "__main__":
     main()
-
-
-# ---------------------------------------------------------------------------
-# Internal helper
-# ---------------------------------------------------------------------------
-
-def _wait_for_process(is_running_fn, stop_fn) -> int:
-    """Block until SIGINT/SIGTERM, then call stop_fn."""
-    _stop_requested = False
-
-    def _handler(signum, frame):  # noqa: ARG001
-        nonlocal _stop_requested
-        print(f"\n[bma-mcp] Signal {signum} received, stopping…", file=sys.stderr)
-        _stop_requested = True
-
-    signal.signal(signal.SIGINT, _handler)
-    signal.signal(signal.SIGTERM, _handler)
-
-    try:
-        while not _stop_requested and is_running_fn():
-            time.sleep(0.5)
-    finally:
-        stop_fn()
-
-    return 0

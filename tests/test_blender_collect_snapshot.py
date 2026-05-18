@@ -32,7 +32,13 @@ class FakeCameraData:
     sensor_width = 36.0
 
 
-def fake_object(name: str, object_type: str, data, location=(0.0, 0.0, 0.0)):
+def fake_object(
+    name: str,
+    object_type: str,
+    data,
+    location=(0.0, 0.0, 0.0),
+    custom_props: dict | None = None,
+):
     return SimpleNamespace(
         name=name,
         type=object_type,
@@ -44,6 +50,7 @@ def fake_object(name: str, object_type: str, data, location=(0.0, 0.0, 0.0)):
         material_slots=[],
         parent=None,
         users_collection=[],
+        get=lambda key, default=None: (custom_props or {}).get(key, default),
     )
 
 
@@ -114,6 +121,23 @@ def test_collect_snapshot_returns_scene_snapshot_compatible_dict(monkeypatch) ->
     assert validated.blender_version == "4.0.0"
 
 
+def test_collect_snapshot_prefers_bma_primitive_hint_custom_property(monkeypatch) -> None:
+    bpy = make_fake_bpy(empty=True)
+    obj = fake_object(
+        "Lowpoly_Roof",
+        "MESH",
+        FakeMeshData("GeneratedMesh"),
+        custom_props={"bma_primitive_hint": "cone"},
+    )
+    bpy.context.scene.objects = [obj]
+    bpy.data.objects = [obj]
+    monkeypatch.setitem(sys.modules, "bpy", bpy)
+
+    snapshot = SceneSnapshot.model_validate(collect_snapshot({}))
+
+    assert snapshot.objects[0].primitive_hint == "cone"
+
+
 def test_collect_snapshot_writes_scene_snapshot_json(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setitem(sys.modules, "bpy", make_fake_bpy())
     output_dir = tmp_path / "snapshot"
@@ -143,4 +167,3 @@ def test_collect_snapshot_json_round_trip(monkeypatch) -> None:
     snapshot = collect_snapshot({})
 
     assert SceneSnapshot.model_validate_json(json.dumps(snapshot)) == SceneSnapshot.model_validate(snapshot)
-

@@ -1,5 +1,7 @@
 """Aggregate scene validator entry point."""
 
+import re
+from collections import Counter
 from inspect import signature
 from pathlib import Path
 
@@ -68,11 +70,17 @@ class SceneValidator:
             for result in validator_results
             for issue in result.issues
         ]
+        contamination_summary, contamination_issues = self._scene_contamination_summary(task, snapshot)
+        issues.extend(contamination_issues)
         has_required_error = any(
             self._has_required_error(result, task.success_criteria)
             for result in active_results
         )
         overall_status = self._overall_status(total_score, has_required_error)
+
+        summary = self._summary(validator_results, active_results, task.success_criteria)
+        summary["issues_total"] = int(summary["issues_total"]) + len(contamination_issues)
+        summary.update(contamination_summary)
 
         return SceneValidationResult(
             task_id=task.id,
@@ -80,7 +88,7 @@ class SceneValidator:
             total_score=total_score,
             validators=validator_results,
             issues=issues,
-            summary=self._summary(validator_results, active_results, task.success_criteria),
+            summary=summary,
         )
 
     def _run_validator(
@@ -168,3 +176,48 @@ class SceneValidator:
                 for result in active_results
             },
         }
+
+    def _scene_contamination_summary(
+        self,
+        task: BenchmarkTask,
+        snapshot: SceneSnapshot,
+    ) -> tuple[dict[str, object], list[ValidationIssue]]:
+        actual_object_count = len(snapshot.objects)
+        expected_object_count = len(task.expected_scene.objects)
+        extra_object_count = max(0, actual_object_count - expected_object_count)
+        duplicate_name_count = _duplicate_base_name_count([obj.name for obj in snapshot.objects])
+
+        issues: list[ValidationIssue] = []
+        if extra_object_count > 0:
+            issues.append(
+                ValidationIssue(
+                    code="scene_contains_unexpected_objects",
+                    message=(
+                        "Scene contains more objects than expected; this may indicate "
+                        "cross-run contamination."
+                    ),
+                    severity=ValidationSeverity.WARNING,
+                    expected_path="expected_scene.objects",
+                    actual_path="snapshot.objects",
+                    expected_value=expected_object_count,
+                    actual_value=actual_object_count,
+                )
+            )
+
+        return (
+            {
+                "actual_object_count": actual_object_count,
+                "expected_object_count": expected_object_count,
+                "extra_object_count": extra_object_count,
+                "duplicate_name_count": duplicate_name_count,
+            },
+            issues,
+        )
+
+
+_BLENDER_NUMERIC_SUFFIX_RE = re.compile(r"\.\d{3}$")
+
+
+def _duplicate_base_name_count(names: list[str]) -> int:
+    bases = [_BLENDER_NUMERIC_SUFFIX_RE.sub("", name) for name in names]
+    return sum(count - 1 for count in Counter(bases).values() if count > 1)

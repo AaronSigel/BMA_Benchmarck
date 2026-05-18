@@ -98,6 +98,44 @@ def _group_table(groups: list) -> str:
     return _md_table(headers, rows)
 
 
+def _freshness_rows(metadata: dict[str, Any]) -> list[list[str]]:
+    freshness = metadata.get("artifact_freshness")
+    runtime = metadata.get("runtime")
+    smoke = metadata.get("mcp_contract_smoke")
+    rows: list[list[str]] = []
+    if isinstance(freshness, dict):
+        rows.extend(
+            [
+                ["Output root", _na(freshness.get("output_root"))],
+                ["Run created at", _na(freshness.get("created_at"))],
+                ["Clean output", _na(freshness.get("clean_output"))],
+                ["Removed existing output", _na(freshness.get("removed_existing_output"))],
+            ]
+        )
+    if isinstance(runtime, dict):
+        socket_info = runtime.get("mcp_socket")
+        socket_text = "N/A"
+        if isinstance(socket_info, dict):
+            socket_text = f"{socket_info.get('host')}:{socket_info.get('port')}"
+        process = runtime.get("blender_process")
+        pid = process.get("pid") if isinstance(process, dict) else None
+        addon = process.get("addon_path") if isinstance(process, dict) else None
+        rows.extend(
+            [
+                ["Latest artifact mtime", _na(runtime.get("latest_run_file_mtime"))],
+                ["MCP profile", _na(runtime.get("mcp_profile"))],
+                ["MCP socket", socket_text],
+                ["Blender PID", _na(pid)],
+                ["Addon path", _na(addon)],
+                ["Tool contract hash", _na(runtime.get("tool_contract_hash"))],
+                ["Git dirty", _na(runtime.get("git_dirty"))],
+            ]
+        )
+    if isinstance(smoke, dict):
+        rows.append(["Contract smoke", "passed" if smoke.get("ok") else "failed"])
+    return rows
+
+
 def build_markdown_report(
     analysis: ExperimentAnalysisResult,
     config: ReportConfig,
@@ -116,6 +154,10 @@ def build_markdown_report(
 
     lines.append(f"# {config.title}")
     lines.append(f"\n**Experiment:** `{analysis.experiment_id}`\n")
+    freshness_rows = _freshness_rows(analysis.metadata)
+    if freshness_rows:
+        lines.append("## Artifact Freshness\n")
+        lines.append(_md_table(["Field", "Value"], freshness_rows))
 
     # ------------------------------------------------------------------
     # 1. Summary
@@ -222,16 +264,18 @@ def build_markdown_report(
     # ------------------------------------------------------------------
     if config.include_runs and runs:
         lines.append("## 8. Run Details\n")
-        det_headers = ["Run ID", "Task", "Strategy", "Model", "Success", "Score", "Tool Calls", "Duration (s)", "Errors"]
+        det_headers = ["Run ID", "Task", "Strategy", "Model", "MCP Profile", "Success", "Score", "Tool Calls", "LLM Calls", "Duration (s)", "Errors"]
         det_rows = [
             [
                 r.run_id,
                 r.task_id,
                 r.strategy,
                 _na(r.model),
+                _na(r.mcp_profile),
                 _na(r.success),
                 _na(round(r.total_score, 4) if r.total_score is not None else None),
                 str(r.tool_call_count),
+                str(r.llm_call_count),
                 _na(round(r.duration_sec, 1) if r.duration_sec is not None else None),
                 str(r.error_count),
             ]
@@ -284,6 +328,16 @@ _HTML_TEMPLATE = """\
 <body>
 <h1>{{ title }}</h1>
 <p class="meta">Experiment: <code>{{ experiment_id }}</code></p>
+
+{% if freshness_rows %}
+<h2>Artifact Freshness</h2>
+<table>
+<tr><th>Field</th><th>Value</th></tr>
+{% for label, val in freshness_rows %}
+<tr><td>{{ label }}</td><td>{{ val }}</td></tr>
+{% endfor %}
+</table>
+{% endif %}
 
 <h2>1. Summary</h2>
 <table>
@@ -427,6 +481,7 @@ def build_html_report(
         ("Best run", _html_na(s.best_run)),
         ("Worst run", _html_na(s.worst_run)),
     ]
+    freshness_rows = _freshness_rows(analysis.metadata)
 
     run_rank_headers = ["Rank", "Run ID", "Task", "Strategy", "Score", "Duration (s)", "Tool Calls"]
 
@@ -465,7 +520,7 @@ def build_html_report(
                     ec[key[len("error."):]] += val
         error_rows = ec.most_common()
 
-    run_detail_headers = ["Run ID", "Task", "Strategy", "Model", "Success", "Score", "Tool Calls", "Duration (s)", "Errors"]
+    run_detail_headers = ["Run ID", "Task", "Strategy", "Model", "MCP Profile", "Success", "Score", "Tool Calls", "LLM Calls", "Duration (s)", "Errors"]
     run_detail_rows: list[list[str]] = []
     if config.include_runs:
         for r in runs:
@@ -474,9 +529,11 @@ def build_html_report(
                 r.task_id,
                 r.strategy,
                 _html_na(r.model),
+                _html_na(r.mcp_profile),
                 _html_bool(r.success),
                 _html_na(round(r.total_score, 4) if r.total_score is not None else None),
                 str(r.tool_call_count),
+                str(r.llm_call_count),
                 _html_na(round(r.duration_sec, 1) if r.duration_sec is not None else None),
                 str(r.error_count),
             ])
@@ -491,6 +548,7 @@ def build_html_report(
         title=config.title,
         experiment_id=analysis.experiment_id,
         summary_rows=summary_rows,
+        freshness_rows=freshness_rows,
         run_rank_headers=run_rank_headers,
         top_runs=top_runs,
         bottom_runs=bottom_runs,

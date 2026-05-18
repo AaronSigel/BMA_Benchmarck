@@ -73,13 +73,13 @@ def _extract_usage_from_step(step_metadata: dict[str, Any] | None, raw_llm: Any)
 
 
 def _aggregate_token_usage(trace: AgentTrace) -> tuple[int | None, int | None, int | None]:
-    """Sum token usage across all LLM_CALL steps."""
+    """Sum token usage across all LLM-originated steps."""
     total_prompt: int = 0
     total_completion: int = 0
     found_any = False
 
     for step in trace.steps:
-        if step.step_type != AgentStepType.LLM_CALL:
+        if step.step_type not in {AgentStepType.LLM_CALL, AgentStepType.PLAN}:
             continue
         usage = _extract_usage_from_step(step.metadata, step.raw_llm_response)
         p = usage.get("prompt_tokens")
@@ -128,6 +128,7 @@ def compute_agent_summary(trace: AgentTrace) -> AgentMetricsSummary:
             llm_call_count += 1
         elif t == AgentStepType.PLAN:
             planning_step_count += 1
+            llm_call_count += 1
         elif t == AgentStepType.OBSERVATION:
             observation_count += 1
         elif t == AgentStepType.FINAL:

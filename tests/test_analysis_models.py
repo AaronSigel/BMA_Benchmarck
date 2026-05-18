@@ -113,6 +113,57 @@ class TestRunAnalysisResult:
         assert result.error_count >= 2
         assert "error.tool_runtime_error" in result.metrics or "error.tool_disabled" in result.metrics
 
+    def test_mcp_profile_from_run_result_execution_summary(self):
+        from benchmark.analysis.run_analysis import analyze_run
+        from benchmark.analysis.trace_reader import RunArtifactBundle
+        from benchmark.runner.models import ExecutionMode, RunResult, RunStatus
+
+        run_result = RunResult(
+            run_id="pilot__task__agent__no_python__r1",
+            task_id="task",
+            status=RunStatus.ERROR,
+            execution_mode=ExecutionMode.AGENT_MCP,
+            validation_result_path=None,
+            scene_snapshot_path=None,
+            artifacts_dir=Path("artifacts"),
+            total_score=None,
+            overall_status=None,
+            started_at="2026-05-16T10:00:00Z",
+            finished_at="2026-05-16T10:00:01Z",
+            duration_sec=1.0,
+            summary={"execution": {"mcp_profile": "no_python"}},
+        )
+
+        result = analyze_run(RunArtifactBundle(run_dir=FIXTURES, run_result=run_result))
+
+        assert result.mcp_profile == "no_python"
+
+    def test_nested_agent_trace_is_listed_as_artifact(self, tmp_path: Path):
+        from benchmark.analysis.run_analysis import analyze_run
+        from benchmark.analysis.trace_reader import RunArtifactBundle
+        from benchmark.runner.models import ExecutionMode, RunResult, RunStatus
+
+        nested = tmp_path / "agent_runs" / "agent1"
+        nested.mkdir(parents=True)
+        (nested / "agent_trace.json").write_text("{}", encoding="utf-8")
+        run_result = RunResult(
+            run_id="r1",
+            task_id="task",
+            status=RunStatus.PASSED,
+            execution_mode=ExecutionMode.AGENT_MCP,
+            validation_result_path=None,
+            scene_snapshot_path=None,
+            artifacts_dir=tmp_path,
+            total_score=None,
+            overall_status=None,
+            started_at="2026-05-16T10:00:00Z",
+            finished_at="2026-05-16T10:00:01Z",
+        )
+
+        result = analyze_run(RunArtifactBundle(run_dir=tmp_path, run_result=run_result))
+
+        assert str(nested / "agent_trace.json") in result.artifacts
+
 
 # ---------------------------------------------------------------------------
 # ExperimentSummary

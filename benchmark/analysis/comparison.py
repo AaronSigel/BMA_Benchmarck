@@ -422,6 +422,7 @@ def rank_groups_by_efficiency(
 
 def analyze_experiment(experiment_dir: Path | str) -> ExperimentAnalysisResult:
     """Discover and analyze all runs under *experiment_dir* (idempotent)."""
+    import json
     from benchmark.analysis.run_analysis import analyze_run
     from benchmark.analysis.trace_reader import discover_run_artifacts, load_run_bundle
 
@@ -439,4 +440,18 @@ def analyze_experiment(experiment_dir: Path | str) -> ExperimentAnalysisResult:
             import logging
             logging.getLogger(__name__).warning("Skipping run dir %s: %s", run_dir, exc)
 
-    return analyze_run_results(results, experiment_id=root.name)
+    metadata: dict = {}
+    manifest_path = root / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            raw_metadata = manifest.get("metadata")
+            if isinstance(raw_metadata, dict):
+                metadata.update(raw_metadata)
+            metadata["manifest_path"] = str(manifest_path)
+            metadata["manifest_generated_at"] = manifest.get("generated_at")
+            metadata["tool_contract_hash"] = raw_metadata.get("runtime", {}).get("tool_contract_hash") if isinstance(raw_metadata, dict) else None
+        except (OSError, json.JSONDecodeError) as exc:
+            metadata["manifest_error"] = str(exc)
+
+    return analyze_run_results(results, experiment_id=root.name, metadata=metadata)

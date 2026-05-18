@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+import yaml
+from pydantic import ValidationError
+
+log = logging.getLogger(__name__)
 
 from benchmark.agent.config_loader import load_agent_config
 from benchmark.agent.llm import LlmResponse, LlmToolCall, MockLlmClient
-from benchmark.agent.models import AgentStrategyName
+from benchmark.agent.models import AgentConfig, AgentStrategyName, LlmProvider
 from benchmark.agent.remote import MockRemoteAgentClient
 from benchmark.agent.runtime import AgentRuntime
-from benchmark.agent.tool_executor import MockToolExecutor, ToolExecutor
+from benchmark.agent.tool_executor import McpToolExecutor, MockToolExecutor, ToolExecutor
+from benchmark.blender.models import SceneSnapshot
+from benchmark.mcp.config import McpServerConfig
+from benchmark.mcp.server_adapter import ExternalBlenderMcpServerAdapter
 from benchmark.runner.execution import ExecutionBackend, ExecutionResult
 from benchmark.runner.models import ExecutionMode, RunConfig
 from benchmark.tasks.loader import load_task
@@ -28,7 +37,7 @@ class AgentExecutionBackend(ExecutionBackend):
         self.tool_executor = tool_executor
 
     def execute(self, config: RunConfig) -> ExecutionResult:
-        output_dir = Path(config.agent_output_dir or config.output_dir)
+        output_dir = Path(config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         agent_config_path = config.agent_config_path or self.agent_config_path
         if agent_config_path is None:
@@ -55,32 +64,100 @@ class AgentExecutionBackend(ExecutionBackend):
                 update={"strategy": AgentStrategyName.REMOTE_AGENT}
             )
 
-        result = AgentRuntime(
-            agent_config,
-            tool_executor=self.tool_executor or _default_tool_executor(agent_config.strategy),
-            llm_client=_default_llm_client(agent_config.strategy),
-            remote_agent_client=_default_remote_client(agent_config.strategy),
-        ).run(
-            task_id=config.task_id,
-            task=task,
-            artifacts_dir=output_dir,
-        )
+        tool_executor = self.tool_executor or _build_tool_executor(agent_config.strategy, config)
+        lifecycle_error, pre_run_snapshot_path = _prepare_blender_scene(tool_executor, output_dir, config.task_id)
+        if lifecycle_error is not None:
+            return ExecutionResult(
+                ok=False,
+                scene_snapshot_path=pre_run_snapshot_path,
+                artifacts_dir=output_dir,
+                error=lifecycle_error,
+                metadata={
+                    "strategy": agent_config.strategy.value,
+                    "agent_id": agent_config.agent_id,
+                    "mcp_profile": agent_config.mcp_profile,
+                    "pre_run_snapshot_path": str(pre_run_snapshot_path) if pre_run_snapshot_path else None,
+                },
+            )
+        tool_executor = _wrap_export_paths(tool_executor, output_dir)
+        log.info("[task:%s] strategy=%s profile=%s executor=%s", config.task_id, agent_config.strategy, agent_config.mcp_profile, type(tool_executor).__name__)
+        try:
+            result = AgentRuntime(
+                agent_config,
+                tool_executor=tool_executor,
+                llm_client=_default_llm_client(agent_config),
+                remote_agent_client=_default_remote_client(agent_config.strategy),
+            ).run(
+                task_id=config.task_id,
+                task=task,
+                artifacts_dir=output_dir,
+            )
+        except Exception as error:
+            scene_snapshot_path = _auto_capture_snapshot(tool_executor, output_dir)
+            return ExecutionResult(
+                ok=False,
+                scene_snapshot_path=scene_snapshot_path,
+                artifacts_dir=output_dir,
+                error=str(error),
+                metadata={
+                    "strategy": agent_config.strategy.value,
+                    "agent_id": agent_config.agent_id,
+                    "mcp_profile": agent_config.mcp_profile,
+                    "pre_run_snapshot_path": str(pre_run_snapshot_path) if pre_run_snapshot_path else None,
+                },
+            )
+
+        # Always try to capture a scene snapshot — even on error — so partial
+        # validation can run and the scene state is preserved for debugging.
+        scene_snapshot_path = result.scene_snapshot_path
+        captured_post_run_snapshot = False
+        if scene_snapshot_path is None:
+            status_label = "success" if result.ok else "error"
+            log.info("[task:%s] auto-capturing scene snapshot after %s", config.task_id, status_label)
+            scene_snapshot_path = _auto_capture_snapshot(tool_executor, output_dir)
+            if scene_snapshot_path:
+                captured_post_run_snapshot = True
+                log.info("[task:%s] scene snapshot captured: %s", config.task_id, scene_snapshot_path)
+            else:
+                log.warning("[task:%s] auto-capture failed: no snapshot produced", config.task_id)
+
+        agent_run_result = result
+        if scene_snapshot_path is not None and result.scene_snapshot_path != scene_snapshot_path:
+            summary = dict(result.summary)
+            execution_summary = summary.get("execution")
+            if isinstance(execution_summary, dict):
+                summary["execution"] = {
+                    **execution_summary,
+                    "scene_snapshot_path": str(scene_snapshot_path),
+                }
+            agent_run_result = result.model_copy(
+                update={
+                    "scene_snapshot_path": scene_snapshot_path,
+                    "summary": summary,
+                }
+            )
+
         metadata = {
             **result.metadata,
             "trace_path": str(result.trace_path) if result.trace_path else None,
-            "agent_run": result.model_dump(mode="json"),
+            "agent_run": agent_run_result.model_dump(mode="json"),
             "warning": None,
+            "mcp_profile": agent_config.mcp_profile,
+            "agent_id": agent_config.agent_id,
+            "strategy": agent_config.strategy.value,
+            "pre_run_snapshot_path": str(pre_run_snapshot_path) if pre_run_snapshot_path else None,
+            "post_run_snapshot_captured": captured_post_run_snapshot,
         }
-        if result.ok and result.scene_snapshot_path is None:
+        if result.ok and scene_snapshot_path is None:
             metadata["warning"] = "agent did not produce scene_snapshot_path"
         return ExecutionResult(
-            ok=result.ok and result.scene_snapshot_path is not None,
-            scene_snapshot_path=result.scene_snapshot_path,
+            ok=result.ok and scene_snapshot_path is not None,
+            scene_snapshot_path=scene_snapshot_path,
             artifacts_dir=output_dir,
             output_files=[result.trace_path] if result.trace_path else [],
             error=result.error or (
                 "agent did not produce scene_snapshot_path"
-                if result.scene_snapshot_path is None
+                if scene_snapshot_path is None
                 else None
             ),
             metadata=metadata,
@@ -97,14 +174,122 @@ def _load_task_payload(config: RunConfig) -> dict:
     return load_task(config.task_path).model_dump(mode="json", exclude_none=True)
 
 
-def _default_tool_executor(strategy: AgentStrategyName) -> ToolExecutor:
+def _auto_capture_snapshot(tool_executor: ToolExecutor, output_dir: Path) -> Path | None:
+    """Capture a full SceneSnapshot as harness infrastructure."""
+    snapshot_path = output_dir / "scene_snapshot.json"
+    return _capture_snapshot_to_path(tool_executor, snapshot_path)
+
+
+def _prepare_blender_scene(
+    tool_executor: ToolExecutor,
+    output_dir: Path,
+    task_id: str,
+) -> tuple[str | None, Path | None]:
+    """Reset Blender and assert the pre-run scene is empty for MCP-backed runs."""
+    mcp_executor = _mcp_executor(tool_executor)
+    if mcp_executor is None:
+        return None, None
+
+    log.info("[task:%s] resetting Blender scene before run", task_id)
+    reset_result = mcp_executor.adapter.reset_scene()
+    if "warning" in reset_result:
+        warning = str(reset_result["warning"])
+        log.warning("[task:%s] scene reset failed: %s", task_id, warning)
+        return f"scene reset failed: {warning}", None
+
+    pre_run_snapshot_path = output_dir / "pre_run_scene_snapshot.json"
+    captured_path = _capture_snapshot_to_path(mcp_executor, pre_run_snapshot_path)
+    if captured_path is None:
+        return "pre-run scene snapshot could not be collected", None
+
+    try:
+        snapshot = SceneSnapshot.model_validate_json(captured_path.read_text(encoding="utf-8"))
+    except (OSError, ValidationError) as error:
+        return f"pre-run scene snapshot is invalid: {error}", captured_path
+
+    object_count = len(snapshot.objects)
+    if object_count != 0:
+        return f"pre-run scene is not clean after reset: object_count={object_count}", captured_path
+
+    log.info("[task:%s] pre-run scene is clean", task_id)
+    return None, captured_path
+
+
+def _capture_snapshot_to_path(tool_executor: ToolExecutor, snapshot_path: Path) -> Path | None:
+    mcp_executor = _mcp_executor(tool_executor)
+    if mcp_executor is None:
+        return None
+    try:
+        result = mcp_executor.adapter.collect_scene_snapshot(snapshot_path)
+    except Exception as error:
+        log.warning("scene snapshot collection failed: %s", error)
+        return None
+    if isinstance(result, dict) and "warning" in result:
+        log.warning("scene snapshot collection warning: %s", result["warning"])
+        return None
+    if snapshot_path.exists():
+        return snapshot_path
+    return None
+
+
+class _ExportPathFixingExecutor:
+    """Wraps a ToolExecutor and rewrites relative bma_export_scene filepaths."""
+
+    def __init__(self, wrapped: ToolExecutor, artifacts_dir: Path) -> None:
+        self._wrapped = wrapped
+        self._artifacts_dir = artifacts_dir
+
+    def call_tool(
+        self,
+        tool_name,
+        arguments=None,
+    ):
+        if tool_name == "bma_export_scene" and isinstance(arguments, dict):
+            fp = arguments.get("filepath", "")
+            if fp and not Path(fp).is_absolute():
+                arguments = {**arguments, "filepath": str(self._artifacts_dir / fp)}
+                log.info("[export_fix] rewritten filepath → %s", arguments["filepath"])
+        return self._wrapped.call_tool(tool_name, arguments)
+
+    def assert_tool_allowed(self, tool_name: str) -> None:
+        return self._wrapped.assert_tool_allowed(tool_name)
+
+    def normalize_tool_result(self, result) -> dict:
+        return self._wrapped.normalize_tool_result(result)
+
+
+def _wrap_export_paths(tool_executor: ToolExecutor, artifacts_dir: Path) -> ToolExecutor:
+    if not isinstance(tool_executor, McpToolExecutor):
+        return tool_executor
+    return _ExportPathFixingExecutor(tool_executor, artifacts_dir)  # type: ignore[return-value]
+
+
+def _mcp_executor(tool_executor: ToolExecutor) -> McpToolExecutor | None:
+    if isinstance(tool_executor, McpToolExecutor):
+        return tool_executor
+    wrapped = getattr(tool_executor, "_wrapped", None)
+    if isinstance(wrapped, McpToolExecutor):
+        return wrapped
+    return None
+
+
+def _build_tool_executor(strategy: AgentStrategyName, config: RunConfig) -> ToolExecutor:
     if strategy == AgentStrategyName.REMOTE_AGENT:
         return MockToolExecutor()
+    if config.mcp_config_path is not None and config.mcp_config_path.exists():
+        raw = yaml.safe_load(config.mcp_config_path.read_text(encoding="utf-8")) or {}
+        mcp_config = McpServerConfig(**{k: v for k, v in raw.items() if k != "env"})
+        adapter = ExternalBlenderMcpServerAdapter(mcp_config)
+        return McpToolExecutor(adapter, profile=config.mcp_profile or mcp_config.profile)
     return MockToolExecutor(results={"get_scene_info": {"objects": []}})
 
 
-def _default_llm_client(strategy: AgentStrategyName) -> MockLlmClient | None:
-    if strategy == AgentStrategyName.REMOTE_AGENT:
+def _default_llm_client(agent_config: AgentConfig) -> MockLlmClient | None:
+    if agent_config.strategy == AgentStrategyName.REMOTE_AGENT:
+        return None
+    # If a real LLM provider is configured, return None so AgentRuntime builds
+    # the client from config via the factory.
+    if agent_config.llm is not None and agent_config.llm.provider != LlmProvider.MOCK:
         return None
     return MockLlmClient(
         [LlmResponse(tool_calls=[LlmToolCall(name="get_scene_info", arguments={})])]

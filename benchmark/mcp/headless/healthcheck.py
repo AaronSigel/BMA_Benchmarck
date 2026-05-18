@@ -26,9 +26,10 @@ def send_blender_socket_command(
     Payload format:  {"type": <command_type>, "params": <params>}
     """
     payload = json.dumps({"type": command_type, "params": params or {}}).encode()
+    connect_host = "127.0.0.1" if host == "localhost" else host
 
     try:
-        sock = socket.create_connection((host, port), timeout=timeout_sec)
+        sock = socket.create_connection((connect_host, port), timeout=timeout_sec)
     except OSError as exc:
         raise BlenderSocketUnavailableError(
             f"Cannot connect to Blender socket at {host}:{port}: {exc}"

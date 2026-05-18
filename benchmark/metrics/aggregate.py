@@ -18,14 +18,26 @@ def aggregate_metric_rows(rows: list[RunMetricRow]) -> MetricSummary:
 
 def aggregate_run_results(results: list[RunResult]) -> MetricsSummary:
     scores = [result.total_score for result in results if result.total_score is not None]
+    average_score_on_validated_runs = sum(scores) / len(scores) if scores else None
+    attempted_runs = len(results)
+    passed_runs = sum(1 for result in results if result.status is RunStatus.PASSED)
+    failed_runs = sum(1 for result in results if result.status is RunStatus.FAILED)
+    error_runs = sum(1 for result in results if result.status is RunStatus.ERROR)
     return MetricsSummary(
-        total_runs=len(results),
-        passed_runs=sum(1 for result in results if result.status is RunStatus.PASSED),
-        failed_runs=sum(1 for result in results if result.status is RunStatus.FAILED),
-        error_runs=sum(1 for result in results if result.status is RunStatus.ERROR),
-        average_score=(sum(scores) / len(scores) if scores else None),
+        total_runs=attempted_runs,
+        attempted_runs=attempted_runs,
+        completed_runs=passed_runs + failed_runs,
+        validated_runs=len(scores),
+        passed_runs=passed_runs,
+        failed_runs=failed_runs,
+        error_runs=error_runs,
+        average_score=average_score_on_validated_runs,
+        average_score_on_validated_runs=average_score_on_validated_runs,
         min_score=(min(scores) if scores else None),
         max_score=(max(scores) if scores else None),
+        success_rate_on_all_attempted_runs=(
+            passed_runs / attempted_runs if attempted_runs else None
+        ),
         metrics=_summary_metrics(results),
     )
 

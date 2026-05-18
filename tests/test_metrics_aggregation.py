@@ -44,12 +44,17 @@ def test_aggregate_run_results_ignores_missing_scores_for_average() -> None:
     summary = aggregate_run_results(results)
 
     assert summary.total_runs == 3
+    assert summary.attempted_runs == 3
+    assert summary.completed_runs == 2
+    assert summary.validated_runs == 2
     assert summary.passed_runs == 1
     assert summary.failed_runs == 1
     assert summary.error_runs == 1
     assert summary.average_score == 0.625
+    assert summary.average_score_on_validated_runs == 0.625
     assert summary.min_score == 0.25
     assert summary.max_score == 1.0
+    assert summary.success_rate_on_all_attempted_runs == 1 / 3
     assert [metric.name for metric in summary.metrics].count("total_score") == 2
 
 
@@ -62,6 +67,8 @@ def test_aggregate_run_results_returns_none_scores_when_no_scores_exist() -> Non
     assert summary.min_score is None
     assert summary.max_score is None
     assert summary.error_runs == 1
+    assert summary.validated_runs == 0
+    assert summary.success_rate_on_all_attempted_runs == 0.0
 
 
 def test_group_by_task() -> None:

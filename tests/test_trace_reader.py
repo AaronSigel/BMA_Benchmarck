@@ -172,6 +172,21 @@ class TestDiscoverRunArtifacts:
         found = discover_run_artifacts(tmp_path)
         assert found == sorted(found)
 
+    def test_excludes_nested_agent_runs_when_parent_run_result_exists(self, tmp_path):
+        run_dir = tmp_path / "run_parent"
+        nested = run_dir / "agent_runs" / "agent_run_1"
+        nested.mkdir(parents=True)
+        (run_dir / "run_result.json").write_text(
+            (FIXTURES / "run_result_success.json").read_text()
+        )
+        (nested / "agent_trace.json").write_text(
+            (FIXTURES / "agent_trace_react_success.json").read_text()
+        )
+
+        found = discover_run_artifacts(tmp_path)
+
+        assert found == [run_dir]
+
 
 # ---------------------------------------------------------------------------
 # load_run_bundle
@@ -206,6 +221,21 @@ class TestLoadRunBundle:
         assert bundle.agent_trace is not None
         assert bundle.run_result is not None
         assert bundle.validation_result is not None
+
+    def test_loads_nested_agent_trace_from_parent_run_dir(self, tmp_path):
+        run_dir = self._make_run_dir(tmp_path, with_run_result=True, with_validation=True)
+        nested = run_dir / "agent_runs" / "agent_run_1"
+        nested.mkdir(parents=True)
+        (nested / "agent_trace.json").write_text(
+            (FIXTURES / "agent_trace_react_success.json").read_text()
+        )
+
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            bundle = load_run_bundle(run_dir)
+
+        assert bundle.agent_trace is not None
+        assert bundle.agent_trace.strategy.value == "react"
 
     def test_missing_trace_handled_gracefully(self, tmp_path):
         run_dir = self._make_run_dir(tmp_path, with_run_result=True, with_validation=True)

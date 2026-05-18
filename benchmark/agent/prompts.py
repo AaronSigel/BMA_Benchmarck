@@ -43,6 +43,8 @@ class PromptBuilder:
             "Use only the MCP tools listed below; do not invent tools.",
             f"Allowed tools: {', '.join(tool_names) if tool_names else 'none'}.",
             f"Tool contracts:\n{tools_json}",
+            "When a task specifies object dimensions, use the dimensions parameter; do not approximate dimensions with scale.",
+            "When a task specifies material names, pass material_name to bma_set_material.",
             "Return tool_calls when the API supports them, otherwise return a JSON action in content.",
             (
                 "Fallback JSON action format: "
@@ -90,6 +92,12 @@ class PromptBuilder:
                 self.build_task_prompt(task),
                 "Create a concise execution plan using only allowed MCP tools.",
                 "Plan steps must be actionable and aimed at modifying the Blender scene.",
+                "Return only JSON. Do not wrap it in Markdown and do not include explanatory text.",
+                (
+                    'Required schema: {"plan":[{"step":1,"description":"...",'
+                    '"tool":"allowed_tool_name","arguments":{}}]}.'
+                ),
+                "Use integer step numbers starting at 1. Every step must include description, tool, and arguments.",
             ]
         )
 

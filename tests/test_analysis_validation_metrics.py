@@ -27,8 +27,19 @@ FIXTURES = Path(__file__).parent / "fixtures" / "analysis"
 # ---------------------------------------------------------------------------
 
 
-def _issue(severity: str = "error", code: str = "test_code") -> ValidationIssue:
-    return ValidationIssue(code=code, message="test issue", severity=severity)
+def _issue(
+    severity: str = "error",
+    code: str = "test_code",
+    expected_path: str | None = None,
+    actual_path: str | None = None,
+) -> ValidationIssue:
+    return ValidationIssue(
+        code=code,
+        message="test issue",
+        severity=severity,
+        expected_path=expected_path,
+        actual_path=actual_path,
+    )
 
 
 def _validator(
@@ -248,16 +259,16 @@ class TestIssueCount:
         assert s.validation_warning_count == 0
 
     def test_validator_level_issues_counted(self):
-        v = _validator("object_validator", issues=[_issue("error"), _issue("warning")])
+        v = _validator("object_validator", issues=[_issue("error", code="err"), _issue("warning", code="warn")])
         val = _scene_result(validators=[v])
         s = compute_validation_summary(val)
         assert s.validation_error_count == 1
         assert s.validation_warning_count == 1
 
     def test_top_level_and_validator_issues_combined(self):
-        v = _validator("material_validator", issues=[_issue("error")])
+        v = _validator("material_validator", issues=[_issue("error", code="validator_err")])
         val = _scene_result(
-            issues=[_issue("warning"), _issue("error")],
+            issues=[_issue("warning", code="top_warn"), _issue("error", code="top_err")],
             validators=[v],
         )
         s = compute_validation_summary(val)
@@ -265,12 +276,26 @@ class TestIssueCount:
         assert s.validation_warning_count == 1
 
     def test_multiple_validators_issues_aggregated(self):
-        v1 = _validator("object_validator", issues=[_issue("error")])
-        v2 = _validator("material_validator", issues=[_issue("error"), _issue("warning")])
+        v1 = _validator("object_validator", issues=[_issue("error", code="object_err")])
+        v2 = _validator("material_validator", issues=[_issue("error", code="mat_err"), _issue("warning", code="mat_warn")])
         val = _scene_result(validators=[v1, v2])
         s = compute_validation_summary(val)
         assert s.validation_error_count == 2
         assert s.validation_warning_count == 1
+
+    def test_duplicate_top_level_and_validator_issue_counted_once(self):
+        issue = _issue(
+            "error",
+            code="dimensions_mismatch",
+            expected_path="expected_scene.objects[0].dimensions",
+            actual_path="snapshot.objects[0].dimensions",
+        )
+        v = _validator("transform_validator", issues=[issue])
+        val = _scene_result(issues=[issue], validators=[v])
+
+        s = compute_validation_summary(val)
+
+        assert s.validation_error_count == 1
 
     def test_fixture_partial_has_errors(self):
         from benchmark.analysis.trace_reader import read_validation_result
@@ -421,6 +446,23 @@ class TestExtractIssues:
         codes = {i["code"] for i in issues}
         assert "top_err" in codes
         assert "obj_warn" in codes
+
+    def test_duplicate_top_level_and_validator_issue_emitted_once(self):
+        issue = _issue(
+            "error",
+            code="dimensions_mismatch",
+            expected_path="expected_scene.objects[0].dimensions",
+            actual_path="snapshot.objects[0].dimensions",
+        )
+        val = _scene_result(
+            issues=[issue],
+            validators=[_validator("transform_validator", issues=[issue])],
+        )
+
+        issues = extract_issues(val)
+
+        assert len(issues) == 1
+        assert issues[0]["code"] == "dimensions_mismatch"
 
     def test_fixture_partial_has_issues(self):
         from benchmark.analysis.trace_reader import read_validation_result

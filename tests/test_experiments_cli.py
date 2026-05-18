@@ -83,6 +83,34 @@ def test_run_and_report_creates_outputs(tmp_path: Path, capsys) -> None:
     assert (output_root / "report.html").is_file()
 
 
+def test_run_and_report_clean_output_flag(tmp_path: Path, capsys) -> None:
+    matrix_path = write_smoke_matrix(tmp_path)
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    (output_root / "stale.json").write_text("{}", encoding="utf-8")
+
+    exit_code = cli.main(["run-and-report", "--matrix", str(matrix_path), "--clean-output"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert f"report: {output_root / 'report.md'}" in captured.out
+    assert not (output_root / "stale.json").exists()
+
+
+def test_run_and_report_existing_output_returns_controlled_error(tmp_path: Path, capsys) -> None:
+    matrix_path = write_smoke_matrix(tmp_path)
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    (output_root / "stale.json").write_text("{}", encoding="utf-8")
+
+    exit_code = cli.main(["run-and-report", "--matrix", str(matrix_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "ERROR:" in captured.out
+    assert "--clean-output" in captured.out
+
+
 def test_run_launches_smoke_matrix(tmp_path: Path, capsys) -> None:
     matrix_path = write_smoke_matrix(tmp_path)
 

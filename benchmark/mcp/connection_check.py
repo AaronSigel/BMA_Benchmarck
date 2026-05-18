@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import socket
 from dataclasses import dataclass, field
 
@@ -21,18 +22,38 @@ class ConnectionCheckResult:
         return self.blender_socket_available and not self.issues
 
 
+def _connect_host(host: str) -> str:
+    """Return the concrete host used for Blender socket probes."""
+    return "127.0.0.1" if host == "localhost" else host
+
+
 def check_blender_socket(host: str, port: int, timeout_sec: float = 5.0) -> None:
-    """Attempt a TCP connection to the Blender add-on socket.
+    """Verify the Blender add-on socket accepts and answers a JSON command.
 
     Raises BlenderSocketUnavailableError if unreachable.
     """
+    payload = json.dumps({"type": "get_scene_info", "params": {}}).encode()
+    connect_host = _connect_host(host)
     try:
-        sock = socket.create_connection((host, port), timeout=timeout_sec)
+        sock = socket.create_connection((connect_host, port), timeout=timeout_sec)
+        sock.settimeout(timeout_sec)
+        sock.sendall(payload)
+        raw = sock.recv(8192)
         sock.close()
     except OSError as exc:
         raise BlenderSocketUnavailableError(
             f"Cannot reach Blender socket at {host}:{port}: {exc}"
         ) from exc
+    try:
+        response = json.loads(raw)
+    except (json.JSONDecodeError, UnboundLocalError) as exc:
+        raise BlenderSocketUnavailableError(
+            f"Blender socket at {host}:{port} did not return valid JSON: {exc}"
+        ) from exc
+    if isinstance(response, dict) and response.get("status") == "error":
+        raise BlenderSocketUnavailableError(
+            f"Blender socket at {host}:{port} returned error: {response.get('error', response)}"
+        )
 
 
 def check_mcp_server_config(config: McpServerConfig) -> ConnectionCheckResult:

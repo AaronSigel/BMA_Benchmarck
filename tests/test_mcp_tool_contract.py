@@ -74,6 +74,29 @@ def test_bma_star_tools_are_benchmark_safe():
         assert tc.requires_external_network is False, f"{name} must not require external network"
 
 
+def test_bma_transform_contract_supports_dimensions() -> None:
+    create_params = {p.name for p in TOOL_CONTRACT_MAP["bma_create_object"].parameters}
+    transform_params = {p.name for p in TOOL_CONTRACT_MAP["bma_set_transform"].parameters}
+
+    assert "dimensions" in create_params
+    assert "dimensions" in transform_params
+
+
+def test_bma_set_material_contract_supports_material_name() -> None:
+    params = {p.name for p in TOOL_CONTRACT_MAP["bma_set_material"].parameters}
+
+    assert "material_name" in params
+
+
+def test_bma_light_and_camera_contract_support_checked_fields() -> None:
+    light_params = {p.name for p in TOOL_CONTRACT_MAP["bma_create_light"].parameters}
+    camera_params = {p.name for p in TOOL_CONTRACT_MAP["bma_create_camera"].parameters}
+
+    assert "rotation" in light_params
+    assert "rotation" in camera_params
+    assert "lens" in camera_params
+
+
 def test_tool_categories_populated():
     categories = {tc.category for tc in TOOL_CONTRACTS}
     assert ToolCategory.INSPECTION in categories

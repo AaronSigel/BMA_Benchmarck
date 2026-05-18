@@ -22,9 +22,20 @@ _SECRET_KEYS = {
 }
 
 
-def build_manifest(matrix: ExperimentMatrix) -> GeneratedExperimentManifest:
+def build_manifest(
+    matrix: ExperimentMatrix,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> GeneratedExperimentManifest:
     payload = sanitized_config_payload(matrix)
     readiness = check_matrix_readiness(matrix)
+    merged_metadata = {
+        "readiness_ok": readiness.ok,
+        "readiness_warnings": readiness.warnings,
+        "readiness_errors": readiness.errors,
+    }
+    if metadata:
+        merged_metadata.update(_sanitize(metadata))
     return GeneratedExperimentManifest(
         matrix_id=matrix.matrix_id,
         generated_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -39,11 +50,7 @@ def build_manifest(matrix: ExperimentMatrix) -> GeneratedExperimentManifest:
         repetitions=matrix.repetitions,
         env_requirements=readiness.requirements,
         config_hash=stable_config_hash(payload),
-        metadata={
-            "readiness_ok": readiness.ok,
-            "readiness_warnings": readiness.warnings,
-            "readiness_errors": readiness.errors,
-        },
+        metadata=merged_metadata,
     )
 
 
@@ -58,9 +65,14 @@ def write_manifest(manifest: GeneratedExperimentManifest, path: Path | str) -> N
     manifest_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
 
 
-def write_manifest_for_matrix(matrix: ExperimentMatrix, path: Path | str | None = None) -> Path:
+def write_manifest_for_matrix(
+    matrix: ExperimentMatrix,
+    path: Path | str | None = None,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> Path:
     manifest_path = Path(path) if path is not None else matrix.output_root / "manifest.json"
-    write_manifest(build_manifest(matrix), manifest_path)
+    write_manifest(build_manifest(matrix, metadata=metadata), manifest_path)
     return manifest_path
 
 

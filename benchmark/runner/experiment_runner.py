@@ -1,8 +1,11 @@
 import json
+import logging
 import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 from pydantic import ValidationError
 
@@ -50,9 +53,11 @@ class ExperimentRunner:
         except Exception as error:
             return self._finish_error(config, layout, started_at, started_perf, str(error))
 
+        log.info("[run:%s] task=%s mode=%s", config.run_id[:8], config.task_id, config.execution_mode.value)
         execution_config = config.model_copy(update={"output_dir": layout.run_dir()})
         execution_result = backend.execute(execution_config)
         if not execution_result.ok:
+            log.warning("[run:%s] execution failed: %s", config.run_id[:8], execution_result.error)
             return self._finish_error(
                 config,
                 layout,
@@ -60,16 +65,19 @@ class ExperimentRunner:
                 started_perf,
                 execution_result.error or "execution failed",
                 scene_snapshot_path=execution_result.scene_snapshot_path,
+                artifacts_dir=execution_result.artifacts_dir,
                 summary={"execution": execution_result.metadata},
             )
 
         if execution_result.scene_snapshot_path is None:
+            log.warning("[run:%s] no scene_snapshot_path", config.run_id[:8])
             return self._finish_error(
                 config,
                 layout,
                 started_at,
                 started_perf,
                 "execution did not return scene_snapshot_path",
+                artifacts_dir=execution_result.artifacts_dir,
                 summary={"execution": execution_result.metadata},
             )
 
@@ -96,6 +104,7 @@ class ExperimentRunner:
                 started_perf,
                 str(error),
                 scene_snapshot_path=execution_result.scene_snapshot_path,
+                artifacts_dir=execution_result.artifacts_dir,
                 summary={"execution": execution_result.metadata},
             )
 
@@ -143,8 +152,10 @@ class ExperimentRunner:
         started_perf: float,
         error: str,
         scene_snapshot_path: Path | None = None,
+        artifacts_dir: Path | None = None,
         summary: dict | None = None,
     ) -> RunResult:
+        validation_result_path: Path | None = None
         if scene_snapshot_path is not None and scene_snapshot_path.exists():
             try:
                 scene_snapshot_path = _copy_snapshot_to_layout(
@@ -153,12 +164,28 @@ class ExperimentRunner:
                 )
             except OSError:
                 pass
+            # Run partial validation so error runs still have a scene snapshot analysis.
+            try:
+                task = self._load_task(config)
+                snapshot = _load_snapshot(scene_snapshot_path)
+                validation_result = SceneValidator().validate(
+                    task,
+                    snapshot,
+                    artifacts_dir=artifacts_dir or layout.run_dir(),
+                )
+                validation_result_path = layout.validation_result_json()
+                _write_validation_result(validation_result, validation_result_path)
+                metrics = metrics_from_validation_result(config.run_id, config.task_id, validation_result)
+                _write_metrics(metrics, layout.metrics_json())
+                log.info("[run:%s] partial validation written (run still error)", config.run_id[:8])
+            except Exception as val_error:
+                log.warning("[run:%s] partial validation failed: %s", config.run_id[:8], val_error)
         result = RunResult(
             run_id=config.run_id,
             task_id=config.task_id,
             status=RunStatus.ERROR,
             execution_mode=config.execution_mode,
-            validation_result_path=None,
+            validation_result_path=validation_result_path,
             scene_snapshot_path=scene_snapshot_path,
             artifacts_dir=layout.run_dir(),
             total_score=None,

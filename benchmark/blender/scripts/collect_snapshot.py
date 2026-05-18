@@ -77,11 +77,28 @@ def _material_names(obj: Any) -> list[str]:
 
 
 def _primitive_hint(obj: Any) -> str | None:
+    custom_hint = _custom_property(obj, "bma_primitive_hint")
+    if custom_hint:
+        return str(custom_hint).lower()
+
     text = f"{getattr(obj, 'name', '')} {getattr(getattr(obj, 'data', None), 'name', '')}".lower()
     for primitive in ("cube", "sphere", "cylinder", "plane", "cone", "torus"):
         if primitive in text:
             return primitive
     return None
+
+
+def _custom_property(obj: Any, key: str) -> Any:
+    getter = getattr(obj, "get", None)
+    if callable(getter):
+        try:
+            return getter(key)
+        except Exception:
+            return None
+    try:
+        return obj[key]
+    except Exception:
+        return None
 
 
 def _collection_names(obj: Any) -> list[str]:

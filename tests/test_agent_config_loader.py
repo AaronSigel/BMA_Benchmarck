@@ -128,6 +128,7 @@ def test_builtin_agent_configs_are_valid() -> None:
         "remote_agent_claude.yaml",
         "generic_http.yaml",
         "generic_command.yaml",
+        "pilot_plan_openrouter_gemini_flash_lite.yaml",
     }
     assert not list(config_dir.glob("*ollama*.yaml"))
 

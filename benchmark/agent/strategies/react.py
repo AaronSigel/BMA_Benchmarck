@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import datetime
+import logging
+import re
 import uuid
 from pathlib import Path
 from typing import Any
 
 from benchmark.agent.errors import AgentRuntimeError
+
+log = logging.getLogger(__name__)
 from benchmark.agent.llm.base import LlmClient, LlmMessage, LlmResponse
 from benchmark.agent.models import AgentConfig, AgentStepType, AgentTrace, ToolCallStatus
 from benchmark.agent.prompts import PromptBuilder
@@ -69,7 +73,11 @@ class ReactStrategy:
         error_message = None
         success = False
 
+        log.info("[react:%s] starting task=%s max_steps=%d profile=%s", trace.run_id[:8], task_id, agent_config.max_steps, agent_config.mcp_profile)
+
         while len(trace.steps) < agent_config.max_steps:
+            step_num = len(trace.steps) + 1
+            log.info("[react:%s] step %d/%d — calling LLM", trace.run_id[:8], step_num, agent_config.max_steps)
             messages = [
                 system_message,
                 LlmMessage(
@@ -96,6 +104,7 @@ class ReactStrategy:
             )
 
             if action.final_answer is not None:
+                log.info("[react:%s] step %d — final answer received", trace.run_id[:8], step_num)
                 final_message = action.final_answer
                 success = True
                 trace = trace.add_step(AgentStepType.FINAL, observation=final_message)
@@ -110,8 +119,13 @@ class ReactStrategy:
                 error_message = "ReAct strategy reached max_steps before executing next action"
                 break
 
+            log.info("[react:%s] step %d — tool_call: %s args=%s", trace.run_id[:8], step_num, action.tool_name, list((action.arguments or {}).keys()))
             tool_result = tool_executor.call_tool(action.tool_name, action.arguments)
             observation = tool_result.result if tool_result.error is None else {"error": tool_result.error}
+            if tool_result.error:
+                log.warning("[react:%s] step %d — tool %s error: %s", trace.run_id[:8], step_num, action.tool_name, tool_result.error)
+            else:
+                log.info("[react:%s] step %d — tool %s ok (%.2fs)", trace.run_id[:8], step_num, action.tool_name, tool_result.duration_sec or 0)
             observations.append(
                 {
                     "tool": tool_result.name,
@@ -195,9 +209,28 @@ def _parse_react_action(response: LlmResponse) -> _ReactAction:
         return _ReactAction(tool_name=first.name, arguments=first.arguments)
 
     if response.content:
+        if _is_pseudo_tool_call(response.content):
+            # Model wrote tool calls as plain text instead of structured calls.
+            # Treating this as a final answer would produce a false pass.
+            log.warning("ReAct: response looks like pseudo tool call in plain text — not accepting as final_answer")
+            return _ReactAction()
         return _ReactAction(final_answer=response.content)
     return _ReactAction()
 
 
 def _optional_str(value: Any) -> str | None:
     return str(value) if value is not None else None
+
+
+# Detects model responses that look like pseudo tool calls written as plain text
+# instead of structured tool_call JSON.  Example pattern the model produces:
+#   "Tool: bma_create_object\nArguments: {...}"
+_PSEUDO_TOOL_RE = re.compile(
+    r"^\s*(Tool|Action|Arguments?|Observation)\s*:",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _is_pseudo_tool_call(content: str) -> bool:
+    """Return True if content looks like text-serialised tool calls, not a genuine final answer."""
+    return bool(_PSEUDO_TOOL_RE.search(content))

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from benchmark.analysis.models import ValidationMetric
 from benchmark.analysis.trace_reader import read_validation_result
 from benchmark.validation.models import SceneValidationResult, ValidationStatus
+from benchmark.validation.models import ValidationIssue
 
 # Map from validator name → metric field name suffix
 _VALIDATOR_SCORE_MAP: dict[str, str] = {
@@ -87,20 +88,13 @@ def compute_validation_summary(val: SceneValidationResult | None) -> ValidationM
             if field_name is not None:
                 scores[field_name] = v.score
 
-    # Issue counts across top-level issues + all validator issues
     error_count = 0
     warning_count = 0
-    for issue in val.issues:
+    for issue in _dedup_issues(val):
         if issue.severity.value == "error":
             error_count += 1
         elif issue.severity.value == "warning":
             warning_count += 1
-    for v in val.validators:
-        for issue in v.issues:
-            if issue.severity.value == "error":
-                error_count += 1
-            elif issue.severity.value == "warning":
-                warning_count += 1
 
     return ValidationMetricsSummary(
         scene_total_score=scene_total_score,
@@ -144,12 +138,42 @@ def extract_score_and_status(val: SceneValidationResult) -> tuple[float | None, 
 
 def extract_issues(val: SceneValidationResult) -> list[dict[str, Any]]:
     """Collect all issues (top-level + per-validator) from a SceneValidationResult."""
-    issues: list[dict[str, Any]] = [i.model_dump() for i in val.issues]
+    seen: set[tuple[str, str | None, str | None]] = set()
+    issues: list[dict[str, Any]] = []
+    for i in val.issues:
+        key = _issue_key(i)
+        if key in seen:
+            continue
+        seen.add(key)
+        issues.append(i.model_dump())
     for v in val.validators:
         for issue in v.issues:
+            key = _issue_key(issue)
+            if key in seen:
+                continue
+            seen.add(key)
             issues.append({**issue.model_dump(), "validator": v.name})
     return issues
 
 
 def load_validation_result(path: Path | str) -> SceneValidationResult:
     return read_validation_result(path)
+
+
+def _dedup_issues(val: SceneValidationResult) -> list[ValidationIssue]:
+    result: list[ValidationIssue] = []
+    seen: set[tuple[str, str | None, str | None]] = set()
+    for issue in [
+        *val.issues,
+        *(issue for validator in val.validators for issue in validator.issues),
+    ]:
+        key = _issue_key(issue)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(issue)
+    return result
+
+
+def _issue_key(issue: ValidationIssue) -> tuple[str, str | None, str | None]:
+    return (issue.code, issue.expected_path, issue.actual_path)

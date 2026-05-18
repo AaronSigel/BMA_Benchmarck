@@ -9,11 +9,16 @@ from pathlib import Path
 from benchmark.mcp.config import McpServerConfig, build_mcp_env
 from benchmark.mcp.errors import McpServerStartError
 
-_ADDON_SCRIPT = Path(__file__).parent / "start_blender_mcp_headless.py"
-
 # Default relative path to the vendored fork's addon.py, resolved from the
 # project root (BMA_Bench/).
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_HEADLESS_DIR = Path(__file__).parent
+_BLOCKING_ADDON_SCRIPT = _PROJECT_ROOT / "blender-mcp-bma" / "headless" / "start_headless_blocking.py"
+_ADDON_SCRIPT = (
+    _BLOCKING_ADDON_SCRIPT
+    if _BLOCKING_ADDON_SCRIPT.is_file()
+    else _HEADLESS_DIR / "start_blender_mcp_headless.py"
+)
 _DEFAULT_ADDON_PATH = _PROJECT_ROOT / "blender-mcp-bma" / "addon.py"
 
 
@@ -85,6 +90,17 @@ class HeadlessBlenderMcpLauncher:
         env = {**os.environ, **build_mcp_env(self._config)}
         env["BMA_HEADLESS"] = "1"
         env["BMA_ADDON_PATH"] = str(self._addon_path)
+        from benchmark.mcp.profiles import McpProfile
+
+        try:
+            profile = McpProfile(self._config.profile)
+        except ValueError:
+            profile = McpProfile.FULL
+        external_enabled = (
+            profile == McpProfile.FULL
+            and self._config.server_distribution in ("fork", "local")
+        )
+        env["BMA_ENABLE_EXTERNAL_ASSETS"] = "true" if external_enabled else "false"
         return env
 
     def start(self) -> None:

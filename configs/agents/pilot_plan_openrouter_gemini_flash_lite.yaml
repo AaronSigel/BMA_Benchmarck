@@ -1,0 +1,27 @@
+agent_id: pilot_plan_openrouter_gemini_flash_lite
+strategy: plan_and_execute
+mcp_profile: no_python
+
+llm:
+  provider: openrouter
+  model: google/gemini-2.5-flash-lite
+  base_url: https://openrouter.ai/api/v1
+  api_key_env: OPENROUTER_API_KEY
+  temperature: 0.2
+  top_p: 0.9
+  max_tokens: 2048
+  timeout_sec: 120
+
+max_steps: 25
+max_retries: 1
+step_timeout_sec: 120
+allow_python_tools: false
+allow_inspection_tools: true
+allowed_tools: []
+trace_enabled: true
+
+metadata:
+  purpose: pilot_live_integrity_check
+  notes:
+    - Uses Plan-and-Execute for the second live OpenRouter+MCP+Blender pilot.
+    - Uses no_python profile so structured bma tools are available but Python is blocked.

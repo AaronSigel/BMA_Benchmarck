@@ -137,9 +137,9 @@ class TestLlmCallCount:
         s = compute_agent_summary(_trace(_llm(0), _llm(1), _llm(2)))
         assert s.llm_call_count == 3
 
-    def test_excludes_non_llm_steps(self):
+    def test_counts_plan_steps_as_llm_calls(self):
         s = compute_agent_summary(_trace(_llm(0), _tool(1), _plan(2), _obs(3)))
-        assert s.llm_call_count == 1
+        assert s.llm_call_count == 2
 
     def test_fixture_direct_success(self):
         from benchmark.agent.models import AgentTrace as AT
@@ -175,10 +175,10 @@ class TestPlanningStepCount:
         s = compute_agent_summary(t)
         assert s.planning_step_count == 1
 
-    def test_plan_not_counted_as_llm(self):
+    def test_plan_counted_as_llm(self):
         s = compute_agent_summary(_trace(_plan(0)))
         assert s.planning_step_count == 1
-        assert s.llm_call_count == 0
+        assert s.llm_call_count == 1
 
 
 # ---------------------------------------------------------------------------

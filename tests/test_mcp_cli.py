@@ -87,6 +87,7 @@ def test_check_returns_all_required_fields():
 
 def test_check_succeeds_with_mock_socket():
     mock_sock = MagicMock()
+    mock_sock.recv.return_value = b'{"status":"success","result":{}}'
     with patch("benchmark.mcp.connection_check.socket.create_connection", return_value=mock_sock):
         result = run_cli("check", expect_exit=0)
     assert result["status"] == "OK"
@@ -134,8 +135,16 @@ def test_smoke_output_contains_timestamp(tmp_path):
 
 def test_smoke_with_config_file(tmp_path):
     out = tmp_path / "result.json"
+    cfg = tmp_path / "minimal.yaml"
+    cfg.write_text(
+        Path("configs/mcp/minimal.yaml").read_text(encoding="utf-8").replace(
+            "blender_port: 9876",
+            "blender_port: 19999",
+        ),
+        encoding="utf-8",
+    )
     run_cli(
-        "--config", "configs/mcp/minimal.yaml",
+        "--config", str(cfg),
         "smoke",
         "--output", str(out),
         expect_exit=1,
@@ -195,6 +204,8 @@ def test_start_headless_blender_shows_command():
     mock_proc.pid = 42
 
     with patch("benchmark.mcp.headless.launcher._find_blender", return_value="blender"), \
+         patch("benchmark.mcp.cli.is_blender_socket_available", return_value=False), \
+         patch("benchmark.mcp.headless.healthcheck.wait_for_blender_socket"), \
          patch("benchmark.mcp.headless.launcher.subprocess.Popen", return_value=mock_proc), \
          redirect_stdout(buf):
         try:
@@ -204,6 +215,73 @@ def test_start_headless_blender_shows_command():
 
     output = buf.getvalue()
     assert "starting" in output or "blender" in output.lower()
+
+
+def test_start_headless_blender_fails_when_socket_already_available():
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with patch("benchmark.mcp.cli.is_blender_socket_available", return_value=True), \
+         redirect_stdout(buf):
+        try:
+            main(["start-headless-blender"])
+        except SystemExit as exc:
+            assert exc.code == 1
+
+    output = buf.getvalue()
+    assert "already reachable" in output
+
+
+# ---------------------------------------------------------------------------
+# stop-headless-blender (mocked)
+# ---------------------------------------------------------------------------
+
+def test_stop_headless_blender_dry_run_lists_matching_processes():
+    result = run_cli("stop-headless-blender", "--dry-run", expect_exit=0)
+    assert isinstance(result, dict)
+    assert result["status"] == "dry_run"
+    assert "processes" in result
+
+
+def test_stop_headless_blender_terminates_matching_processes():
+    ps_output = (
+        "123 /usr/bin/blender --background --python "
+        "/repo/blender-mcp-bma/headless/start_headless_blocking.py -- "
+        "--addon /repo/blender-mcp-bma/addon.py --host localhost --port 9876\n"
+        "124 python -m benchmark.mcp.cli --config configs/mcp/no_python.yaml "
+        "start-headless-blender --wait\n"
+        "125 uvx --from blender-mcp-bma blender-mcp\n"
+    )
+    mock_run = MagicMock(returncode=0, stdout=ps_output)
+
+    with patch("benchmark.mcp.cli.subprocess.run", return_value=mock_run), \
+         patch("benchmark.mcp.cli.os.getpid", return_value=999), \
+         patch("benchmark.mcp.cli.os.kill") as mock_kill:
+        mock_kill.side_effect = [
+            None, None, None,
+            ProcessLookupError(), ProcessLookupError(), ProcessLookupError(),
+        ]
+        result = run_cli("stop-headless-blender", "--timeout-sec", "0", expect_exit=0)
+
+    assert result["status"] == "stopped"
+    assert result["matched_count"] == 3
+    assert set(result["terminated_pids"]) == {123, 124, 125}
+
+
+def test_stop_headless_blender_ignores_unrelated_blender_process():
+    ps_output = (
+        "123 /usr/bin/blender --background some_other_file.blend\n"
+        "124 /usr/bin/blender --background --python "
+        "/repo/blender-mcp-bma/headless/start_headless_blocking.py -- --port 9999\n"
+    )
+    mock_run = MagicMock(returncode=0, stdout=ps_output)
+
+    with patch("benchmark.mcp.cli.subprocess.run", return_value=mock_run), \
+         patch("benchmark.mcp.cli.os.getpid", return_value=999):
+        result = run_cli("stop-headless-blender", "--dry-run", expect_exit=0)
+
+    assert result["matched_count"] == 0
 
 
 # ---------------------------------------------------------------------------

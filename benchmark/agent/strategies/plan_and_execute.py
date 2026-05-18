@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime
+import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -67,7 +69,26 @@ class PlanAndExecuteStrategy:
             timeout_sec=agent_config.step_timeout_sec,
         )
         llm_finished_at = datetime.datetime.now(datetime.timezone.utc)
-        plan = _parse_plan(response)
+        try:
+            plan = _parse_plan(response)
+        except LlmResponseParseError as error:
+            trace = trace.add_step(
+                AgentStepType.ERROR,
+                error=str(error),
+                raw_llm_response=response.model_dump(mode="json", exclude_none=True),
+                started_at=llm_started_at,
+                finished_at=llm_finished_at,
+                duration_sec=(llm_finished_at - llm_started_at).total_seconds(),
+            )
+            finished_at = datetime.datetime.now(datetime.timezone.utc)
+            return trace.model_copy(
+                update={
+                    "success": False,
+                    "error": str(error),
+                    "finished_at": finished_at,
+                    "duration_sec": (finished_at - started_at).total_seconds(),
+                }
+            )
         trace = trace.add_step(
             AgentStepType.PLAN,
             action="plan",
@@ -133,14 +154,14 @@ class _PlanStep:
 
 
 def _parse_plan(response: LlmResponse) -> list[_PlanStep]:
-    action = response.json_action()
+    action = _json_action(response)
     if action is None:
         raise LlmResponseParseError(
             "Plan-and-execute response must be a JSON object with a plan list",
             fragment=response.content,
             raw_response=response.raw_response,
         )
-    raw_plan = action.get("plan")
+    raw_plan = action.get("plan") or action.get("steps")
     if not isinstance(raw_plan, list) or not raw_plan:
         raise LlmResponseParseError(
             "Plan-and-execute response must contain a non-empty plan list",
@@ -162,6 +183,46 @@ def _parse_plan(response: LlmResponse) -> list[_PlanStep]:
             raise _invalid_plan(response, f"plan[{index}].arguments must be an object")
         steps.append(_PlanStep(item))
     return sorted(steps, key=lambda item: item.step)
+
+
+def _json_action(response: LlmResponse) -> dict[str, Any] | None:
+    action = response.json_action()
+    if isinstance(action, dict):
+        return action
+
+    parsed = _parse_json_from_content(response.content)
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, list):
+        return {"plan": parsed}
+    return None
+
+
+_JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.IGNORECASE | re.DOTALL)
+
+
+def _parse_json_from_content(content: str | None) -> Any:
+    if content is None:
+        return None
+    text = content.strip()
+    fence = _JSON_FENCE_RE.match(text)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char not in "[{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        return value
+    return None
 
 
 def _invalid_plan(response: LlmResponse, message: str) -> LlmResponseParseError:

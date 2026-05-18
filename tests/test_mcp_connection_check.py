@@ -38,8 +38,10 @@ def test_check_blender_socket_raises_when_refused():
 
 def test_check_blender_socket_succeeds_with_mock():
     mock_sock = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
+    mock_sock.recv.return_value = b'{"status":"success","result":{}}'
     with patch("benchmark.mcp.connection_check.socket.create_connection", return_value=mock_sock):
         check_blender_socket("localhost", 9876, timeout_sec=1.0)
+    assert mock_sock.sendall.called
     mock_sock.close.assert_called_once()
 
 
@@ -64,6 +66,7 @@ def test_is_blender_socket_available_false_when_refused():
 def test_is_blender_socket_available_true_with_mock():
     cfg = make_config()
     mock_sock = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
+    mock_sock.recv.return_value = b'{"status":"success","result":{}}'
     with patch("benchmark.mcp.connection_check.socket.create_connection", return_value=mock_sock):
         assert is_blender_socket_available(cfg) is True
 
@@ -88,6 +91,7 @@ def test_check_mcp_server_config_socket_unavailable():
 def test_check_mcp_server_config_socket_available():
     cfg = make_config()
     mock_sock = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
+    mock_sock.recv.return_value = b'{"status":"success","result":{}}'
     with patch("benchmark.mcp.connection_check.socket.create_connection", return_value=mock_sock):
         result = check_mcp_server_config(cfg)
     assert result.blender_socket_available is True

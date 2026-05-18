@@ -48,9 +48,9 @@ _TRACE_RULES: list[tuple[ErrorCategory, re.Pattern[str]]] = [
 
 _ISSUE_CODE_RULES: list[tuple[ErrorCategory, re.Pattern[str]]] = [
     (ErrorCategory.SCENE_OBJECT_MISSING,
-     re.compile(r"^object_missing$|^object_type_mismatch|^primitive_mismatch", re.I)),
+     re.compile(r"^object_missing$|^object_type_mismatch", re.I)),
     (ErrorCategory.SCENE_TRANSFORM_MISMATCH,
-     re.compile(r"object_missing_for_transform|location_mismatch|rotation_mismatch|scale_mismatch|transform", re.I)),
+     re.compile(r"primitive_mismatch|object_missing_for_transform|location_mismatch|rotation_mismatch|scale_mismatch|dimensions_mismatch|transform", re.I)),
     (ErrorCategory.SCENE_MATERIAL_MISMATCH,
      re.compile(r"material_|object_missing_for_material|object_material_", re.I)),
     (ErrorCategory.SCENE_LIGHT_MISMATCH,
@@ -123,13 +123,26 @@ def aggregate_errors(run_bundle: RunArtifactBundle) -> dict[str, int]:
     # Validation issues
     if run_bundle.validation_result is not None:
         val = run_bundle.validation_result
+        seen: set[tuple[str, str | None, str | None]] = set()
         for issue in val.issues:
+            key = _issue_key(issue)
+            if key in seen:
+                continue
+            seen.add(key)
             counts[classify_validation_issue(issue).value] += 1
         for validator in val.validators:
             for issue in validator.issues:
+                key = _issue_key(issue)
+                if key in seen:
+                    continue
+                seen.add(key)
                 counts[classify_validation_issue(issue).value] += 1
 
     return dict(counts)
+
+
+def _issue_key(issue: ValidationIssue) -> tuple[str, str | None, str | None]:
+    return (issue.code, issue.expected_path, issue.actual_path)
 
 
 def summarize_errors(records: list[ErrorRecord]) -> dict[str, int]:

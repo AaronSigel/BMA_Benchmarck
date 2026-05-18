@@ -161,11 +161,39 @@ def test_call_tool_returns_result():
     assert result == {"objects": []}
 
 
+def test_call_tool_maps_bma_tool_name_to_socket_command():
+    cfg = make_config(profile="no_python")
+    adapter = ExternalBlenderMcpServerAdapter(cfg)
+    mock_sock = _make_socket_mock({"result": {"ok": True}})
+
+    with patch("benchmark.mcp.server_adapter.socket.create_connection", return_value=mock_sock):
+        result = adapter.call_tool("bma_export_scene", {"filepath": "exports/result.glb"})
+
+    payload = json.loads(mock_sock.sendall.call_args.args[0].decode())
+    assert result == {"ok": True}
+    assert payload["type"] == "export_scene"
+    assert payload["params"] == {"filepath": "exports/result.glb"}
+
+
 def test_call_tool_disabled_in_profile_raises():
     cfg = make_config(profile="minimal")
     adapter = ExternalBlenderMcpServerAdapter(cfg)
     with pytest.raises(ToolDisabledError):
         adapter.call_tool("execute_blender_code")
+
+
+def test_collect_scene_snapshot_bypasses_profile_tool_gating():
+    cfg = make_config(profile="no_python")
+    adapter = ExternalBlenderMcpServerAdapter(cfg)
+    mock_sock = _make_socket_mock({"result": {"ok": True}})
+
+    with patch("benchmark.mcp.server_adapter.socket.create_connection", return_value=mock_sock):
+        result = adapter.collect_scene_snapshot("/tmp/scene_snapshot.json")
+
+    payload = json.loads(mock_sock.sendall.call_args.args[0].decode())
+    assert result == {"ok": True}
+    assert payload["type"] == "execute_code"
+    assert "collect_snapshot" in payload["params"]["code"]
 
 
 def test_call_tool_socket_error_raises():

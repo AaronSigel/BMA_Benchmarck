@@ -102,21 +102,24 @@ def read_experiment_result(path: Path | str) -> ExperimentResult:
 
 
 def discover_run_artifacts(root: Path | str) -> list[Path]:
-    """Return all run directories under *root* that contain at least one known artifact."""
+    """Return top-level run directories under *root* that contain at least one known artifact.
+
+    Nested run directories (e.g. ``agent_runs/<uuid>/`` inside a parent run dir)
+    are excluded — only the outermost directory for each run is returned.
+    """
     root_path = Path(root)
-    known = {
-        _AGENT_TRACE_FILENAME,
-        _RUN_RESULT_FILENAME,
-        _VALIDATION_RESULT_FILENAME,
-    }
-    found: list[Path] = []
-    for candidate in sorted(root_path.rglob(_AGENT_TRACE_FILENAME)):
-        found.append(candidate.parent)
-    for candidate in sorted(root_path.rglob(_RUN_RESULT_FILENAME)):
-        p = candidate.parent
-        if p not in found:
-            found.append(p)
-    return sorted(set(found))
+    found: set[Path] = set()
+    for candidate in root_path.rglob(_AGENT_TRACE_FILENAME):
+        found.add(candidate.parent)
+    for candidate in root_path.rglob(_RUN_RESULT_FILENAME):
+        found.add(candidate.parent)
+
+    # Keep only dirs that are not nested inside another found dir.
+    result = [
+        p for p in sorted(found)
+        if not any(other != p and other in p.parents for other in found)
+    ]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -131,9 +134,17 @@ def load_run_bundle(run_dir: Path | str) -> RunArtifactBundle:
     """
     d = Path(run_dir)
 
-    # agent_trace — optional, no crash if missing
+    # agent_trace — optional, no crash if missing.
+    # Falls back to first nested agent_runs/<uuid>/agent_trace.json when not
+    # found directly in the run dir (happens when AgentRuntime writes its own
+    # sub-directory via ArtifactLayout.build_artifact_layout).
     agent_trace: AgentTrace | None = None
     trace_path = d / _AGENT_TRACE_FILENAME
+    if not trace_path.exists():
+        nested = sorted(d.glob(f"agent_runs/*/{_AGENT_TRACE_FILENAME}"))
+        if nested:
+            trace_path = nested[0]
+            logger.debug("agent_trace not in run root; using nested %s", trace_path)
     if trace_path.exists():
         try:
             agent_trace = read_agent_trace(trace_path)

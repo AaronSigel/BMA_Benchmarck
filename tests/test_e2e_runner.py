@@ -121,6 +121,28 @@ def test_smoke_matrix_run_and_report_passes_without_external_services(tmp_path: 
             assert line in report_text
 
 
+def test_run_and_report_requires_clean_output_for_existing_artifacts(tmp_path: Path) -> None:
+    matrix_path = write_smoke_matrix(tmp_path)
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    (output_root / "old_run.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="--clean-output"):
+        E2EBenchmarkRunner().run_and_report(matrix_path)
+
+
+def test_run_and_report_clean_output_removes_existing_artifacts(tmp_path: Path) -> None:
+    matrix_path = write_smoke_matrix(tmp_path)
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    (output_root / "old_run.json").write_text("{}", encoding="utf-8")
+
+    report_path = E2EBenchmarkRunner().run_and_report(matrix_path, clean_output=True)
+
+    assert report_path.is_file()
+    assert not (output_root / "old_run.json").exists()
+
+
 def test_readiness_error_prevents_batch_start(tmp_path: Path) -> None:
     matrix_path = tmp_path / "bad_matrix.yaml"
     matrix_path.write_text(

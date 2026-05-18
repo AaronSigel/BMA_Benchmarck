@@ -1,8 +1,5 @@
 from pathlib import Path
 
-import pytest
-
-from benchmark.agent.errors import LlmResponseParseError
 from benchmark.agent.llm import LlmResponse, MockLlmClient
 from benchmark.agent.models import AgentConfig, AgentStepType, AgentStrategyName, LlmConfig
 from benchmark.agent.runtime import AgentRuntime
@@ -61,15 +58,69 @@ def test_plan_execute_strategy_executes_steps_in_order() -> None:
 def test_plan_execute_strategy_invalid_plan_raises_parse_error() -> None:
     llm = MockLlmClient([LlmResponse(content='{"plan":[{"step":1,"tool":"get_scene_info"}]}')])
 
-    with pytest.raises(LlmResponseParseError, match="description"):
-        PlanAndExecuteStrategy().run(
-            {"id": "task-1", "prompt": "Inspect"},
-            make_config(),
-            llm,
-            MockToolExecutor(),
-            AgentToolContext(run_id="run-1", task_id="task-1"),
-            Path("."),
-        )
+    trace = PlanAndExecuteStrategy().run(
+        {"id": "task-1", "prompt": "Inspect"},
+        make_config(),
+        llm,
+        MockToolExecutor(),
+        AgentToolContext(run_id="run-1", task_id="task-1"),
+        Path("."),
+    )
+
+    assert trace.success is False
+    assert "description" in (trace.error or "")
+    assert trace.steps[-1].step_type == AgentStepType.ERROR
+    assert trace.steps[-1].raw_llm_response is not None
+
+
+def test_plan_execute_strategy_accepts_markdown_fenced_plan() -> None:
+    llm = MockLlmClient(
+        [
+            LlmResponse(
+                content=(
+                    "```json\n"
+                    '{"plan":[{"step":1,"description":"Inspect","tool":"get_scene_info","arguments":{}}]}'
+                    "\n```"
+                )
+            )
+        ]
+    )
+    executor = MockToolExecutor(results={"get_scene_info": {"objects": []}})
+
+    trace = PlanAndExecuteStrategy().run(
+        {"id": "task-1", "prompt": "Inspect"},
+        make_config(),
+        llm,
+        executor,
+        AgentToolContext(run_id="run-1", task_id="task-1"),
+        Path("."),
+    )
+
+    assert trace.success is True
+    assert [call.name for call in executor.calls] == ["get_scene_info"]
+
+
+def test_plan_execute_strategy_accepts_top_level_plan_list() -> None:
+    llm = MockLlmClient(
+        [
+            LlmResponse(
+                content='[{"step":1,"description":"Inspect","tool":"get_scene_info","arguments":{}}]'
+            )
+        ]
+    )
+    executor = MockToolExecutor(results={"get_scene_info": {"objects": []}})
+
+    trace = PlanAndExecuteStrategy().run(
+        {"id": "task-1", "prompt": "Inspect"},
+        make_config(),
+        llm,
+        executor,
+        AgentToolContext(run_id="run-1", task_id="task-1"),
+        Path("."),
+    )
+
+    assert trace.success is True
+    assert [call.name for call in executor.calls] == ["get_scene_info"]
 
 
 def test_plan_execute_strategy_blocks_forbidden_tool() -> None:

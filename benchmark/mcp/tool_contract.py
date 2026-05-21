@@ -191,7 +191,8 @@ TOOL_CONTRACTS: list[ToolContract] = [
         parameters=[
             _p("name", "str", "Camera name"),
             _p("location", "list[float]", "XYZ camera location [x, y, z]"),
-            _p("target", "list[float]", "XYZ target point [x, y, z]"),
+            _p("target", "list[float]", "XYZ target point [x, y, z]", required=False, default=None),
+            _p("target_object_name", "str", "Name of an object to look at when target coordinates are not available", required=False, default=None),
             _p("focal_length", "float", "Focal length in mm", required=False, default=35.0),
             _p("make_active", "bool", "Set scene.camera to the created camera", required=False, default=True),
             _p("sensor_width", "float", "Camera sensor width in mm", required=False, default=None),

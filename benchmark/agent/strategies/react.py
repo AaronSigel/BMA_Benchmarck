@@ -135,6 +135,7 @@ class ReactStrategy:
         consecutive_no_progress = 0
         blocked_export_count = 0
         repair_step_count = 0
+        deterministic_repair_step_count = 0
         initial_issue_count: int | None = None
         initial_issue_codes: set[str] = set()
 
@@ -171,7 +172,7 @@ class ReactStrategy:
                 previous_issue_codes = {i.code for i in initial_result.issues}
                 initial_issue_count = len(previous_issue_codes)
                 initial_issue_codes = set(previous_issue_codes)
-            if scene_ok:
+            if scene_ok or _validation_passed_or_warning(initial_result):
                 log.info("[react:%s] initial scene passed, stopping before LLM call", trace.run_id[:8])
                 success = True
                 final_message = "scene_passed_initial_stop"
@@ -191,6 +192,15 @@ class ReactStrategy:
             _issue_count_before: int = len(previous_issue_codes)
             _top_issue_dict: dict[str, Any] | None = None
             _suggested_repair_dict: dict[str, Any] | None = None
+            _repair_activation: dict[str, Any] = _repair_activation_metadata(
+                last_validation_result,
+                task_obj,
+                None,
+                None,
+                tool_contracts,
+                deterministic_executed=False,
+                fallback_reason="pending_follow_up" if pending_repair_actions else None,
+            )
 
             # --- Select action: queued follow-up → deterministic repair → LLM fallback ---
             repair_action: Any = None  # RepairAction | None — used for parse-error fallback
@@ -206,12 +216,12 @@ class ReactStrategy:
                 trace = trace.add_step(
                     AgentStepType.OBSERVATION,
                     observation={"queued_follow_up_repair": True, "tool": action.tool_name, "arguments": action.arguments},
-                    metadata={"react": {"step_index": step_num, "queued_follow_up": True}},
+                    metadata={"react": {"step_index": step_num, "queued_follow_up": True}, "react_repair_activation": _repair_activation},
                 )
             else:
                 # Build validator-driven step context (prompt injection + repair detection).
-                step_context, repair_action = _build_step_context(
-                    last_validation_result, task_obj, initial_step_context if step_num == 1 else None
+                step_context, repair_action, _repair_activation = _build_step_context(
+                    last_validation_result, task_obj, initial_step_context if step_num == 1 else None, tool_contracts
                 )
                 if step_context:
                     _top_issue_dict = step_context.get("top_issue")
@@ -221,6 +231,12 @@ class ReactStrategy:
                 action = _react_action_from_repair(repair_action, tool_contracts)
                 if action is not None:
                     _is_deterministic = True
+                    _repair_activation = {
+                        **_repair_activation,
+                        "repair_arguments_complete": True,
+                        "deterministic_repair_executed": True,
+                        "fallback_reason": None,
+                    }
                     # Queue follow-up repair so it runs in the very next iteration.
                     if repair_action is not None and repair_action.follow_up_step is not None:
                         follow_up = _react_action_from_repair(repair_action.follow_up_step, tool_contracts)
@@ -239,7 +255,8 @@ class ReactStrategy:
                                 "top_issue": _top_issue_dict,
                                 "suggested_repair": _suggested_repair_dict,
                                 "deterministic_repair": True,
-                            }
+                            },
+                            "react_repair_activation": _repair_activation,
                         },
                     )
                 else:
@@ -270,6 +287,12 @@ class ReactStrategy:
                         use_native_tool_calls=use_native_tool_calls,
                         max_parse_retries=0 if use_native_tool_calls else min(agent_config.max_retries, 1),
                     )
+                    if trace.steps:
+                        last_step = trace.steps[-1]
+                        last_step.metadata = {
+                            **(last_step.metadata or {}),
+                            "react_repair_activation": _repair_activation,
+                        }
 
                     if action.parse_error is not None:
                         # Before hard-failing, attempt a lenient deterministic fallback: use the
@@ -318,7 +341,7 @@ class ReactStrategy:
                                 last_validation_result = _check_result
                         except Exception:
                             _check_result = None
-                    if _check_result is not None and not getattr(_check_result, "passed", False):
+                    if _check_result is not None and not _validation_passed_or_warning(_check_result):
                         _finish_allowed = False
 
                 if not _finish_allowed:
@@ -516,6 +539,8 @@ class ReactStrategy:
             _is_repair_step = _is_deterministic or _top_issue_dict is not None
             if _is_repair_step:
                 repair_step_count += 1
+            if _is_deterministic:
+                deterministic_repair_step_count += 1
 
             observations.append({
                 "tool": tool_result.name,
@@ -534,6 +559,7 @@ class ReactStrategy:
                 finished_at=tool_result.finished_at,
                 duration_sec=tool_result.duration_sec,
                 metadata={
+                    "react_repair_activation": _repair_activation,
                     "react": {
                         "step_index": step_num,
                         "top_issue": _top_issue_dict,
@@ -571,7 +597,7 @@ class ReactStrategy:
                 if val_result is not None:
                     last_validation_result = val_result
 
-                if agent_config.stop_after_scene_passed and scene_ok:
+                if agent_config.stop_after_scene_passed and (scene_ok or _validation_passed_or_warning(val_result)):
                     log.info("[react:%s] step %d — scene passed, stopping early", trace.run_id[:8], step_num)
                     success = True
                     final_message = "scene_passed_early_stop"
@@ -662,7 +688,7 @@ class ReactStrategy:
         scene_passed_but_agent_error = (
             error_message is not None
             and last_validation_result is not None
-            and bool(getattr(last_validation_result, "passed", False))
+            and _validation_passed_or_warning(last_validation_result)
         )
         return trace.model_copy(
             update={
@@ -687,6 +713,7 @@ class ReactStrategy:
                     # R-10: ReAct aggregate metrics
                     "react_steps_total": len(trace.steps),
                     "react_repair_steps": repair_step_count,
+                    "deterministic_repair_steps": deterministic_repair_step_count,
                     "react_wasted_steps": wasted_step_count,
                     "react_no_progress_count": no_progress_step_count,
                     "react_blocked_export_count": blocked_export_count,
@@ -710,9 +737,11 @@ def _resolve_max_steps(task: dict[str, Any], config: AgentConfig) -> int:
     category = str(task.get("category") or "").lower()
     if config.max_steps_by_category and category in config.max_steps_by_category:
         return config.max_steps_by_category[category]
+    if config.max_steps:
+        return config.max_steps
     if category in _DEFAULT_CATEGORY_MAX_STEPS:
         return _DEFAULT_CATEGORY_MAX_STEPS[category]
-    return config.max_steps
+    return 20
 
 
 def _try_load_task(task: dict[str, Any]) -> Any:
@@ -728,7 +757,8 @@ def _build_step_context(
     val_result: Any,
     task_obj: Any,
     initial_context: dict[str, Any] | None,
-) -> tuple[dict[str, Any] | None, Any]:
+    tool_contracts: list[Any],
+) -> tuple[dict[str, Any] | None, Any, dict[str, Any]]:
     """Build the current-scene-state dict injected into each step's prompt.
 
     Returns (context_dict, repair_action_or_None). The RepairAction object is
@@ -736,7 +766,9 @@ def _build_step_context(
     without re-running the mapper.
     """
     if val_result is None:
-        return initial_context, None  # First step: task checklist only
+        return initial_context, None, _repair_activation_metadata(
+            val_result, task_obj, None, None, tool_contracts, deterministic_executed=False, fallback_reason="no_validation_result"
+        )  # First step: task checklist only
 
     from benchmark.agent.strategies.issue_action_mapper import select_top_issue, map_issue_to_repair
 
@@ -744,8 +776,13 @@ def _build_step_context(
     top_issue = select_top_issue(issues) if issues else None
     repair_action = None
     suggested_repair = None
+    mapper_exception: Exception | None = None
     if top_issue is not None and task_obj is not None:
-        repair_action = map_issue_to_repair(top_issue, task_obj)
+        try:
+            repair_action = map_issue_to_repair(top_issue, task_obj)
+        except Exception as exc:  # noqa: BLE001
+            mapper_exception = exc
+            repair_action = None
         if repair_action is not None:
             suggested_repair = {
                 "tool": repair_action.tool_name,
@@ -772,7 +809,18 @@ def _build_step_context(
         ctx["suggested_repair"] = suggested_repair
     if initial_context:
         ctx.update(initial_context)
-    return ctx, repair_action
+    fallback_reason = _repair_activation_fallback_reason(val_result, task_obj, top_issue, repair_action, mapper_exception)
+    activation = _repair_activation_metadata(
+        val_result,
+        task_obj,
+        top_issue,
+        repair_action,
+        tool_contracts,
+        deterministic_executed=False,
+        fallback_reason=fallback_reason,
+        mapper_exception=mapper_exception,
+    )
+    return ctx, repair_action, activation
 
 
 def _build_no_progress_hint(val_result: Any, task_obj: Any) -> str:
@@ -792,6 +840,75 @@ def _build_no_progress_hint(val_result: Any, task_obj: Any) -> str:
         if repair is not None:
             hint += f" Suggested repair: use {repair.tool_name} with {repair.arguments_template}."
     return hint
+
+
+def _validation_passed_or_warning(val_result: Any) -> bool:
+    status = str(getattr(val_result, "overall_status", "") or "").lower()
+    return status in {"passed", "warning"}
+
+
+def _repair_activation_fallback_reason(
+    val_result: Any,
+    task_obj: Any,
+    top_issue: Any,
+    repair_action: Any,
+    mapper_exception: Exception | None,
+) -> str | None:
+    if val_result is None:
+        return "no_validation_result"
+    issues = getattr(val_result, "issues", None) or []
+    if not issues:
+        return "no_issues"
+    if top_issue is None:
+        return "no_top_issue"
+    if task_obj is None:
+        return "task_obj_missing"
+    if mapper_exception is not None:
+        return "mapper_exception"
+    if repair_action is None:
+        return "mapper_returned_none"
+    return None
+
+
+def _repair_activation_metadata(
+    val_result: Any,
+    task_obj: Any,
+    top_issue: Any,
+    repair_action: Any,
+    tool_contracts: list[Any],
+    *,
+    deterministic_executed: bool,
+    fallback_reason: str | None,
+    mapper_exception: Exception | None = None,
+) -> dict[str, Any]:
+    issues = getattr(val_result, "issues", None) or []
+    tool_name = getattr(repair_action, "tool_name", None) if repair_action is not None else None
+    args = getattr(repair_action, "arguments_template", None) if repair_action is not None else None
+    tool_available = (
+        any(getattr(contract, "name", None) == tool_name for contract in tool_contracts)
+        if tool_name else False
+    )
+    args_complete = (
+        _has_required_repair_arguments(tool_name, args or {}, tool_contracts)
+        if isinstance(tool_name, str) else False
+    )
+    resolved_fallback = fallback_reason
+    if repair_action is not None and not tool_available:
+        resolved_fallback = "tool_not_available_in_profile"
+    elif repair_action is not None and not args_complete:
+        resolved_fallback = "required_arguments_missing"
+    return {
+        "validation_result_available": val_result is not None,
+        "issue_count": len(issues),
+        "top_issue_code": getattr(top_issue, "code", None) if top_issue is not None else None,
+        "task_obj_loaded": task_obj is not None,
+        "repair_mapped": repair_action is not None,
+        "repair_tool": tool_name,
+        "repair_arguments_complete": args_complete,
+        "deterministic_repair_executed": deterministic_executed,
+        "fallback_reason": resolved_fallback,
+        "mapper_exception": str(mapper_exception) if mapper_exception is not None else None,
+    }
 
 
 def _react_action_from_repair(

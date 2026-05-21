@@ -304,7 +304,14 @@
           ]
         },
         "target": {
-          "$ref": "#/$defs/NullableVector3"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NullableVector3"
+            },
+            {
+              "type": "string"
+            }
+          ]
         },
         "require_active": {
           "type": [

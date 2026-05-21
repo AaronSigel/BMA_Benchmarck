@@ -66,10 +66,10 @@ class CameraValidator:
             transform_scores.append(transform_score)
             self._append_transform_issues(expected, actual, expected_path, actual_path, issues)
 
-            direction_score = self._direction_score(expected, actual)
+            direction_score = self._direction_score(expected, actual, snapshot)
             direction_scores.append(direction_score)
             if direction_score < 1.0:
-                issues.append(self._direction_mismatch_issue(expected, actual, expected_path, actual_path))
+                issues.append(self._direction_mismatch_issue(expected, actual, snapshot, expected_path, actual_path))
 
             focal_length_score = self._focal_length_score(expected, actual)
             focal_length_scores.append(focal_length_score)
@@ -160,10 +160,13 @@ class CameraValidator:
                     )
                 )
 
-    def _direction_score(self, expected: ExpectedCamera, actual: CameraSnapshot) -> float:
+    def _direction_score(self, expected: ExpectedCamera, actual: CameraSnapshot, snapshot: SceneSnapshot) -> float:
+        target = _resolve_target(expected.target, snapshot)
         if expected.target is None:
             return 1.0
-        deviation = _angular_deviation_deg(_camera_forward(actual.rotation_euler), _target_direction(actual, expected.target))
+        if target is None:
+            return 0.0
+        deviation = _angular_deviation_deg(_camera_forward(actual.rotation_euler), _target_direction(actual, target))
         if deviation <= expected.direction_tolerance_deg:
             return 1.0
         if expected.direction_tolerance_deg <= 0.0:
@@ -230,12 +233,14 @@ class CameraValidator:
         self,
         expected: ExpectedCamera,
         actual: CameraSnapshot,
+        snapshot: SceneSnapshot,
         expected_path: str,
         actual_path: str,
     ) -> ValidationIssue:
+        target = _resolve_target(expected.target, snapshot)
         deviation = _angular_deviation_deg(
             _camera_forward(actual.rotation_euler),
-            _target_direction(actual, expected.target),
+            _target_direction(actual, target),
         )
         return ValidationIssue(
             code="camera_direction_mismatch",
@@ -246,7 +251,7 @@ class CameraValidator:
             severity=ValidationSeverity.ERROR,
             expected_path=f"{expected_path}.target",
             actual_path=f"{actual_path}.rotation_euler",
-            expected_value=expected.target.model_dump(mode="json") if expected.target is not None else None,
+            expected_value=_target_expected_value(expected.target, target),
             actual_value={
                 "rotation_euler": actual.rotation_euler.model_dump(mode="json"),
                 "angular_deviation_deg": deviation,
@@ -269,6 +274,26 @@ class CameraValidator:
             expected_value=True,
             actual_value=actual.is_active,
         )
+
+
+def _resolve_target(target: Vector3 | str | None, snapshot: SceneSnapshot) -> Vector3 | None:
+    if target is None:
+        return None
+    if isinstance(target, str):
+        obj = next((o for o in snapshot.objects if o.name == target), None)
+        if obj is None:
+            return None
+        return Vector3(x=obj.location.x, y=obj.location.y, z=obj.location.z)
+    return target
+
+
+def _target_expected_value(target: Vector3 | str | None, resolved: Vector3 | None) -> dict | str | None:
+    if isinstance(target, str):
+        return {
+            "target_object_name": target,
+            "resolved_target": resolved.model_dump(mode="json") if resolved is not None else None,
+        }
+    return target.model_dump(mode="json") if target is not None else None
 
 
 def _target_direction(actual: CameraSnapshot, target: Vector3 | None) -> tuple[float, float, float]:

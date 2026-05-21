@@ -187,21 +187,24 @@ class ExternalBlenderMcpServerAdapter:
         try:
             response = json.loads(raw)
         except json.JSONDecodeError as exc:
+            raw_preview = raw.decode("utf-8", errors="replace")[:200] if isinstance(raw, (bytes, bytearray)) else str(raw)[:200]
             return _tool_envelope(
                 tool_name,
                 ok=False,
-                result=None,
+                result={"raw_len": len(raw), "raw_preview": raw_preview},
                 error_type="InvalidJsonResponse",
                 error_message=f"Invalid JSON from '{tool_name}': {exc}",
             )
 
         if isinstance(response, dict) and response.get("status") == "error":
-            message = response.get("error") or response.get("message") or response
+            error_payload = response.get("error_details") or response.get("error") or response.get("message") or response
+            message = error_payload.get("message") if isinstance(error_payload, dict) else error_payload
+            error_type = error_payload.get("type") if isinstance(error_payload, dict) else "ToolError"
             return _tool_envelope(
                 tool_name,
                 ok=False,
-                result=None,
-                error_type="ToolError",
+                result=error_payload if isinstance(error_payload, dict) else None,
+                error_type=str(error_type or "ToolError"),
                 error_message=str(message),
             )
 
@@ -412,5 +415,6 @@ def _tool_envelope(
         "error": None if ok else {
             "type": error_type or "ToolError",
             "message": error_message or "Tool failed",
+            **(result if isinstance(result, dict) else {}),
         },
     }

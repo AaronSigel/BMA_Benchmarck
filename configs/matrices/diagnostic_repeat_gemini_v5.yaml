@@ -1,8 +1,8 @@
 matrix_id: diagnostic_repeat_gemini_v5
 title: Diagnostic repeat Gemini v5
 description: >
-  Single-repeat diagnostic matrix for report-ready MVP:
-  18 tasks × 3 strategies × 5 MCP profiles × 1 model × 1 repetition = 270 runs.
+  Single-repeat diagnostic matrix for stabilized report-ready MVP:
+  18 tasks × 4 strategies × 5 MCP profiles × 1 model × 1 repetition = 360 runs.
 tasks:
   ids:
     - geometry_001_basic_primitives
@@ -28,6 +28,7 @@ agents:
     - direct_openrouter
     - plan_execute_openrouter
     - react_openrouter
+    - plan_execute_react_repair_openrouter
   config_root: configs/agents
 mcp_profiles:
   - minimal
@@ -44,8 +45,8 @@ repetitions: 1
 output_root: artifacts/experiments/diagnostic_repeat_gemini_v5
 report_config_path: configs/reports/default_report.yaml
 metadata:
-  purpose: diagnostic_repeat_single_model
-  expected_runs: 270
+  purpose: diagnostic_repeat_single_model_stabilized
+  expected_runs: 360
   report_ready_mvp: true
   timestamp_output_root: true
   preflight:
@@ -58,6 +59,23 @@ metadata:
       stop_after_scene_passed: true
       detect_repeated_actions: true
       detect_duplicate_objects: true
+      detect_no_progress: true
+      no_progress_limit: 3
+      repair_activation_diagnostics: true
+    plan_execute_react_repair:
+      max_steps: 25
+      stop_after_scene_passed: true
+      detect_repeated_actions: true
+      detect_duplicate_objects: true
+      detect_no_progress: true
+      no_progress_limit: 3
+      repair_activation_diagnostics: true
+  readiness_gates:
+    export_smoke_required: true
+    invalid_tool_response_export_max: 0
+    clean_pass_with_error_type_max: 0
+    react_max_steps_rate_max: 0.2
+    require_react_repair_steps_on_validation_issues: true
   cost:
     source: openrouter
     disable_internal_estimate: true

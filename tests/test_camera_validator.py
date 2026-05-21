@@ -4,6 +4,7 @@ import pytest
 
 from benchmark.blender.models import (
     CameraSnapshot,
+    ObjectSnapshot,
     RenderSettingsSnapshot,
     SceneSnapshot,
     Vector3 as SnapshotVector3,
@@ -46,10 +47,27 @@ def camera_snapshot(
     )
 
 
-def scene_snapshot(cameras: list[CameraSnapshot]) -> SceneSnapshot:
+def object_snapshot(name: str, location: SnapshotVector3) -> ObjectSnapshot:
+    return ObjectSnapshot(
+        name=name,
+        type="MESH",
+        primitive_hint=None,
+        location=location,
+        rotation_euler=snapshot_vector(),
+        scale=snapshot_vector(1.0, 1.0, 1.0),
+        dimensions=snapshot_vector(1.0, 1.0, 1.0),
+        material_slots=[],
+        parent=None,
+        collection_names=["Collection"],
+        vertex_count=None,
+        polygon_count=None,
+    )
+
+
+def scene_snapshot(cameras: list[CameraSnapshot], objects: list[ObjectSnapshot] | None = None) -> SceneSnapshot:
     return SceneSnapshot(
         scene_name="Scene",
-        objects=[],
+        objects=objects or [],
         materials=[],
         lights=[],
         cameras=cameras,
@@ -237,6 +255,28 @@ def test_camera_validator_reports_target_direction_mismatch() -> None:
     assert result.status is ValidationStatus.FAILED
     assert metric_score(result, "camera_direction_score") < 1.0
     assert any(issue.code == "camera_direction_mismatch" for issue in result.issues)
+
+
+def test_camera_validator_resolves_string_target_from_snapshot_object() -> None:
+    task = task_with_cameras(
+        [ExpectedCamera(name="Camera", target="Center_Sphere", direction_tolerance_deg=5.0)]
+    )
+    snapshot = scene_snapshot(
+        [
+            camera_snapshot(
+                "Camera",
+                location=snapshot_vector(0.0, -6.0, 2.0),
+                rotation_euler=snapshot_vector(math.atan2(6.0, 1.0), 0.0, 0.0),
+                is_active=True,
+            )
+        ],
+        objects=[object_snapshot("Center_Sphere", snapshot_vector(0.0, 0.0, 1.0))],
+    )
+
+    result = CameraValidator().validate(task, snapshot)
+
+    assert result.status is ValidationStatus.PASSED
+    assert metric_score(result, "camera_direction_score") == 1.0
 
 
 def test_single_expected_camera_must_be_active() -> None:

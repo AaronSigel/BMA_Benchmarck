@@ -57,15 +57,24 @@ def test_export_scene_imports_without_bpy() -> None:
     assert "bpy" not in sys.modules
 
 
+def export_payload(result: dict) -> dict:
+    assert result["status"] in {"success", "error"}
+    assert isinstance(result.get("result"), dict)
+    return result["result"]
+
+
 def test_export_scene_blend(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setitem(sys.modules, "bpy", make_fake_bpy())
     output_path = tmp_path / "nested" / "scene.blend"
 
     result = export_scene({"output_path": str(output_path), "format": "blend"})
+    payload = export_payload(result)
 
-    assert result == {
+    assert result["status"] == "success"
+    assert payload == {
         "ok": True,
         "output_path": str(output_path),
+        "filepath": str(output_path),
         "format": "blend",
         "exists": True,
         "file_size_bytes": 5,
@@ -79,10 +88,12 @@ def test_export_scene_glb(monkeypatch, tmp_path: Path) -> None:
     output_path = tmp_path / "scene.glb"
 
     result = export_scene({"output_path": str(output_path), "format": "glb"})
+    payload = export_payload(result)
 
-    assert result["ok"] is True
-    assert result["format"] == "glb"
-    assert result["file_size_bytes"] == 3
+    assert result["status"] == "success"
+    assert payload["ok"] is True
+    assert payload["format"] == "glb"
+    assert payload["file_size_bytes"] == 3
     assert fake_bpy.ops.export_scene.gltf.calls == [
         {"filepath": str(output_path), "export_format": "GLB"}
     ]
@@ -94,8 +105,10 @@ def test_export_scene_gltf(monkeypatch, tmp_path: Path) -> None:
     output_path = tmp_path / "scene.gltf"
 
     result = export_scene({"output_path": str(output_path), "format": "gltf"})
+    payload = export_payload(result)
 
-    assert result["ok"] is True
+    assert result["status"] == "success"
+    assert payload["ok"] is True
     assert fake_bpy.ops.export_scene.gltf.calls == [
         {"filepath": str(output_path), "export_format": "GLTF_SEPARATE"}
     ]
@@ -106,12 +119,14 @@ def test_export_scene_returns_error_for_unsupported_format(monkeypatch, tmp_path
     output_path = tmp_path / "scene.obj"
 
     result = export_scene({"output_path": str(output_path), "format": "obj"})
+    payload = export_payload(result)
 
-    assert result["ok"] is False
-    assert result["output_path"] == str(output_path)
-    assert result["format"] == "obj"
-    assert result["exists"] is False
-    assert "unsupported format" in result["error"]
+    assert result["status"] == "error"
+    assert payload["ok"] is False
+    assert payload["output_path"] == str(output_path)
+    assert payload["format"] == "obj"
+    assert payload["exists"] is False
+    assert "unsupported format" in payload["error"]
 
 
 def test_export_scene_handles_missing_fbx_operator(monkeypatch, tmp_path: Path) -> None:
@@ -119,11 +134,13 @@ def test_export_scene_handles_missing_fbx_operator(monkeypatch, tmp_path: Path) 
     output_path = tmp_path / "scene.fbx"
 
     result = export_scene({"output_path": str(output_path), "format": "fbx"})
+    payload = export_payload(result)
 
-    assert result["ok"] is False
-    assert result["format"] == "fbx"
-    assert result["exists"] is False
-    assert "FBX" in result["error"]
+    assert result["status"] == "error"
+    assert payload["ok"] is False
+    assert payload["format"] == "fbx"
+    assert payload["exists"] is False
+    assert "FBX" in payload["error"]
 
 
 def test_export_scene_handles_gltf_poll_error(monkeypatch, tmp_path: Path) -> None:
@@ -131,18 +148,22 @@ def test_export_scene_handles_gltf_poll_error(monkeypatch, tmp_path: Path) -> No
     output_path = tmp_path / "scene.glb"
 
     result = export_scene({"output_path": str(output_path), "format": "glb"})
+    payload = export_payload(result)
 
-    assert result["ok"] is False
-    assert result["format"] == "glb"
-    assert "glTF export operator" in result["error"]
-    assert "operator could not be found" in result["error"]
+    assert result["status"] == "error"
+    assert payload["ok"] is False
+    assert payload["format"] == "glb"
+    assert "glTF export operator" in payload["error"]
+    assert "operator could not be found" in payload["error"]
 
 
 def test_export_scene_requires_output_path(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "bpy", make_fake_bpy())
 
     result = export_scene({"format": "blend"})
+    payload = export_payload(result)
 
-    assert result["ok"] is False
-    assert result["output_path"] is None
-    assert "output_path" in result["error"]
+    assert result["status"] == "error"
+    assert payload["ok"] is False
+    assert payload["output_path"] is None
+    assert "output_path" in payload["error"]

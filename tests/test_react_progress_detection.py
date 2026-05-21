@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from benchmark.agent.llm import LlmResponse, MockLlmClient
 from benchmark.agent.models import AgentConfig, AgentStepType, AgentStrategyName, LlmConfig
 from benchmark.agent.strategies import ReactStrategy
+from benchmark.agent.strategies.react import _resolve_max_steps
 from benchmark.agent.tool_context import AgentToolContext
 from benchmark.agent.tool_executor import MockToolExecutor
 from benchmark.validation.models import ValidationIssue, ValidationSeverity, ValidationStatus
@@ -42,6 +43,12 @@ def _issue(code: str = "object_missing") -> ValidationIssue:
         expected_value=None,
         actual_value=None,
     )
+
+
+def test_config_max_steps_overrides_category_default() -> None:
+    assert _resolve_max_steps({"category": "geometry"}, _config(max_steps=20)) == 20
+    cfg = _config(max_steps=20, max_steps_by_category={"geometry": 7})
+    assert _resolve_max_steps({"category": "geometry"}, cfg) == 7
 
 
 # --- Max steps classification ---

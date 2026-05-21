@@ -56,8 +56,8 @@ class E2EBenchmarkRunner:
         prepared = self._prepare(matrix_path, clean_output=clean_output, run_contract_smoke=True, fail_fast_profile_preflight=fail_fast_profile_preflight, resume=resume)
         self._run_batch(prepared.config, resume=resume)
         _refresh_manifest(prepared)
-        analysis = run_analysis(prepared.matrix.output_root)
-        return build_reports(analysis, prepared.matrix)
+        analysis = _run_analysis(prepared.matrix.output_root)
+        return _build_reports(analysis, prepared.matrix)
 
     def _prepare(
         self,
@@ -149,7 +149,12 @@ class E2EBenchmarkRunner:
 
     def _run_batch(self, config: ExperimentConfig, *, resume: bool = False) -> ExperimentResult:
         runner = self.batch_runner or _default_batch_runner()
-        return runner.run_experiment(config, resume=resume)
+        try:
+            return runner.run_experiment(config, resume=resume)
+        except TypeError as exc:
+            if "resume" not in str(exc):
+                raise
+            return runner.run_experiment(config)
 
 
 def _default_batch_runner():

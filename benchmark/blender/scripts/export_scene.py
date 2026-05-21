@@ -8,13 +8,32 @@ SUPPORTED_FORMATS = {"blend", "glb", "gltf", "fbx"}
 def _result(path: Path | None, export_format: str | None, error: str | None = None) -> dict:
     exists = path.exists() if path else False
     file_size_bytes = path.stat().st_size if path and exists else 0
-    return {
+    filepath = str(path) if path else None
+    payload = {
         "ok": error is None and exists and file_size_bytes > 0,
-        "output_path": str(path) if path else None,
+        "output_path": filepath,
+        "filepath": filepath,
         "format": export_format,
         "exists": exists,
         "file_size_bytes": file_size_bytes,
         "error": error,
+    }
+    if error is not None:
+        return {
+            **payload,
+            "status": "error",
+            "error": {
+                "type": "ExportFailed",
+                "message": error,
+                "format": export_format,
+                "filepath": filepath,
+            },
+            "result": payload,
+        }
+    return {
+        **payload,
+        "status": "success",
+        "result": payload,
     }
 
 

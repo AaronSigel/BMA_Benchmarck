@@ -213,6 +213,7 @@ def run_contract_smoke_for_experiment(config: ExperimentConfig, output_root: Pat
             _err = material_result.get("error") or {}
             _msg = _err.get("message") if isinstance(_err, dict) else str(_err)
             raise RuntimeError(f"bma_set_material probe failed: {_msg}")
+        export_results = _run_export_smoke(adapter, output_root)
         adapter.collect_scene_snapshot(snapshot_path)
         snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
         _assert_contract_snapshot(snapshot)
@@ -236,9 +237,58 @@ def run_contract_smoke_for_experiment(config: ExperimentConfig, output_root: Pat
             "finished_at": _utc_now(),
             "create_result": _json_safe(create_result),
             "material_result": _json_safe(material_result),
+            "export_results": _json_safe(export_results),
         }
     )
     return metadata
+
+
+def _run_export_smoke(adapter: ExternalBlenderMcpServerAdapter, output_root: Path) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for export_format, relative_path in (("blend", "result.blend"), ("glb", "exports/result.glb")):
+        reset_result = adapter.reset_scene()
+        if isinstance(reset_result, dict) and reset_result.get("warning"):
+            raise RuntimeError(str(reset_result["warning"]))
+        create_result = adapter.call_tool(
+            "bma_create_object",
+            {
+                "type": "MESH_CUBE",
+                "name": "ExportProbeCube",
+                "dimensions": [1.0, 1.0, 1.0],
+            },
+        )
+        if create_result.get("ok") is False:
+            _err = create_result.get("error") or {}
+            _msg = _err.get("message") if isinstance(_err, dict) else str(_err)
+            raise RuntimeError(f"export smoke create cube failed: {_msg}")
+        filepath = output_root / "preflight_exports" / relative_path
+        export_result = adapter.call_tool(
+            "bma_export_scene",
+            {
+                "format": export_format,
+                "filename": relative_path,
+                "filepath": str(filepath),
+            },
+        )
+        _assert_export_smoke_result(export_format, filepath, export_result)
+        results.append(export_result)
+    return results
+
+
+def _assert_export_smoke_result(export_format: str, filepath: Path, result: dict[str, Any]) -> None:
+    if result.get("ok") is False:
+        err = result.get("error") or {}
+        msg = err.get("message") if isinstance(err, dict) else str(err)
+        raise RuntimeError(f"bma_export_scene {export_format} smoke failed: {msg}")
+    payload = result.get("result") if isinstance(result.get("result"), dict) else {}
+    exists = bool(payload.get("exists")) or filepath.exists()
+    size = payload.get("file_size_bytes")
+    if not isinstance(size, int):
+        size = filepath.stat().st_size if filepath.exists() else 0
+    if not exists:
+        raise RuntimeError(f"bma_export_scene {export_format} smoke did not create {filepath}")
+    if size <= 0:
+        raise RuntimeError(f"bma_export_scene {export_format} smoke created empty file {filepath}")
 
 
 EXPECTED_BMA_CONTRACT = frozenset({

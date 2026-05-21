@@ -175,6 +175,21 @@ def test_call_tool_maps_bma_tool_name_to_socket_command():
     assert payload["params"] == {"filepath": "exports/result.glb"}
 
 
+def test_invalid_json_error_includes_raw_len_preview():
+    cfg = make_config(profile="no_python")
+    adapter = ExternalBlenderMcpServerAdapter(cfg)
+    mock_sock = MagicMock()
+    mock_sock.recv.side_effect = [b"not-json", b""]
+
+    with patch("benchmark.mcp.server_adapter.socket.create_connection", return_value=mock_sock):
+        result = adapter.call_tool("bma_export_scene", {"filepath": "exports/result.glb"})
+
+    assert result["ok"] is False
+    assert result["error"]["type"] == "InvalidJsonResponse"
+    assert result["error"]["raw_len"] == len(b"not-json")
+    assert result["error"]["raw_preview"] == "not-json"
+
+
 def test_call_tool_maps_camera_look_at_to_socket_command():
     cfg = make_config(profile="no_python")
     adapter = ExternalBlenderMcpServerAdapter(cfg)

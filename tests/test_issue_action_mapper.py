@@ -3,6 +3,12 @@ from __future__ import annotations
 
 import pytest
 
+from benchmark.blender.models import (
+    ObjectSnapshot,
+    RenderSettingsSnapshot,
+    SceneSnapshot,
+    Vector3 as SnapshotVector3,
+)
 from benchmark.agent.strategies.issue_action_mapper import (
     EXPORT_BLOCKING_CODES,
     RepairAction,
@@ -51,6 +57,44 @@ def _task(**scene_kwargs) -> BenchmarkTask:
         allowed_tools=[],
         expected_scene=ExpectedScene(**scene_kwargs),
         success_criteria=[SuccessCriterion(metric="object_existence", weight=1.0)],
+    )
+
+
+def _snapshot_with_object(name: str, x: float, y: float, z: float) -> SceneSnapshot:
+    vec = SnapshotVector3(x=x, y=y, z=z)
+    return SceneSnapshot(
+        scene_name="Scene",
+        objects=[
+            ObjectSnapshot(
+                name=name,
+                type="MESH",
+                primitive_hint=None,
+                location=vec,
+                rotation_euler=SnapshotVector3(x=0, y=0, z=0),
+                scale=SnapshotVector3(x=1, y=1, z=1),
+                dimensions=SnapshotVector3(x=1, y=1, z=1),
+                material_slots=[],
+                parent=None,
+                collection_names=["Collection"],
+                vertex_count=None,
+                polygon_count=None,
+            )
+        ],
+        materials=[],
+        lights=[],
+        cameras=[],
+        collections=["Collection"],
+        render_settings=RenderSettingsSnapshot(
+            engine="CYCLES",
+            resolution_x=1920,
+            resolution_y=1080,
+            frame_start=1,
+            frame_end=1,
+            frame_current=1,
+        ),
+        frame_current=1,
+        blender_version="4.0.0",
+        created_at="2026-05-15T12:00:00Z",
     )
 
 
@@ -219,6 +263,62 @@ def test_map_camera_target_to_look_at() -> None:
     assert action.tool_name == "bma_create_camera_look_at"
     assert action.arguments_template.get("name") == "Camera"
     assert action.arguments_template.get("focal_length") == 35.0
+
+
+def test_camera_target_string_does_not_crash_mapper() -> None:
+    task = _task(
+        cameras=[
+            ExpectedCamera(
+                name="Camera",
+                location=Vector3(x=4, y=-6, z=4),
+                target="Center_Sphere",
+                focal_length=35.0,
+            )
+        ]
+    )
+    issue = ValidationIssue(
+        code="camera_missing",
+        message="Missing camera",
+        severity=ValidationSeverity.ERROR,
+        expected_path="expected_scene.cameras[0]",
+        actual_path=None,
+        expected_value=None,
+        actual_value=None,
+    )
+
+    action = map_issue_to_repair(issue, task)
+
+    assert action is not None
+    assert action.tool_name == "bma_create_camera_look_at"
+    assert action.arguments_template["target_object_name"] == "Center_Sphere"
+
+
+def test_camera_target_string_uses_snapshot_object_coords() -> None:
+    task = _task(
+        cameras=[
+            ExpectedCamera(
+                name="Camera",
+                location=Vector3(x=4, y=-6, z=4),
+                target="Center_Sphere",
+                focal_length=35.0,
+            )
+        ]
+    )
+    issue = ValidationIssue(
+        code="camera_missing",
+        message="Missing camera",
+        severity=ValidationSeverity.ERROR,
+        expected_path="expected_scene.cameras[0]",
+        actual_path=None,
+        expected_value=None,
+        actual_value=None,
+    )
+
+    action = map_issue_to_repair(issue, task, _snapshot_with_object("Center_Sphere", 0.0, 0.0, 0.75))
+
+    assert action is not None
+    assert action.arguments_template["target"] == [0.0, 0.0, 0.75]
+    assert "target_object_name" not in action.arguments_template
 
 
 def test_map_camera_location_mismatch() -> None:

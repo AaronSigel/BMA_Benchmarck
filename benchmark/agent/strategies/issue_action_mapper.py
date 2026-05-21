@@ -130,13 +130,13 @@ def map_issue_to_repair(
     if code in {"light_rotation_mismatch", "light_direction_mismatch", "light_energy_mismatch", "light_type_mismatch", "light_location_mismatch"}:
         return _repair_light_mismatch(issue, task)
     if code == "camera_missing":
-        return _repair_camera_missing(issue, task)
+        return _repair_camera_missing(issue, task, snapshot)
     if code in {
         "camera_rotation_mismatch", "camera_position_mismatch",
         "camera_location_mismatch", "camera_direction_mismatch",
         "camera_focal_length_mismatch", "camera_lens_mismatch",
     }:
-        return _repair_camera_mismatch(issue, task)
+        return _repair_camera_mismatch(issue, task, snapshot)
     if code in {"active_camera_mismatch", "active_camera_missing"}:
         return _repair_active_camera(issue, task)
     if code in {
@@ -157,7 +157,23 @@ def _extract_index(path: str | None) -> int | None:
 def _vec3_list(v: Any) -> list[float] | None:
     if v is None:
         return None
+    if isinstance(v, str):
+        return None
     return [v.x, v.y, v.z]
+
+
+def _target_args(target: Any, snapshot: SceneSnapshot | None = None) -> dict[str, Any]:
+    """Return look-at args for coordinate targets or object-name targets."""
+    if target is None:
+        return {}
+    if isinstance(target, str):
+        if snapshot is not None:
+            obj = next((o for o in snapshot.objects if o.name == target), None)
+            if obj is not None:
+                return {"target": [obj.location.x, obj.location.y, obj.location.z]}
+        return {"target_object_name": target}
+    coords = _vec3_list(target)
+    return {"target": coords} if coords is not None else {}
 
 
 def _repair_object_missing(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
@@ -418,7 +434,11 @@ def _repair_light_mismatch(issue: ValidationIssue, task: BenchmarkTask) -> Repai
     )
 
 
-def _repair_camera_missing(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
+def _repair_camera_missing(
+    issue: ValidationIssue,
+    task: BenchmarkTask,
+    snapshot: SceneSnapshot | None = None,
+) -> RepairAction:
     idx = _extract_index(issue.expected_path)
     cameras = task.expected_scene.cameras
     cam = cameras[idx] if idx is not None and idx < len(cameras) else None
@@ -432,7 +452,7 @@ def _repair_camera_missing(issue: ValidationIssue, task: BenchmarkTask) -> Repai
         if loc:
             args["location"] = loc
         if cam.target:
-            args["target"] = _vec3_list(cam.target)
+            args.update(_target_args(cam.target, snapshot))
             tool = "bma_create_camera_look_at"
         elif cam.rotation:
             args["rotation"] = _vec3_list(cam.rotation)
@@ -451,8 +471,12 @@ def _repair_camera_missing(issue: ValidationIssue, task: BenchmarkTask) -> Repai
     )
 
 
-def _repair_camera_mismatch(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
-    return _repair_camera_missing(issue, task)
+def _repair_camera_mismatch(
+    issue: ValidationIssue,
+    task: BenchmarkTask,
+    snapshot: SceneSnapshot | None = None,
+) -> RepairAction:
+    return _repair_camera_missing(issue, task, snapshot)
 
 
 def _repair_active_camera(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
@@ -467,7 +491,7 @@ def _repair_active_camera(issue: ValidationIssue, task: BenchmarkTask) -> Repair
         if loc:
             args["location"] = loc
         if active.target:
-            args["target"] = _vec3_list(active.target)
+            args.update(_target_args(active.target))
         elif active.rotation:
             args["rotation"] = _vec3_list(active.rotation)
             tool = "bma_create_camera"

@@ -37,13 +37,31 @@ class FakeAdapter:
 
     def call_tool(self, tool_name, params=None):
         if tool_name == "bma_create_object":
+            name = (params or {}).get("name", "ProbeCube")
+            dims = (params or {}).get("dimensions", [2.0, 2.0, 2.0])
             return {
-                "name": "ProbeCube",
-                "dimensions": [2.0, 2.0, 2.0],
+                "ok": True,
+                "name": name,
+                "dimensions": dims,
                 "primitive_hint": "cube",
             }
         if tool_name == "bma_set_material":
-            return {"object": "ProbeCube", "material": "ProbeRed"}
+            return {"ok": True, "object": "ProbeCube", "material": "ProbeRed"}
+        if tool_name == "bma_export_scene":
+            filepath = Path((params or {})["filepath"])
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            filepath.write_bytes(b"export")
+            return {
+                "ok": True,
+                "result": {
+                    "ok": True,
+                    "format": (params or {}).get("format"),
+                    "filepath": str(filepath),
+                    "exists": True,
+                    "file_size_bytes": filepath.stat().st_size,
+                },
+                "error": None,
+            }
         return {}
 
     def collect_scene_snapshot(self, output_path):
@@ -103,6 +121,22 @@ def test_contract_smoke_success_writes_snapshot_and_resets(tmp_path: Path, monke
 
     assert result["ok"] is True
     assert (tmp_path / "preflight_contract_smoke_snapshot.json").is_file()
+    assert len(result["export_results"]) == 2
+
+
+def test_preflight_fails_when_export_response_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class EmptyExportAdapter(FakeAdapter):
+        def call_tool(self, tool_name, params=None):
+            if tool_name == "bma_export_scene":
+                return {}
+            return super().call_tool(tool_name, params)
+
+    _patch_smoke(monkeypatch, EmptyExportAdapter)
+
+    result = preflight.run_contract_smoke_for_experiment(_agent_config(tmp_path), tmp_path)
+
+    assert result["ok"] is False
+    assert "bma_export_scene" in result["error"]
 
 
 def test_contract_smoke_fails_when_dimensions_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

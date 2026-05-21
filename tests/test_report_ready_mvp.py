@@ -42,6 +42,8 @@ def _run(run_id: str, pass_type: str, **kwargs) -> RunAnalysisResult:
 def test_pass_type_classifier_uses_report_ready_values() -> None:
     assert _classify_pass_type("passed", "passed", "completed", []) == "clean_pass"
     assert _classify_pass_type("passed", "passed", "completed", [{"code": "object_missing"}]) == "soft_pass"
+    assert _classify_pass_type("error", "passed", "runtime_error", []) == "soft_pass"
+    assert _classify_pass_type("passed", "warning", "completed", []) == "soft_pass"
     assert _classify_pass_type("failed", "failed", "completed", []) == "failed_validation"
     assert _classify_pass_type("error", "not_available", "runtime_error", []) == "runtime_error"
 

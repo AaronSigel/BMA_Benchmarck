@@ -362,6 +362,7 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
     )
     _scene_status_str = (
         run_result.scene_status.value if run_result is not None and run_result.scene_status
+        else run_result.overall_status if run_result is not None and run_result.overall_status
         else val_summary.scene_overall_status
     )
     pass_type = _classify_pass_type(_run_status_str, _scene_status_str, _agent_status_str, issues)
@@ -400,17 +401,20 @@ def _classify_pass_type(
     issues: list[dict[str, Any]],
 ) -> str:
     """Classify a run as clean_pass, soft_pass, failed_validation, or runtime_error."""
+    agent_ok = agent_status in (
+        "completed",
+        "completed_after_scene_passed",
+        None,
+    )
+    if scene_status == "passed":
+        if run_status == "passed" and agent_ok and not issues:
+            return "clean_pass"
+        return "soft_pass"
+    if scene_status == "warning":
+        if run_status in {"passed", "failed", "error"} or agent_status:
+            return "soft_pass"
     if run_status == "error" or run_status is None or scene_status in {None, "not_available", "skipped"}:
         return "runtime_error"
-    if run_status == "passed" and scene_status == "passed":
-        agent_ok = agent_status in (
-            "completed",
-            "completed_after_scene_passed",
-            None,
-        )
-        if issues and agent_ok:
-            return "soft_pass"
-        return "clean_pass"
     if scene_status == "failed":
         return "failed_validation"
     return "runtime_error"

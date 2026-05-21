@@ -158,6 +158,17 @@ class ExperimentSummary(BaseModel):
 
     most_common_errors: list[tuple[str, int]] = Field(default_factory=list)
 
+    # Infrastructure / model failure rates
+    infra_error_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    model_failure_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    validation_failure_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    tool_runtime_failure_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    reported_success_rate_excluding_infra: float | None = Field(default=None, ge=0.0, le=1.0)
+    infra_socket_timeouts: int = Field(default=0, ge=0)
+    infra_empty_socket_responses: int = Field(default=0, ge=0)
+    infra_worker_restarts: int = Field(default=0, ge=0)
+    no_progress_by_reason: dict[str, int] = Field(default_factory=dict)
+
     best_run: str | None = None
     worst_run: str | None = None
 

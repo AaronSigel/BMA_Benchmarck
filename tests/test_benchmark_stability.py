@@ -193,7 +193,7 @@ class TestUnclassifiedErrorNotUsedForKnownFailures:
         ("Tool call timed out after 60 seconds", ControlledErrorType.TOOL_TIMEOUT),
         ("pre-run scene snapshot could not be collected", ControlledErrorType.SNAPSHOT_UNAVAILABLE),
         ("scene reset failed: could not reset scene", ControlledErrorType.RESET_SCENE_FAILED),
-        ("No response from Blender socket", ControlledErrorType.BLENDER_SOCKET_UNAVAILABLE),
+        ("No response from Blender socket", ControlledErrorType.BLENDER_SOCKET_NO_RESPONSE),
         ("repeated the same action three times", ControlledErrorType.REACT_INVALID_ACTION),
         ("no_progress_detected after 3 steps", ControlledErrorType.REACT_NO_PROGRESS),
     ])

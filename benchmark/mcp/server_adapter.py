@@ -21,16 +21,28 @@ from benchmark.mcp.tool_registry import McpToolRegistry
 _RECV_BUFFER = 8192
 
 # Error types that indicate a transient socket failure safe to retry.
-_TRANSIENT_ERROR_TYPES = {"EmptySocketResponse", "SocketTimeout", "SocketError"}
+_TRANSIENT_ERROR_TYPES = {"EmptySocketResponse", "SocketTimeout", "SocketError", "ToolTimeout"}
 
 # Empty or unparseable socket responses — harness may recover via execute_code fallback.
-_CAMERA_LOOK_AT_FALLBACK_ERROR_TYPES = {"EmptySocketResponse", "InvalidJsonResponse", "SocketTimeout", "SocketError"}
+_CAMERA_LOOK_AT_FALLBACK_ERROR_TYPES = {
+    "EmptySocketResponse",
+    "InvalidJsonResponse",
+    "SocketTimeout",
+    "SocketError",
+    "ToolTimeout",
+}
 
 # Tools whose calls are idempotent and can be safely retried once on transient errors.
-# bma_set_transform / bma_set_material are always idempotent (overwrite existing state).
-# bma_create_object is idempotent only when if_exists=update (handled in _call_create_object_with_if_exists).
-# bma_create_camera_look_at is retried on transient empty socket responses.
-_IDEMPOTENT_TOOLS = {"bma_set_transform", "bma_set_material", "bma_assign_material", "bma_create_camera_look_at"}
+_IDEMPOTENT_TOOLS = {
+    "bma_set_transform",
+    "bma_set_material",
+    "bma_assign_material",
+    "bma_create_material",
+    "bma_create_camera_look_at",
+}
+
+# Non-idempotent tools that may retry only with explicit safety proof.
+_NON_IDEMPOTENT_TOOLS = {"bma_export_scene", "execute_blender_code"}
 
 
 def _connect_host(host: str) -> str:
@@ -50,9 +62,15 @@ class ExternalBlenderMcpServerAdapter:
         self,
         config: McpServerConfig,
         registry: McpToolRegistry | None = None,
+        *,
+        watchdog: Any | None = None,
+        call_context: dict[str, Any] | None = None,
     ) -> None:
         self._config = config
         self._registry = registry or McpToolRegistry()
+        self._watchdog = watchdog
+        self._call_context = dict(call_context or {})
+        self._retry_log: list[dict[str, Any]] = []
 
     @property
     def config(self) -> McpServerConfig:
@@ -170,19 +188,70 @@ class ExternalBlenderMcpServerAdapter:
         if tool_name == "bma_create_camera_look_at":
             return self._call_create_camera_look_at(params or {})
 
+        if tool_name == "bma_create_light" and isinstance(params, dict) and params.get("if_exists") == "update":
+            result = self._socket_call_once(tool_name, params)
+            if self._should_retry_idempotent(tool_name, result):
+                result = self._retry_with_watchdog(tool_name, params, result, attempt=2)
+            return result
+
         result = self._socket_call_once(tool_name, params)
 
-        # Retry once for idempotent tools on transient failures.
-        if (
+        if self._should_retry_idempotent(tool_name, result):
+            result = self._retry_with_watchdog(tool_name, params, result, attempt=2)
+
+        return result
+
+    def _should_retry_idempotent(self, tool_name: str, result: Any) -> bool:
+        return (
             isinstance(result, dict)
             and not result.get("ok")
             and isinstance(result.get("error"), dict)
             and result["error"].get("type") in _TRANSIENT_ERROR_TYPES
             and tool_name in _IDEMPOTENT_TOOLS
-        ):
-            result = self._socket_call_once(tool_name, params)
+        )
 
-        return result
+    def _retry_with_watchdog(
+        self,
+        tool_name: str,
+        params: dict[str, Any] | None,
+        first_result: dict[str, Any],
+        *,
+        attempt: int,
+    ) -> dict[str, Any]:
+        error = first_result.get("error") if isinstance(first_result.get("error"), dict) else {}
+        error_type = str(error.get("type") or "Unknown")
+        self._log_retry(tool_name, attempt - 1, error_type)
+        if self._watchdog is not None:
+            from benchmark.mcp.socket_watchdog import SocketFailureEvent, WatchdogAction
+            action = self._watchdog.on_socket_failure(
+                SocketFailureEvent(
+                    error_type=error_type,
+                    tool_name=tool_name,
+                    message=str(error.get("message") or ""),
+                    failure_stage=str(error.get("stage") or error.get("failure_stage") or "tool_call"),
+                    attempt=attempt - 1,
+                )
+            )
+            if action.value == "mark_infra_error":
+                error_payload = dict(error)
+                error_payload["type"] = "BlenderWorkerUnhealthy"
+                return {**first_result, "error": error_payload}
+        retry_result = self._socket_call_once(tool_name, params, attempt=attempt)
+        self._log_retry(tool_name, attempt, error_type)
+        return retry_result
+
+    def _log_retry(self, tool_name: str, attempt: int, error_type: str) -> None:
+        import datetime
+        entry = {
+            "tool": tool_name,
+            "attempt": attempt,
+            "error_type": error_type,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        self._retry_log.append(entry)
+
+    def get_retry_log(self) -> list[dict[str, Any]]:
+        return list(self._retry_log)
 
     def _call_create_camera_look_at(self, params: dict[str, Any]) -> dict[str, Any]:
         """Create camera look-at via socket, with execute_code fallback when addon handler is missing."""
@@ -212,8 +281,12 @@ class ExternalBlenderMcpServerAdapter:
 
     def _create_camera_look_at_via_code(self, params: dict[str, Any]) -> dict[str, Any]:
         """Harness fallback when addon socket command create_camera_look_at is unavailable."""
-        raw = self.execute_code_unrestricted(_create_camera_look_at_code(params))
-        if isinstance(raw, dict) and raw.get("warning"):
+        raw = self.execute_code_unrestricted(
+            _create_camera_look_at_code(params),
+            operation="bma_create_camera_look_at",
+        )
+        if isinstance(raw, dict) and raw.get("ok") is False:
+            error = raw.get("error") if isinstance(raw.get("error"), dict) else {}
             return _tool_envelope(
                 "bma_create_camera_look_at",
                 ok=False,
@@ -222,8 +295,8 @@ class ExternalBlenderMcpServerAdapter:
                     "target": params.get("target") or params.get("target_object_name"),
                     "failure_stage": "execute_code_fallback",
                 },
-                error_type="CameraLookAtFailed",
-                error_message=str(raw.get("warning")),
+                error_type=str(error.get("type") or "CameraLookAtFailed"),
+                error_message=str(error.get("message") or "Camera look-at execute_code fallback failed"),
             )
 
         payload = _parse_execute_code_payload(raw)
@@ -296,7 +369,13 @@ class ExternalBlenderMcpServerAdapter:
             return _tool_envelope("bma_create_camera_look_at", ok=True, result=normalized)
         return envelope
 
-    def _socket_call_once(self, tool_name: str, params: dict[str, Any] | None) -> Any:
+    def _socket_call_once(
+        self,
+        tool_name: str,
+        params: dict[str, Any] | None,
+        *,
+        attempt: int = 1,
+    ) -> Any:
         """Execute a single socket round-trip and return a parsed _tool_envelope dict."""
         socket_cmd = _TOOL_TO_SOCKET_CMD.get(tool_name, tool_name)
         payload = json.dumps({"type": socket_cmd, "params": params or {}}).encode()
@@ -317,13 +396,21 @@ class ExternalBlenderMcpServerAdapter:
             sock.sendall(payload)
             raw = _recv_all(sock)
         except TimeoutError:
+            ctx = self._call_context
             return _tool_envelope(
                 tool_name,
                 ok=False,
                 result={
                     "tool_name": tool_name,
                     "timeout_sec": self._config.request_timeout_sec,
-                    "failure_stage": "tool_call",
+                    "failure_stage": "tool_execution",
+                    "stage": "tool_execution",
+                    "run_id": ctx.get("run_id"),
+                    "task_id": ctx.get("task_id"),
+                    "agent_id": ctx.get("agent_id"),
+                    "mcp_profile": ctx.get("mcp_profile") or self._config.profile,
+                    "attempt": attempt,
+                    "retry_allowed": tool_name in _IDEMPOTENT_TOOLS,
                     "raw_preview": "",
                 },
                 error_type="ToolTimeout",
@@ -344,7 +431,12 @@ class ExternalBlenderMcpServerAdapter:
             return _tool_envelope(
                 tool_name,
                 ok=False,
-                result={"raw_len": 0, "raw_preview": "", "failure_stage": "tool_response_parse"},
+                result={
+                    "raw_len": 0,
+                    "raw_preview": "",
+                    "failure_stage": "socket_response",
+                    "stage": "socket_response",
+                },
                 error_type="EmptySocketResponse",
                 error_message=f"Empty response from Blender socket for tool '{tool_name}'",
             )
@@ -451,7 +543,6 @@ class ExternalBlenderMcpServerAdapter:
 
         raw_result = self._socket_call_once("bma_create_object", create_params)
 
-        # Retry once on transient failures when if_exists=update (idempotent).
         if (
             if_exists == "update"
             and isinstance(raw_result, dict)
@@ -459,7 +550,7 @@ class ExternalBlenderMcpServerAdapter:
             and isinstance(raw_result.get("error"), dict)
             and raw_result["error"].get("type") in _TRANSIENT_ERROR_TYPES
         ):
-            raw_result = self._socket_call_once("bma_create_object", create_params)
+            raw_result = self._retry_with_watchdog("bma_create_object", create_params, raw_result, attempt=2)
 
         if isinstance(raw_result, dict) and raw_result.get("ok"):
             inner = raw_result.get("result") or {}
@@ -470,14 +561,40 @@ class ExternalBlenderMcpServerAdapter:
                 raw_result = {**raw_result, "result": inner}
         return raw_result
 
-    def reset_scene(self) -> dict:
+    def reset_scene(self) -> dict[str, Any]:
         """Reset the Blender scene unconditionally, bypassing profile restrictions."""
-        return self.execute_code_unrestricted(_RESET_SCENE_CODE)
+        raw = self.execute_code_unrestricted(_RESET_SCENE_CODE, operation="reset_scene")
+        if isinstance(raw, dict) and raw.get("ok") is False:
+            return raw
+        if isinstance(raw, dict) and raw.get("warning"):
+            return _tool_envelope(
+                "reset_scene",
+                ok=False,
+                result={"failure_stage": "reset_scene", "stage": "reset_scene"},
+                error_type="ResetSceneFailed",
+                error_message=str(raw.get("warning")),
+            )
+        return _tool_envelope("reset_scene", ok=True, result={"reset": True})
 
-    def collect_scene_snapshot(self, output_path: Path | str) -> dict:
+    def collect_scene_snapshot(self, output_path: Path | str) -> dict[str, Any]:
         """Collect a SceneSnapshot as harness infrastructure, bypassing profile restrictions."""
         code = _collect_snapshot_code(Path(output_path))
-        return self.execute_code_unrestricted(code)
+        raw = self.execute_code_unrestricted(code, operation="bma_get_scene_snapshot")
+        if isinstance(raw, dict) and raw.get("ok") is False:
+            return raw
+        if isinstance(raw, dict) and raw.get("warning"):
+            return _tool_envelope(
+                "bma_get_scene_snapshot",
+                ok=False,
+                result={"failure_stage": "snapshot_collection", "stage": "snapshot_collection"},
+                error_type="SnapshotUnavailable",
+                error_message=str(raw.get("warning")),
+            )
+        return _tool_envelope(
+            "bma_get_scene_snapshot",
+            ok=True,
+            result={"path": str(output_path)},
+        )
 
     def _call_get_scene_snapshot(self) -> dict[str, Any]:
         """Return full SceneSnapshot via collect_snapshot (not lightweight get_scene_info)."""
@@ -487,13 +604,14 @@ class ExternalBlenderMcpServerAdapter:
             snap_path = Path(tmp.name)
         try:
             raw = self.collect_scene_snapshot(snap_path)
-            if isinstance(raw, dict) and raw.get("warning"):
+            if isinstance(raw, dict) and raw.get("ok") is False:
+                error = raw.get("error") if isinstance(raw.get("error"), dict) else {}
                 return _tool_envelope(
                     "bma_get_scene_snapshot",
                     ok=False,
-                    result=None,
-                    error_type="SnapshotCollectionFailed",
-                    error_message=str(raw.get("warning")),
+                    result=raw.get("result"),
+                    error_type=str(error.get("type") or "SnapshotUnavailable"),
+                    error_message=str(error.get("message") or "snapshot collection failed"),
                 )
             if snap_path.exists():
                 try:
@@ -518,7 +636,7 @@ class ExternalBlenderMcpServerAdapter:
         finally:
             snap_path.unlink(missing_ok=True)
 
-    def execute_code_unrestricted(self, code: str) -> dict:
+    def execute_code_unrestricted(self, code: str, *, operation: str = "execute_code") -> dict[str, Any]:
         """Run Blender Python for harness-only operations, not model-visible tool use."""
         payload = json.dumps({"type": "execute_code", "params": {"code": code}}).encode()
         sock = None
@@ -530,13 +648,52 @@ class ExternalBlenderMcpServerAdapter:
             sock.settimeout(self._config.request_timeout_sec)
             sock.sendall(payload)
             raw = _recv_all(sock)
-            response = _loads_socket_response(raw, "execute_code")
+            if not raw:
+                return _tool_envelope(
+                    operation,
+                    ok=False,
+                    result={"raw_len": 0, "raw_preview": "", "failure_stage": "socket_response", "stage": "socket_response"},
+                    error_type="EmptySocketResponse",
+                    error_message=f"Empty response from Blender socket for '{operation}'",
+                )
+            response = _loads_socket_response(raw, operation)
             if isinstance(response, dict) and response.get("status") == "error":
                 message = response.get("error") or response.get("message") or response
-                return {"warning": f"execute_code failed: {message}"}
-            return response.get("result", response) if isinstance(response, dict) else {}
+                return _tool_envelope(
+                    operation,
+                    ok=False,
+                    result={"failure_stage": "blender_python_execution", "stage": "blender_python_execution"},
+                    error_type="BlenderRuntimeError",
+                    error_message=f"execute_code failed: {message}",
+                )
+            result = response.get("result", response) if isinstance(response, dict) else {}
+            return _tool_envelope(operation, ok=True, result=result if isinstance(result, dict) else {"result": result})
+        except TimeoutError:
+            ctx = self._call_context
+            return _tool_envelope(
+                operation,
+                ok=False,
+                result={
+                    "tool_name": operation,
+                    "timeout_sec": self._config.request_timeout_sec,
+                    "failure_stage": "tool_execution",
+                    "stage": "tool_execution",
+                    "run_id": ctx.get("run_id"),
+                    "task_id": ctx.get("task_id"),
+                    "attempt": 1,
+                    "retry_allowed": False,
+                },
+                error_type="ToolTimeout",
+                error_message=f"execute_code timed out after {self._config.request_timeout_sec} seconds",
+            )
         except Exception as exc:
-            return {"warning": f"execute_code failed: {exc}"}
+            return _tool_envelope(
+                operation,
+                ok=False,
+                result={"failure_stage": "blender_python_execution", "stage": "blender_python_execution"},
+                error_type="BlenderRuntimeError",
+                error_message=f"execute_code failed: {exc}",
+            )
         finally:
             if sock is not None:
                 sock.close()
@@ -698,8 +855,17 @@ def _extract_json_from_text(text: Any) -> dict[str, Any] | None:
 
 
 def _parse_execute_code_payload(raw: Any) -> dict[str, Any] | None:
-    if not isinstance(raw, dict) or raw.get("warning"):
+    if not isinstance(raw, dict):
         return None
+    if raw.get("ok") is False:
+        return None
+    if raw.get("warning"):
+        return None
+    if raw.get("ok") is True and isinstance(raw.get("result"), dict):
+        inner = raw["result"]
+        if inner.get("ok") is not None:
+            return inner
+        return inner
     if raw.get("ok") is not None and ("result" in raw or "error" in raw):
         return raw
     inner = raw.get("result")

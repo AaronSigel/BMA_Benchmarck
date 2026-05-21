@@ -263,10 +263,10 @@ def test_light_direction_mismatch_uses_set_transform() -> None:
     )
     action = map_issue_to_repair(issue, task)
     assert action is not None
-    assert action.tool_name == "bma_set_transform"
-    assert action.arguments_template.get("object_name") == "Key_Light"
-    assert action.arguments_template.get("rotation") is not None
-    assert action.arguments_template["rotation"][0] > 1.0
+    assert action.tool_name == "bma_create_light"
+    assert action.arguments_template.get("name") == "Key_Light"
+    assert action.arguments_template.get("if_exists") == "update"
+    assert "target" in action.arguments_template or "target_object_name" in action.arguments_template
 
 
 def test_light_missing_with_string_target_includes_rotation_radians() -> None:

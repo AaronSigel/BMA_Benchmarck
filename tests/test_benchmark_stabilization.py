@@ -60,7 +60,7 @@ def test_unknown_error_is_not_used_for_known_failures() -> None:
         "Invalid JSON from tool": "InvalidToolResponse",
         "Tool call timed out after 60 seconds": "ToolTimeout",
         "scene reset failed": "ResetSceneFailed",
-        "No response from Blender socket": "BlenderSocketUnavailable",
+        "No response from Blender socket": "BlenderSocketNoResponse",
     }
     for message, expected in cases.items():
         error = normalize_error(message)

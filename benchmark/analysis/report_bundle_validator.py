@@ -253,8 +253,10 @@ def _evaluate_readiness_gates(
             "hybrid_repair_activation_required_for_failed_validation": True,
         }
 
-    def _fail(name: str, expected: Any, actual: Any, *, severity: str = "blocking") -> None:
+    def _fail(name: str, expected: Any, actual: Any, *, severity: str = "blocking", gate_category: str | None = None) -> None:
         entry = {"name": name, "expected": expected, "actual": actual, "severity": severity}
+        if gate_category:
+            entry["gate_category"] = gate_category
         if severity == "warning":
             warning_gates.append(entry)
         else:
@@ -267,6 +269,7 @@ def _evaluate_readiness_gates(
         comparator: str,
         threshold: float,
         severity: str = "blocking",
+        gate_category: str | None = None,
     ) -> None:
         if gate_name not in gates or actual_rate is None:
             return
@@ -277,7 +280,7 @@ def _evaluate_readiness_gates(
             else actual_rate > threshold_value
         )
         if failed:
-            _fail(gate_name, threshold_value, round(actual_rate, 4), severity=severity)
+            _fail(gate_name, threshold_value, round(actual_rate, 4), severity=severity, gate_category=gate_category)
 
     # --- invalid_tool_response_export_max ---
     # Max allowed InvalidToolResponse / EmptySocketResponse / InvalidJsonResponse on export tasks.
@@ -399,6 +402,57 @@ def _evaluate_readiness_gates(
         comparator="max",
         threshold=float(gates.get("runtime_error_rate_max", 1)),
     )
+    _check_rate_gate(
+        "infra_error_rate_max",
+        actual_rate=_infra_error_rate(rows),
+        comparator="max",
+        threshold=float(gates.get("infra_error_rate_max", 1)),
+        gate_category="infra",
+    )
+    _check_rate_gate(
+        "reset_failure_rate_max",
+        actual_rate=_reset_failure_rate(rows),
+        comparator="max",
+        threshold=float(gates.get("reset_failure_rate_max", 1)),
+        gate_category="infra",
+    )
+    _check_rate_gate(
+        "snapshot_failure_rate_max",
+        actual_rate=_snapshot_failure_rate(rows),
+        comparator="max",
+        threshold=float(gates.get("snapshot_failure_rate_max", 1)),
+        gate_category="infra",
+    )
+    _check_rate_gate(
+        "model_failure_rate_max",
+        actual_rate=_model_failure_rate(rows),
+        comparator="max",
+        threshold=float(gates.get("model_failure_rate_max", 1)),
+    )
+    _check_rate_gate(
+        "validation_failure_rate_max",
+        actual_rate=_validation_failure_rate(rows),
+        comparator="max",
+        threshold=float(gates.get("validation_failure_rate_max", 1)),
+    )
+    if "socket_timeout_count_max" in gates:
+        gates_checked.append("socket_timeout_count_max")
+        timeout_count = sum(
+            1 for r in rows
+            if str(r.get("error_type", "")).strip() in {"ToolTimeout", "SocketTimeout"}
+        )
+        threshold = int(gates["socket_timeout_count_max"])
+        if timeout_count > threshold:
+            _fail("socket_timeout_count_max", threshold, timeout_count, gate_category="infra")
+    if "empty_socket_response_count_max" in gates:
+        gates_checked.append("empty_socket_response_count_max")
+        empty_count = sum(
+            1 for r in rows
+            if str(r.get("error_type", "")).strip() == "EmptySocketResponse"
+        )
+        threshold = int(gates["empty_socket_response_count_max"])
+        if empty_count > threshold:
+            _fail("empty_socket_response_count_max", threshold, empty_count, gate_category="infra")
     for category, gate_name in (
         ("geometry", "geometry_success_rate_min"),
         ("materials", "materials_success_rate_min"),
@@ -450,6 +504,56 @@ def _runtime_error_rate(rows: list[dict[str, str]]) -> float | None:
         return None
     errors = sum(1 for row in rows if str(row.get("pass_type", "")).strip() == "runtime_error")
     return errors / len(rows)
+
+
+def _bool_metric(value: Any) -> bool:
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
+def _infra_error_rate(rows: list[dict[str, str]]) -> float | None:
+    if not rows:
+        return None
+    count = sum(1 for row in rows if _bool_metric(row.get("is_infra_failure")))
+    return count / len(rows)
+
+
+def _model_failure_rate(rows: list[dict[str, str]]) -> float | None:
+    if not rows:
+        return None
+    count = sum(
+        1 for row in rows
+        if _bool_metric(row.get("is_model_failure")) and not _bool_metric(row.get("is_infra_failure"))
+    )
+    return count / len(rows)
+
+
+def _validation_failure_rate(rows: list[dict[str, str]]) -> float | None:
+    if not rows:
+        return None
+    count = sum(1 for row in rows if _bool_metric(row.get("is_validation_failure")))
+    return count / len(rows)
+
+
+def _reset_failure_rate(rows: list[dict[str, str]]) -> float | None:
+    if not rows:
+        return None
+    count = sum(
+        1 for row in rows
+        if str(row.get("error_type", "")).strip() == "ResetSceneFailed"
+        or str(row.get("failure_stage", "")).strip() == "reset_scene"
+    )
+    return count / len(rows)
+
+
+def _snapshot_failure_rate(rows: list[dict[str, str]]) -> float | None:
+    if not rows:
+        return None
+    count = sum(
+        1 for row in rows
+        if str(row.get("error_type", "")).strip() == "SnapshotUnavailable"
+        or "snapshot" in str(row.get("failure_stage", "")).lower()
+    )
+    return count / len(rows)
 
 
 def _category_success_rate(rows: list[dict[str, str]], category: str) -> float | None:

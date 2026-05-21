@@ -15,17 +15,29 @@ class ControlledErrorType(str, Enum):
     DIRECT_NO_ACTION = "DirectNoAction"
     LLM_PARSE_ERROR = "LlmParseError"
     INVALID_TOOL_CALL = "InvalidToolCall"
+    INVALID_ARGUMENTS = "InvalidArguments"
     BLENDER_SOCKET_UNAVAILABLE = "BlenderSocketUnavailable"
+    BLENDER_SOCKET_NO_RESPONSE = "BlenderSocketNoResponse"
+    EMPTY_SOCKET_RESPONSE = "EmptySocketResponse"
+    BLENDER_WORKER_UNHEALTHY = "BlenderWorkerUnhealthy"
     REPORT_BUILD_ERROR = "ReportBuildError"
     PREFLIGHT_CHECK_FAILED = "PreflightCheckFailed"
     TOOL_TIMEOUT = "ToolTimeout"
+    SOCKET_TIMEOUT = "SocketTimeout"
+    SOCKET_ERROR = "SocketError"
     INVALID_TOOL_RESPONSE = "InvalidToolResponse"
+    INVALID_JSON_RESPONSE = "InvalidJsonResponse"
+    EMPTY_TOOL_RESPONSE = "EmptyToolResponse"
+    TOOL_EXECUTION_FAILED = "ToolExecutionFailed"
     BLENDER_RUNTIME_ERROR = "BlenderRuntimeError"
     LLM_PROVIDER_ERROR = "LlmProviderError"
     SNAPSHOT_UNAVAILABLE = "SnapshotUnavailable"
     VALIDATION_UNAVAILABLE = "ValidationUnavailable"
     RESET_SCENE_FAILED = "ResetSceneFailed"
     EXPORT_UNAVAILABLE = "ExportUnavailable"
+    SCENE_PASSED_BUT_AGENT_ERROR = "ScenePassedButAgentError"
+    SCENE_PASSED_WITH_WARNING = "ScenePassedWithWarning"
+    SCENE_PASSED_AFTER_REPAIR = "ScenePassedAfterRepair"
     UNCLASSIFIED = "UnclassifiedError"
 
 
@@ -51,6 +63,12 @@ class ControlledFailureStage(str, Enum):
     EXPORT = "export"
     ANALYSIS = "analysis"
     REPORT_BUILD = "report_build"
+    SOCKET_RESPONSE = "socket_response"
+    TOOL_RESPONSE_PARSE = "tool_response_parse"
+    SNAPSHOT_COLLECTION = "snapshot_collection"
+    SNAPSHOT_NORMALIZATION = "snapshot_normalization"
+    EXECUTE_CODE_FALLBACK = "execute_code_fallback"
+    BLENDER_PYTHON_EXECUTION = "blender_python_execution"
 
 
 class ControlledError(BaseModel):
@@ -119,12 +137,31 @@ def normalize_error(
         error_type = ControlledErrorType.RESET_SCENE_FAILED
         inferred_source = explicit_source or ControlledErrorSource.BLENDER
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.RESET_SCENE
+    elif "emptysocketresponse" in text or "empty response from blender socket" in text:
+        error_type = ControlledErrorType.EMPTY_SOCKET_RESPONSE
+        inferred_source = explicit_source or ControlledErrorSource.BLENDER
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.SOCKET_RESPONSE
+    elif "emptytoolresponse" in text or "empty tool response" in text:
+        error_type = ControlledErrorType.EMPTY_TOOL_RESPONSE
+        inferred_source = explicit_source or ControlledErrorSource.TOOL
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_RESPONSE_PARSE
+    elif "invalidjsonresponse" in text or "invalid json response" in text:
+        error_type = ControlledErrorType.INVALID_JSON_RESPONSE
+        inferred_source = explicit_source or ControlledErrorSource.TOOL
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_RESPONSE_PARSE
+    elif "blenderworkerunhealthy" in text or "worker unhealthy" in text:
+        error_type = ControlledErrorType.BLENDER_WORKER_UNHEALTHY
+        inferred_source = explicit_source or ControlledErrorSource.BLENDER
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.PREFLIGHT
     elif "pre-run scene snapshot could not be collected" in text or ("snapshot" in text and "not" in text):
         error_type = ControlledErrorType.SNAPSHOT_UNAVAILABLE
         inferred_source = explicit_source or ControlledErrorSource.BLENDER
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.PRE_RUN_SNAPSHOT
-    elif "no response from blender socket" in text or "blendersocketunavailable" in text or ("socket" in text and ("unavailable" in text or "no response" in text or "refused" in text or "error" in text)):
-        error_type = ControlledErrorType.BLENDER_SOCKET_UNAVAILABLE
+    elif "no response from blender socket" in text or "blendersocketunavailable" in text or "blendersocketnoresponse" in text or ("socket" in text and ("unavailable" in text or "no response" in text or "refused" in text or "error" in text)):
+        if "no response" in text:
+            error_type = ControlledErrorType.BLENDER_SOCKET_NO_RESPONSE
+        else:
+            error_type = ControlledErrorType.BLENDER_SOCKET_UNAVAILABLE
         inferred_source = explicit_source or ControlledErrorSource.BLENDER
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
     elif "timeout" in text or "timed out" in text or "timed-out" in text:
@@ -206,8 +243,59 @@ def controlled_error_payload(
     *,
     source: str | ControlledErrorSource | None = None,
     failure_stage: str | ControlledFailureStage | None = None,
+    enrich: bool = True,
+    **classification_kwargs: Any,
 ) -> dict[str, Any]:
-    return normalize_error(error, source=source, failure_stage=failure_stage).model_dump(mode="json")
+    payload = normalize_error(error, source=source, failure_stage=failure_stage).model_dump(mode="json")
+    if enrich:
+        from benchmark.runner.error_classification import enrich_structured_error
+        return enrich_structured_error(payload, **classification_kwargs) or payload
+    return payload
+
+
+def controlled_error_from_envelope(
+    envelope: dict[str, Any],
+    *,
+    source: str | ControlledErrorSource | None = None,
+    failure_stage: str | ControlledFailureStage | None = None,
+    **classification_kwargs: Any,
+) -> dict[str, Any]:
+    """Строит structured_error из MCP tool envelope."""
+    error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
+    error_type = str(error.get("type") or "UnclassifiedError")
+    message = str(error.get("message") or envelope.get("error") or "tool failed")
+    stage = error.get("stage") or error.get("failure_stage") or failure_stage
+    inner = envelope.get("result") if isinstance(envelope.get("result"), dict) else {}
+    if not stage and isinstance(inner, dict):
+        stage = inner.get("failure_stage") or stage
+    payload = normalize_error(
+        message,
+        source=source or ControlledErrorSource.TOOL,
+        failure_stage=stage or failure_stage,
+    ).model_dump(mode="json")
+    # Переопределяем error_type из envelope, если он известен
+    try:
+        payload["error_type"] = ControlledErrorType(error_type).value
+    except ValueError:
+        mapped = _map_envelope_error_type(error_type)
+        payload["error_type"] = mapped.value if mapped else error_type
+    payload["message"] = message
+    payload["raw_error"] = message
+    from benchmark.runner.error_classification import enrich_structured_error
+    return enrich_structured_error(payload, **classification_kwargs) or payload
+
+
+def _map_envelope_error_type(error_type: str) -> ControlledErrorType | None:
+    mapping = {
+        "EmptySocketResponse": ControlledErrorType.EMPTY_SOCKET_RESPONSE,
+        "InvalidJsonResponse": ControlledErrorType.INVALID_JSON_RESPONSE,
+        "ToolTimeout": ControlledErrorType.TOOL_TIMEOUT,
+        "SocketTimeout": ControlledErrorType.SOCKET_TIMEOUT,
+        "SocketError": ControlledErrorType.SOCKET_ERROR,
+        "ToolError": ControlledErrorType.TOOL_EXECUTION_FAILED,
+        "BlenderRuntimeError": ControlledErrorType.BLENDER_RUNTIME_ERROR,
+    }
+    return mapping.get(error_type)
 
 
 def _source(value: str | ControlledErrorSource | None) -> ControlledErrorSource | None:

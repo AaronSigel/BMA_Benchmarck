@@ -470,6 +470,39 @@ class ReactStrategy:
                         trace.run_id[:8], step_num, action.tool_name,
                     )
                     continue
+                from benchmark.agent.strategies.issue_action_mapper import resolve_invalid_action_repair
+                mapper_repair = None
+                if last_validation_result is not None and task_obj is not None:
+                    mapper_repair = resolve_invalid_action_repair(
+                        action.tool_name,
+                        last_validation_result.issues,
+                        task_obj,
+                        current_snapshot,
+                    )
+                recovered_action = _react_action_from_repair(mapper_repair, tool_contracts) if mapper_repair else None
+                if recovered_action is not None:
+                    pending_repair_actions.insert(0, recovered_action)
+                    trace = trace.add_step(
+                        AgentStepType.OBSERVATION,
+                        observation={
+                            "invalid_action_recovered_by_mapper": True,
+                            "original_invalid_action": action.tool_name,
+                            "recovery_repair_action": recovered_action.tool_name,
+                        },
+                        metadata={
+                            "original_invalid_action": action.tool_name,
+                            "recovery_repair_action": recovered_action.tool_name,
+                            "recovered_by_mapper": True,
+                            "repair_attempt": True,
+                            "repeated_action": True,
+                        },
+                    )
+                    consecutive_repeated_actions = 0
+                    log.info(
+                        "[react:%s] step %d — invalid action recovered via mapper: %s -> %s",
+                        trace.run_id[:8], step_num, action.tool_name, recovered_action.tool_name,
+                    )
+                    continue
                 error_message = "ReactInvalidAction"
                 trace = trace.add_step(
                     AgentStepType.ERROR,
@@ -721,6 +754,17 @@ class ReactStrategy:
                             )
                             log.info("[react:%s] step %d — no progress hint injected", trace.run_id[:8], step_num)
                         elif consecutive_no_progress >= agent_config.no_progress_limit:
+                            no_progress_reason = _classify_no_progress(
+                                tool_result_ok=tool_result.error is None,
+                                snapshot_available=val_result is not None,
+                                validation_available=val_result is not None,
+                                scene_already_passed=_validation_passed_or_warning(val_result),
+                                score_before=previous_scene_score,
+                                score_after=current_score,
+                                issue_count_before=len(previous_issue_codes),
+                                issue_count_after=len(current_issue_codes),
+                                repeated_action=False,
+                            )
                             error_message = "ReactNoProgress"
                             trace = trace.add_step(
                                 AgentStepType.ERROR,
@@ -729,6 +773,14 @@ class ReactStrategy:
                                     "react_error_type": "ReactNoProgress",
                                     "no_progress_detected": True,
                                     "no_progress_step_count": no_progress_step_count,
+                                    "no_progress_reason": no_progress_reason,
+                                    "score_before": previous_scene_score,
+                                    "score_after": current_score,
+                                    "issue_count_before": len(previous_issue_codes),
+                                    "issue_count_after": len(current_issue_codes),
+                                    "tool_result_ok": tool_result.error is None,
+                                    "snapshot_available": val_result is not None,
+                                    "validation_available": val_result is not None,
                                 },
                             )
                             break
@@ -921,6 +973,37 @@ def _build_step_context(
         snapshot_schema_valid=snapshot is not None,
     )
     return ctx, repair_action, activation
+
+
+def _classify_no_progress(
+    *,
+    tool_result_ok: bool,
+    snapshot_available: bool,
+    validation_available: bool,
+    scene_already_passed: bool,
+    score_before: float | None,
+    score_after: float | None,
+    issue_count_before: int,
+    issue_count_after: int,
+    repeated_action: bool,
+) -> str:
+    if scene_already_passed:
+        return "scene_already_passed"
+    if not tool_result_ok:
+        return "tool_failed"
+    if not snapshot_available:
+        return "snapshot_failed"
+    if not validation_available:
+        return "validation_unavailable"
+    if repeated_action and tool_result_ok and validation_available:
+        return "repeated_action"
+    if score_before is not None and score_after is not None and score_before == score_after:
+        if issue_count_after < issue_count_before:
+            return "issue_count_reduced"
+        return "score_unchanged"
+    if issue_count_before == issue_count_after:
+        return "issue_count_unchanged"
+    return "score_unchanged"
 
 
 def _build_no_progress_hint(val_result: Any, task_obj: Any) -> str:

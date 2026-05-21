@@ -223,7 +223,8 @@ def test_collect_scene_snapshot_bypasses_profile_tool_gating():
         result = adapter.collect_scene_snapshot("/tmp/scene_snapshot.json")
 
     payload = json.loads(mock_sock.sendall.call_args.args[0].decode())
-    assert result == {"ok": True}
+    assert result.get("ok") is True
+    assert result.get("tool") == "bma_get_scene_snapshot"
     assert payload["type"] == "execute_code"
     assert "collect_snapshot" in payload["params"]["code"]
 
@@ -237,8 +238,8 @@ def test_reset_scene_reports_empty_execute_code_response():
     with patch("benchmark.mcp.server_adapter.socket.create_connection", return_value=mock_sock):
         result = adapter.reset_scene()
 
-    assert "warning" in result
-    assert "No response from Blender socket for 'execute_code'" in result["warning"]
+    assert result.get("ok") is False
+    assert result["error"]["type"] == "EmptySocketResponse"
 
 
 def test_reset_scene_reports_execute_code_error_response():
@@ -249,7 +250,9 @@ def test_reset_scene_reports_execute_code_error_response():
     with patch("benchmark.mcp.server_adapter.socket.create_connection", return_value=mock_sock):
         result = adapter.reset_scene()
 
-    assert result == {"warning": "execute_code failed: python disabled"}
+    assert result.get("ok") is False
+    assert result["error"]["type"] == "BlenderRuntimeError"
+    assert "python disabled" in result["error"]["message"]
 
 
 def test_call_tool_socket_error_raises():

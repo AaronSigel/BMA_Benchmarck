@@ -298,6 +298,25 @@ def _build_summary(results: list[RunAnalysisResult]) -> ExperimentSummary:
         and r.run_status == "error"
     )
 
+    infra_runs = sum(1 for r in results if bool(r.metrics.get("is_infra_failure")))
+    model_failures = sum(
+        1 for r in results
+        if bool(r.metrics.get("is_model_failure"))
+        and not bool(r.metrics.get("is_infra_failure"))
+    )
+    validation_failures = sum(1 for r in results if bool(r.metrics.get("is_validation_failure")))
+    tool_runtime_failures = sum(1 for r in results if bool(r.metrics.get("is_tool_runtime_failure")))
+    success_excluding_infra = sum(
+        1 for r in results
+        if _effective_pass_type(r) in {"clean_pass", "soft_pass"}
+        and not bool(r.metrics.get("is_infra_failure"))
+    )
+    no_progress_by_reason: dict[str, int] = {}
+    for r in results:
+        reason = str(r.metrics.get("no_progress_reason") or "").strip()
+        if reason:
+            no_progress_by_reason[reason] = no_progress_by_reason.get(reason, 0) + 1
+
     return ExperimentSummary(
         total_runs=total,
         successful_runs=len(successful),
@@ -314,6 +333,12 @@ def _build_summary(results: list[RunAnalysisResult]) -> ExperimentSummary:
         soft_pass_rate=(soft_pass / total if total else None),
         strict_success_rate=(clean_pass / total if total else None),
         reported_success_rate=((clean_pass + soft_pass) / total if total else None),
+        reported_success_rate_excluding_infra=(success_excluding_infra / total if total else None),
+        infra_error_rate=(infra_runs / total if total else None),
+        model_failure_rate=(model_failures / total if total else None),
+        validation_failure_rate=(validation_failures / total if total else None),
+        tool_runtime_failure_rate=(tool_runtime_failures / total if total else None),
+        no_progress_by_reason=no_progress_by_reason,
         agent_completed_count=agent_completed,
         agent_completed_after_scene_passed_count=agent_completed_after,
         agent_incomplete_count=agent_incomplete,

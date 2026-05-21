@@ -425,7 +425,26 @@ def _repair_light_missing(issue: ValidationIssue, task: BenchmarkTask) -> Repair
 
 def _repair_light_orientation(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
     light = _expected_light(issue, task)
-    args: dict[str, Any] = {}
+    if issue.code == "light_direction_mismatch" and light is not None and light.target is not None:
+        target_args = _target_args(light.target, None)
+        if target_args:
+            args: dict[str, Any] = {"name": light.name or "Light", "if_exists": "update", **target_args}
+            if light.location is not None:
+                loc = _vec3_list(light.location)
+                if loc:
+                    args["location"] = loc
+            return RepairAction(
+                issue_code=issue.code,
+                tool_name="bma_create_light",
+                arguments_template=args,
+                description=f"Re-aim light '{args.get('name', 'light')}' toward target",
+                priority=_ISSUE_PRIORITY.get(issue.code, 99),
+                blocking=False,
+                expected_value=issue.expected_value,
+                actual_value=issue.actual_value,
+            )
+
+    args = {}
     if light and light.name:
         args["object_name"] = light.name
     rot = _rotation_radians_list(light.rotation) if light else None
@@ -600,3 +619,29 @@ def build_task_checklist(task: BenchmarkTask) -> dict[str, Any]:
             for e in scene.exports
         ],
     }
+
+
+_INVALID_TOOL_ALIASES = frozenset({
+    "bma_set_light_properties",
+    "set_light_properties",
+    "bma_update_light",
+    "update_light",
+})
+
+
+def resolve_invalid_action_repair(
+    invalid_tool: str,
+    issues: list[ValidationIssue],
+    task: BenchmarkTask,
+    snapshot: SceneSnapshot | None = None,
+) -> RepairAction | None:
+    """Подбирает deterministic repair вместо invalid/hallucinated tool name."""
+    normalized = invalid_tool.strip().lower().replace("-", "_")
+    if normalized in _INVALID_TOOL_ALIASES or "light_propert" in normalized:
+        top = select_top_issue(issues)
+        if top is not None and top.code.startswith("light_"):
+            return map_issue_to_repair(top, task, snapshot)
+    top = select_top_issue(issues)
+    if top is None:
+        return None
+    return map_issue_to_repair(top, task, snapshot)

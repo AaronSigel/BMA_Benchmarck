@@ -241,13 +241,31 @@ def _prepare_blender_scene(
 
     log.info("[task:%s] resetting Blender scene before run", task_id)
     reset_result = mcp_executor.adapter.reset_scene()
-    if "warning" in reset_result:
-        log.warning("[task:%s] scene reset failed, retrying once: %s", task_id, reset_result["warning"])
+    if _envelope_failed(reset_result):
+        log.warning(
+            "[task:%s] scene reset failed, retrying once: %s",
+            task_id,
+            _envelope_error_message(reset_result),
+        )
         reset_result = mcp_executor.adapter.reset_scene()
-    if "warning" in reset_result:
-        warning = str(reset_result["warning"])
-        log.warning("[task:%s] scene reset failed: %s", task_id, warning)
-        return f"scene reset failed: {warning}", None
+    if _envelope_failed(reset_result):
+        watchdog = getattr(mcp_executor.adapter, "_watchdog", None)
+        if watchdog is not None:
+            from benchmark.mcp.socket_watchdog import SocketFailureEvent, WatchdogAction
+            action = watchdog.on_socket_failure(
+                SocketFailureEvent(
+                    error_type=_envelope_error_type(reset_result) or "ResetSceneFailed",
+                    tool_name="reset_scene",
+                    message=_envelope_error_message(reset_result),
+                    failure_stage="reset_scene",
+                )
+            )
+            if action in {WatchdogAction.RESTARTED, WatchdogAction.ALLOW_RETRY}:
+                reset_result = mcp_executor.adapter.reset_scene()
+        if _envelope_failed(reset_result):
+            warning = _envelope_error_message(reset_result)
+            log.warning("[task:%s] scene reset failed: %s", task_id, warning)
+            return f"scene reset failed: {warning}", None
 
     pre_run_snapshot_path = output_dir / "pre_run_scene_snapshot.json"
     captured_path = _capture_snapshot_to_path(mcp_executor, pre_run_snapshot_path)
@@ -271,17 +289,44 @@ def _capture_snapshot_to_path(tool_executor: ToolExecutor, snapshot_path: Path) 
     mcp_executor = _mcp_executor(tool_executor)
     if mcp_executor is None:
         return None
+    last_known: Path | None = None
     for attempt in range(2):
         try:
             result = mcp_executor.adapter.collect_scene_snapshot(snapshot_path)
         except Exception as error:
             log.warning("scene snapshot collection failed (attempt %d): %s", attempt + 1, error)
-            result = {"warning": str(error)}
-        if isinstance(result, dict) and "warning" in result:
-            log.warning("scene snapshot collection warning (attempt %d): %s", attempt + 1, result["warning"])
+            result = {"ok": False, "error": {"type": "SnapshotUnavailable", "message": str(error)}}
+        if _envelope_failed(result):
+            log.warning(
+                "scene snapshot collection warning (attempt %d): %s",
+                attempt + 1,
+                _envelope_error_message(result),
+            )
         elif snapshot_path.exists():
+            last_known = snapshot_path
             return snapshot_path
-    return None
+    return last_known
+
+
+def _envelope_failed(result: dict | Any) -> bool:
+    if not isinstance(result, dict):
+        return True
+    if result.get("ok") is False:
+        return True
+    return "warning" in result
+
+
+def _envelope_error_message(result: dict) -> str:
+    if "warning" in result:
+        return str(result["warning"])
+    error = result.get("error") if isinstance(result.get("error"), dict) else {}
+    return str(error.get("message") or "unknown error")
+
+
+def _envelope_error_type(result: dict) -> str | None:
+    error = result.get("error") if isinstance(result.get("error"), dict) else {}
+    value = error.get("type")
+    return str(value) if value else None
 
 
 class _ExportPathFixingExecutor:
@@ -386,7 +431,18 @@ def _build_tool_executor(strategy: AgentStrategyName, config: RunConfig) -> Tool
     if config.mcp_config_path is not None and config.mcp_config_path.exists():
         raw = yaml.safe_load(config.mcp_config_path.read_text(encoding="utf-8")) or {}
         mcp_config = McpServerConfig(**{k: v for k, v in raw.items() if k != "env"})
-        adapter = ExternalBlenderMcpServerAdapter(mcp_config)
+        from benchmark.mcp.socket_watchdog import BlenderSocketWatchdog
+        watchdog = BlenderSocketWatchdog(mcp_config, mcp_config_path=config.mcp_config_path)
+        adapter = ExternalBlenderMcpServerAdapter(
+            mcp_config,
+            watchdog=watchdog,
+            call_context={
+                "run_id": config.run_id,
+                "task_id": config.task_id,
+                "mcp_profile": config.mcp_profile or mcp_config.profile,
+                "agent_id": config.metadata.get("agent_id"),
+            },
+        )
         return McpToolExecutor(adapter, profile=config.mcp_profile or mcp_config.profile)
     return MockToolExecutor(results={"get_scene_info": {"objects": []}})
 

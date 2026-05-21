@@ -22,6 +22,10 @@ class BatchRunner:
         self.runner = runner or ExperimentRunner()
 
     def run_experiment(self, config: ExperimentConfig, *, resume: bool = False) -> ExperimentResult:
+        from benchmark.mcp.socket_watchdog import get_watchdog_counters, increment_runs_since_restart, reset_watchdog_counters
+        reset_watchdog_counters()
+        worker_lifecycle = config.metadata.get("worker_lifecycle") if isinstance(config.metadata.get("worker_lifecycle"), dict) else {}
+        restart_every_n = int(worker_lifecycle.get("restart_every_n_runs", 0) or 0)
         results: list[RunResult] = []
         resume_status: dict[str, str] = {}
         resume_entries: list[dict[str, str]] = []
@@ -44,12 +48,22 @@ class BatchRunner:
                 resume_status[run_config.run_id] = previous
                 resume_entries[-1]["result_status"] = result.status.value
             results.append(result)
+            if not resume or resume_status.get(run_config.run_id) != "skipped_existing":
+                increment_runs_since_restart()
+                if restart_every_n > 0 and run_config.mcp_config_path is not None:
+                    _maybe_proactive_worker_restart(run_config, restart_every_n, worker_lifecycle)
 
         metrics_summary = aggregate_run_results(results)
+        from benchmark.mcp.socket_watchdog import get_runs_since_last_restart
+        watchdog_counters = get_watchdog_counters()
         result = ExperimentResult(
             experiment_id=config.experiment_id,
             runs=results,
-            summary=metrics_summary.model_dump(exclude={"metrics"}),
+            summary={
+                **metrics_summary.model_dump(exclude={"metrics"}),
+                **watchdog_counters.to_dict(),
+                "runs_since_last_restart": get_runs_since_last_restart(),
+            },
         )
         output_dir = _experiment_output_dir(config.runs)
         _write_experiment_result(result, output_dir / "experiment_result.json")
@@ -67,6 +81,26 @@ class BatchRunner:
 
     def run(self, config: ExperimentConfig) -> ExperimentResult:
         return self.run_experiment(config)
+
+
+def _maybe_proactive_worker_restart(
+    run_config: RunConfig,
+    every_n_runs: int,
+    worker_lifecycle: dict,
+) -> None:
+    from benchmark.mcp.config import McpServerConfig
+    from benchmark.mcp.socket_watchdog import BlenderSocketWatchdog, get_runs_since_last_restart
+    import yaml
+
+    if get_runs_since_last_restart() < every_n_runs:
+        return
+    if run_config.mcp_config_path is None:
+        return
+    raw = yaml.safe_load(run_config.mcp_config_path.read_text(encoding="utf-8")) or {}
+    mcp_config = McpServerConfig(**{k: v for k, v in raw.items() if k != "env"})
+    watchdog = BlenderSocketWatchdog(mcp_config, mcp_config_path=run_config.mcp_config_path)
+    if watchdog.proactive_restart_if_due(every_n_runs):
+        return
 
 
 def _experiment_output_dir(runs: list[RunConfig]) -> Path:

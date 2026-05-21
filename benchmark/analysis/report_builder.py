@@ -1401,6 +1401,68 @@ def _react_diagnostics_table(runs: list[RunAnalysisResult]) -> list[list[str]]:
     ]
 
 
+def _reliability_table(analysis: ExperimentAnalysisResult, runs: list[RunAnalysisResult]) -> list[list[str]]:
+    s = analysis.summary
+    timeout_count = sum(
+        1 for r in runs
+        if str(r.metrics.get("structured_error_type") or r.metrics.get("error_type") or "").strip()
+        in {"ToolTimeout", "SocketTimeout"}
+    )
+    empty_socket_count = sum(
+        1 for r in runs
+        if str(r.metrics.get("structured_error_type") or r.metrics.get("error_type") or "").strip() == "EmptySocketResponse"
+    )
+    reset_failures = sum(
+        1 for r in runs
+        if str(r.metrics.get("structured_error_type") or "").strip() == "ResetSceneFailed"
+    )
+    snapshot_failures = sum(
+        1 for r in runs
+        if str(r.metrics.get("structured_error_type") or "").strip() == "SnapshotUnavailable"
+    )
+    metadata = analysis.metadata if isinstance(analysis.metadata, dict) else {}
+    return [
+        ["infra_error_rate", _pct(s.infra_error_rate)],
+        ["reported_success_rate_excluding_infra", _pct(s.reported_success_rate_excluding_infra)],
+        ["socket_timeout_count", str(timeout_count)],
+        ["empty_socket_response_count", str(empty_socket_count)],
+        ["reset_failure_count", str(reset_failures)],
+        ["snapshot_failure_count", str(snapshot_failures)],
+        ["worker_restart_count", str(metadata.get("infra_worker_restarts", s.infra_worker_restarts))],
+        ["tool_runtime_failure_rate", _pct(s.tool_runtime_failure_rate)],
+        ["no_progress_by_reason", str(s.no_progress_by_reason or {})],
+    ]
+
+
+def _model_failures_after_infra_table(runs: list[RunAnalysisResult]) -> list[list[str]]:
+    def _is_true(metric_key: str, r: RunAnalysisResult) -> bool:
+        return str(r.metrics.get(metric_key, "")).strip().lower() in {"true", "1", "yes"}
+
+    healthy = [r for r in runs if not _is_true("is_infra_failure", r)]
+    return [
+        ["model_failure_rate_excluding_infra", _pct(
+            sum(1 for r in healthy if _is_true("is_model_failure", r)) / len(healthy) if healthy else None
+        )],
+        ["ReactInvalidAction_model_failures", str(sum(
+            1 for r in healthy
+            if str(r.metrics.get("structured_error_type") or "").strip() == "ReactInvalidAction"
+            and _is_true("is_model_failure", r)
+        ))],
+        ["ReactNoProgress_model_failures", str(sum(
+            1 for r in healthy
+            if str(r.metrics.get("structured_error_type") or "").strip() == "ReactNoProgress"
+            and _is_true("is_model_failure", r)
+        ))],
+        ["DirectNoAction", str(sum(
+            1 for r in healthy
+            if str(r.metrics.get("structured_error_type") or "").strip() == "DirectNoAction"
+        ))],
+        ["validation_failures_healthy_runtime", str(sum(
+            1 for r in healthy if _is_true("is_validation_failure", r)
+        ))],
+    ]
+
+
 def _export_diagnostics_table(runs: list[RunAnalysisResult]) -> list[list[str]]:
     export_runs = [r for r in runs if _category(r) == "export" or "export" in r.task_id.lower()]
     c = _status_counts(export_runs)
@@ -1557,6 +1619,16 @@ def build_markdown_report(analysis: ExperimentAnalysisResult, config: ReportConf
         ["runs_without_provider_cost", str(sum(1 for r in runs if r.metrics.get("provider_cost_available") is not True))],
     ])])
     if config.include_error_taxonomy:
+        lines.extend([
+            "## Runtime and infrastructure reliability",
+            "",
+            _md_table(["metric", "value"], _reliability_table(analysis, runs)),
+            "",
+            "## Model/agent failures after infra filtering",
+            "",
+            _md_table(["metric", "value"], _model_failures_after_infra_table(runs)),
+            "",
+        ])
         react_rows = _react_diagnostics_table(runs)
         if runs and any(r.strategy == "react" for r in runs):
             lines.extend(["## ReAct Diagnostics", "", "ReAct в текущем MVP используется как диагностическая стратегия. Низкий success rate ReAct не является ошибкой benchmark-стенда, а отражает ограничения текущего agent loop на многошаговых Blender-задачах.", "", _md_table(["metric", "value"], react_rows)])

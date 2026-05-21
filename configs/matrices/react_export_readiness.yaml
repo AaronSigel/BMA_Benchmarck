@@ -70,6 +70,15 @@ metadata:
     snapshot_invalid_schema_max: 0
     reported_success_rate_min: 0.75
     runtime_error_rate_max: 0.10
+    infra_error_rate_max: 0.05
+    socket_timeout_count_max: 0
+    empty_socket_response_count_max: 0
+    reset_failure_rate_max: 0.02
+    snapshot_failure_rate_max: 0.05
+    model_failure_rate_max: 0.20
+    validation_failure_rate_max: 0.20
+  worker_lifecycle:
+    restart_every_n_runs: 20
     geometry_success_rate_min: 0.80
     materials_success_rate_min: 0.85
     camera_success_rate_min: 0.80

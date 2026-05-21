@@ -166,7 +166,11 @@ class ExperimentRunner:
         artifacts_dir: Path | None = None,
         summary: dict | None = None,
     ) -> RunResult:
-        structured_error = controlled_error_payload(error)
+        structured_error = controlled_error_payload(
+            error,
+            failure_stage=_infer_failure_stage(error),
+            enrich=True,
+        )
         validation_result_path: Path | None = None
         total_score: float | None = None
         overall_status: str | None = None
@@ -451,6 +455,19 @@ def _effective_model(config: RunConfig, execution_metadata: dict | None = None) 
             metadata = agent_run.get("metadata")
             if isinstance(metadata, dict) and metadata.get("model"):
                 return str(metadata["model"])
+    return None
+
+
+def _infer_failure_stage(error: str) -> str | None:
+    text = str(error).lower()
+    if "reset" in text and "scene" in text:
+        return "reset_scene"
+    if "pre-run scene snapshot" in text or "snapshot could not" in text:
+        return "pre_run_snapshot"
+    if "export" in text:
+        return "export"
+    if "preflight" in text:
+        return "preflight"
     return None
 
 

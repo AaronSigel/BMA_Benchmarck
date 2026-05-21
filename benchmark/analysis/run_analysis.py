@@ -330,6 +330,13 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
             failure_stage = structured_error.get("failure_stage")
             if isinstance(failure_stage, str) and failure_stage:
                 metrics["failure_stage"] = failure_stage
+            for flag in (
+                "error_class", "is_model_failure", "is_agent_failure", "is_infra_failure",
+                "is_validation_failure", "is_tool_runtime_failure", "is_scene_available",
+                "scene_passed_before_error",
+            ):
+                if flag in structured_error:
+                    metrics[flag] = structured_error[flag]
     if trace is not None and trace.structured_error is not None:
         if trace.metadata.get("scene_passed_but_agent_error") or trace.metadata.get("early_stop_reason"):
             pass
@@ -385,12 +392,45 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
         else run_result.overall_status if run_result is not None and run_result.overall_status
         else val_summary.scene_overall_status
     )
+    scene_passed_but_agent_error = bool(
+        (trace.metadata.get("scene_passed_but_agent_error") if trace is not None else False)
+        or metrics.get("scene_passed_but_agent_error")
+    )
+    early_stop_reason = trace.metadata.get("early_stop_reason") if trace is not None else None
+    no_progress_reason = None
+    if trace is not None:
+        no_progress_reason = trace.metadata.get("no_progress_reason")
+        for step in reversed(trace.steps):
+            step_meta = step.metadata or {}
+            if step_meta.get("no_progress_reason"):
+                no_progress_reason = step_meta.get("no_progress_reason")
+                break
+    if no_progress_reason:
+        metrics["no_progress_reason"] = no_progress_reason
+    from benchmark.runner.error_classification import classify_failure
+    runtime_healthy = not bool(metrics.get("is_infra_failure"))
+    classification = classify_failure(
+        error_type=str(metrics.get("structured_error_type") or "") or None,
+        failure_stage=str(metrics.get("failure_stage") or "") or None,
+        scene_status=_scene_status_str,
+        run_status=_run_status_str,
+        scene_passed_but_agent_error=scene_passed_but_agent_error,
+        early_stop_reason=str(early_stop_reason) if early_stop_reason else None,
+        validation_issues=issues,
+        no_progress_reason=str(no_progress_reason) if no_progress_reason else None,
+        runtime_healthy=runtime_healthy,
+    )
+    for key, value in classification.model_dump(mode="json").items():
+        if value is not None and value is not False:
+            metrics[key] = value
     pass_type = _classify_pass_type(
         _run_status_str,
         _scene_status_str,
         _agent_status_str,
         issues,
         error_type=str(metrics.get("structured_error_type") or "") or None,
+        error_class=str(metrics.get("error_class") or "") or None,
+        is_infra_failure=bool(metrics.get("is_infra_failure")),
     )
 
     return RunAnalysisResult(
@@ -427,6 +467,8 @@ def _classify_pass_type(
     issues: list[dict[str, Any]],
     *,
     error_type: str | None = None,
+    error_class: str | None = None,
+    is_infra_failure: bool = False,
 ) -> str:
     """Classify a run as clean_pass, soft_pass, failed_validation, or runtime_error."""
     agent_ok = agent_status in (
@@ -435,6 +477,8 @@ def _classify_pass_type(
         None,
     )
     has_error_type = bool(error_type and str(error_type).strip() not in {"", "null", "None"})
+    if is_infra_failure or error_class == "INFRA_ERROR":
+        return "runtime_error"
     if scene_status == "passed":
         if run_status == "passed" and agent_ok and not issues and not has_error_type:
             return "clean_pass"

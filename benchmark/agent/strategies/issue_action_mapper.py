@@ -19,26 +19,42 @@ _INDEX_RE = re.compile(r"\[(\d+)\]")
 _ISSUE_PRIORITY: dict[str, int] = {
     "object_missing": 0,
     "object_missing_for_transform": 1,
+    "object_missing_for_material": 1,
     "material_missing": 2,
     "object_material_missing": 2,
     "light_missing": 3,
     "camera_missing": 4,
+    "object_type_mismatch": 4,
     "dimensions_mismatch": 5,
     "transform_mismatch": 5,
     "location_mismatch": 5,
     "rotation_mismatch": 5,
     "scale_mismatch": 5,
+    "base_color_mismatch": 6,
     "material_color_mismatch": 6,
+    "roughness_mismatch": 6,
     "material_roughness_mismatch": 6,
+    "metallic_mismatch": 6,
     "material_metallic_mismatch": 6,
+    "light_location_mismatch": 7,
     "light_rotation_mismatch": 7,
     "light_energy_mismatch": 7,
     "light_type_mismatch": 7,
+    "camera_location_mismatch": 8,
     "camera_rotation_mismatch": 8,
     "camera_position_mismatch": 8,
+    "camera_direction_mismatch": 8,
+    "camera_focal_length_mismatch": 8,
+    "camera_lens_mismatch": 8,
     "active_camera_mismatch": 9,
+    "active_camera_missing": 9,
     "export_missing": 10,
+    "export_empty_file": 10,
+    "export_file_empty": 10,
     "export_import_missing": 11,
+    "glb_import_back_failed": 11,
+    "export_import_failed": 11,
+    "export_import_file_too_small": 11,
 }
 
 # Issue codes that block export until they are resolved
@@ -54,11 +70,16 @@ EXPORT_BLOCKING_CODES = frozenset({
 
 @dataclass
 class RepairAction:
+    issue_code: str
     tool_name: str
     arguments_template: dict[str, Any]
-    issue_code: str
     description: str
+    priority: int = 99
+    blocking: bool = False
     requires_prior_step: RepairAction | None = None
+    expected_value: Any | None = None
+    actual_value: Any | None = None
+    confidence: float = 1.0
 
 
 def select_top_issue(issues: list[ValidationIssue]) -> ValidationIssue | None:
@@ -90,25 +111,37 @@ def map_issue_to_repair(
     code = issue.code
     if code == "object_missing":
         return _repair_object_missing(issue, task)
-    if code == "object_missing_for_transform":
+    if code in {"object_missing_for_transform", "object_type_mismatch"}:
         return _repair_object_missing_for_transform(issue, task)
+    if code == "object_missing_for_material":
+        return _repair_object_missing_for_material(issue, task)
     if code in {"transform_mismatch", "dimensions_mismatch", "location_mismatch", "rotation_mismatch", "scale_mismatch"}:
         return _repair_transform(issue, task)
     if code in {"material_missing", "object_material_missing"}:
         return _repair_material_missing(issue, task)
-    if code in {"material_color_mismatch", "material_roughness_mismatch", "material_metallic_mismatch"}:
+    if code in {
+        "material_color_mismatch", "material_roughness_mismatch", "material_metallic_mismatch",
+        "base_color_mismatch", "roughness_mismatch", "metallic_mismatch",
+    }:
         return _repair_material_mismatch(issue, task)
     if code == "light_missing":
         return _repair_light_missing(issue, task)
-    if code in {"light_rotation_mismatch", "light_energy_mismatch", "light_type_mismatch"}:
+    if code in {"light_rotation_mismatch", "light_energy_mismatch", "light_type_mismatch", "light_location_mismatch"}:
         return _repair_light_mismatch(issue, task)
     if code == "camera_missing":
         return _repair_camera_missing(issue, task)
-    if code in {"camera_rotation_mismatch", "camera_position_mismatch"}:
+    if code in {
+        "camera_rotation_mismatch", "camera_position_mismatch",
+        "camera_location_mismatch", "camera_direction_mismatch",
+        "camera_focal_length_mismatch", "camera_lens_mismatch",
+    }:
         return _repair_camera_mismatch(issue, task)
-    if code == "active_camera_mismatch":
+    if code in {"active_camera_mismatch", "active_camera_missing"}:
         return _repair_active_camera(issue, task)
-    if code in {"export_missing", "export_import_missing"}:
+    if code in {
+        "export_missing", "export_import_missing", "export_empty_file", "export_file_empty",
+        "glb_import_back_failed", "export_import_failed", "export_import_file_too_small",
+    }:
         return _repair_export(issue, task)
     return None
 
@@ -150,10 +183,14 @@ def _repair_object_missing(issue: ValidationIssue, task: BenchmarkTask) -> Repai
             args["scale"] = _vec3_list(obj.scale)
 
     return RepairAction(
+        issue_code=issue.code,
         tool_name="bma_create_object",
         arguments_template=args,
-        issue_code=issue.code,
         description=f"Create missing object '{args.get('name', 'object')}'",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=issue.code in EXPORT_BLOCKING_CODES,
+        expected_value=issue.expected_value,
+        actual_value=issue.actual_value,
     )
 
 
@@ -180,16 +217,20 @@ def _repair_object_missing_for_transform(issue: ValidationIssue, task: Benchmark
         t_args["rotation"] = _vec3_list(obj.rotation)
 
     set_transform = RepairAction(
+        issue_code=issue.code,
         tool_name="bma_set_transform",
         arguments_template=t_args,
-        issue_code=issue.code,
         description=f"Set transform on '{obj.name}' after creating it",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=issue.code in EXPORT_BLOCKING_CODES,
     )
     return RepairAction(
+        issue_code=issue.code,
         tool_name="bma_create_object",
         arguments_template=create.arguments_template,
-        issue_code=issue.code,
         description=create.description,
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=issue.code in EXPORT_BLOCKING_CODES,
         requires_prior_step=set_transform,
     )
 
@@ -217,10 +258,14 @@ def _repair_transform(issue: ValidationIssue, task: BenchmarkTask) -> RepairActi
         args["object_name"] = issue.actual_value
 
     return RepairAction(
+        issue_code=issue.code,
         tool_name="bma_set_transform",
         arguments_template=args,
-        issue_code=issue.code,
         description=f"Fix transform mismatch on '{args.get('object_name', 'object')}'",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=False,
+        expected_value=issue.expected_value,
+        actual_value=issue.actual_value,
     )
 
 
@@ -254,10 +299,29 @@ def _repair_material_missing(issue: ValidationIssue, task: BenchmarkTask) -> Rep
         args["material_name"] = issue.expected_value
 
     return RepairAction(
+        issue_code=issue.code,
         tool_name="bma_assign_material",
         arguments_template=args,
-        issue_code=issue.code,
         description=f"Assign material to '{args.get('object_name', 'object')}'",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=issue.code in EXPORT_BLOCKING_CODES,
+        expected_value=issue.expected_value,
+        actual_value=issue.actual_value,
+    )
+
+
+def _repair_object_missing_for_material(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
+    """Create the object first, then assign the material."""
+    create = _repair_object_missing(issue, task)
+    assign = _repair_material_missing(issue, task)
+    return RepairAction(
+        issue_code=issue.code,
+        tool_name="bma_create_object",
+        arguments_template=create.arguments_template,
+        description=create.description,
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=issue.code in EXPORT_BLOCKING_CODES,
+        requires_prior_step=assign,
     )
 
 
@@ -277,10 +341,14 @@ def _repair_material_mismatch(issue: ValidationIssue, task: BenchmarkTask) -> Re
             args["metallic"] = mat.metallic
 
     return RepairAction(
+        issue_code=issue.code,
         tool_name="bma_assign_material",
         arguments_template=args,
-        issue_code=issue.code,
         description=f"Fix material mismatch on '{mat.name if mat else 'material'}'",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=False,
+        expected_value=issue.expected_value,
+        actual_value=issue.actual_value,
     )
 
 
@@ -305,10 +373,14 @@ def _repair_light_missing(issue: ValidationIssue, task: BenchmarkTask) -> Repair
             args["energy"] = light.energy
 
     return RepairAction(
+        issue_code=issue.code,
         tool_name="bma_create_light",
         arguments_template=args,
-        issue_code=issue.code,
         description=f"Create missing light '{args.get('name', 'light')}'",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=issue.code in EXPORT_BLOCKING_CODES,
+        expected_value=issue.expected_value,
+        actual_value=issue.actual_value,
     )
 
 
@@ -334,10 +406,14 @@ def _repair_light_mismatch(issue: ValidationIssue, task: BenchmarkTask) -> Repai
             args["energy"] = light.energy
 
     return RepairAction(
+        issue_code=issue.code,
         tool_name="bma_create_light",
         arguments_template=args,
-        issue_code=issue.code,
         description=f"Fix light '{args.get('name', 'light')}' mismatch",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=False,
+        expected_value=issue.expected_value,
+        actual_value=issue.actual_value,
     )
 
 
@@ -363,10 +439,14 @@ def _repair_camera_missing(issue: ValidationIssue, task: BenchmarkTask) -> Repai
             args["focal_length"] = cam.focal_length
 
     return RepairAction(
+        issue_code=issue.code,
         tool_name=tool,
         arguments_template=args,
-        issue_code=issue.code,
         description=f"Create missing camera '{args.get('name', 'camera')}'",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=issue.code in EXPORT_BLOCKING_CODES,
+        expected_value=issue.expected_value,
+        actual_value=issue.actual_value,
     )
 
 
@@ -392,10 +472,12 @@ def _repair_active_camera(issue: ValidationIssue, task: BenchmarkTask) -> Repair
             tool = "bma_create_camera"
 
     return RepairAction(
+        issue_code=issue.code,
         tool_name=tool,
         arguments_template=args,
-        issue_code=issue.code,
         description=f"Set active camera to '{args.get('name', 'camera')}'",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=False,
     )
 
 
@@ -407,12 +489,16 @@ def _repair_export(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
         args["format"] = export.format
         if export.filename:
             args["filename"] = export.filename
+    # filepath is intentionally omitted — the runner injects the absolute path
+    # from run_dir (e.g. <run_dir>/result.blend or <run_dir>/exports/result.glb).
 
     return RepairAction(
+        issue_code=issue.code,
         tool_name="bma_export_scene",
         arguments_template=args,
-        issue_code=issue.code,
-        description="Export scene to required format",
+        description="Export scene to required format (runner injects output path)",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=False,
     )
 
 

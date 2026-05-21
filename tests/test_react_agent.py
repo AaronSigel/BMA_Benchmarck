@@ -74,7 +74,7 @@ def test_react_strategy_stops_infinite_loop_at_max_steps() -> None:
 
     assert trace.success is False
     assert trace.error is not None
-    assert "max_steps" in trace.error
+    assert "ReactMaxSteps" in trace.error or "max_steps" in trace.error
     assert len(trace.steps) <= 4
 
 

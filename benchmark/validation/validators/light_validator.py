@@ -253,7 +253,10 @@ class LightValidator:
             return 1.0
         if actual.energy is None:
             return 0.0
-        return tolerance_score(expected.energy, actual.energy, expected.tolerance)
+        # Use relative tolerance: tolerance represents the allowed fraction of expected energy.
+        # e.g. tolerance=0.10 → ±10% of expected_energy.
+        relative_band = abs(expected.energy) * expected.tolerance
+        return tolerance_score(expected.energy, actual.energy, max(relative_band, 1.0))
 
     def _missing_issue(self, expected: ExpectedLight, expected_path: str) -> ValidationIssue:
         return ValidationIssue(
@@ -311,9 +314,14 @@ class LightValidator:
         expected_path: str,
         actual_path: str,
     ) -> ValidationIssue:
+        pct = round(expected.tolerance * 100)
         return ValidationIssue(
             code="light_energy_mismatch",
-            message=f"Expected light energy within tolerance {expected.tolerance}, got a different value.",
+            message=(
+                f"Expected light energy {expected.energy}W within {pct}% tolerance "
+                f"(±{abs(expected.energy or 0) * expected.tolerance:.1f}W), "
+                f"got {actual.energy}W."
+            ),
             severity=ValidationSeverity.ERROR,
             expected_path=f"{expected_path}.energy",
             actual_path=f"{actual_path}.energy",

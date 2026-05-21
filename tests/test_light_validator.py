@@ -143,7 +143,8 @@ def test_light_validator_reports_point_area_type_mismatch() -> None:
 
 
 def test_light_validator_checks_energy_with_tolerance() -> None:
-    task = task_with_lights([ExpectedLight(name="Key", type="AREA", energy=500.0, tolerance=100.0)])
+    # tolerance=0.20 means ±20% of 500W = ±100W band; actual=650W is 150W off → score 0.5
+    task = task_with_lights([ExpectedLight(name="Key", type="AREA", energy=500.0, tolerance=0.20)])
     snapshot = scene_snapshot([light_snapshot("Key", "AREA", energy=650.0)])
 
     result = LightValidator().validate(task, snapshot)

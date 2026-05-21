@@ -131,6 +131,10 @@ class ReactStrategy:
         wasted_step_count = 0
         no_progress_step_count = 0
         consecutive_no_progress = 0
+        blocked_export_count = 0
+        repair_step_count = 0
+        initial_issue_count: int | None = None
+        initial_issue_codes: set[str] = set()
 
         # Validation / progress state
         previous_scene_score: float | None = None
@@ -156,10 +160,19 @@ class ReactStrategy:
         while len(trace.steps) < effective_max_steps:
             step_num = len(trace.steps) + 1
 
+            # Capture pre-step validation state for per-step trace fields (R-10).
+            _score_before: float | None = previous_scene_score
+            _issue_count_before: int = len(previous_issue_codes)
+            _top_issue_dict: dict[str, Any] | None = None
+            _suggested_repair_dict: dict[str, Any] | None = None
+
             # Build validator-driven step context (P0.2).
             step_context = _build_step_context(
                 last_validation_result, task_obj, initial_step_context if step_num == 1 else None
             )
+            if step_context:
+                _top_issue_dict = step_context.get("top_issue")
+                _suggested_repair_dict = step_context.get("suggested_repair")
 
             log.info("[react:%s] step %d/%d — calling LLM", trace.run_id[:8], step_num, effective_max_steps)
             messages = [
@@ -188,6 +201,39 @@ class ReactStrategy:
             )
 
             if action.final_answer is not None:
+                # R-05: only allow finish if scene passed or validator unavailable.
+                # If no prior validation result exists, run the validator eagerly.
+                _finish_allowed = True
+                if self.scene_validator_fn is not None:
+                    _check_result = last_validation_result
+                    if _check_result is None:
+                        try:
+                            _snap_path = output_dir / f"finish_check_step_{step_num}_snapshot.json"
+                            _, _, _check_result = self.scene_validator_fn(_snap_path)
+                            if _check_result is not None:
+                                last_validation_result = _check_result
+                        except Exception:
+                            _check_result = None
+                    if _check_result is not None and not getattr(_check_result, "passed", False):
+                        _finish_allowed = False
+
+                if not _finish_allowed:
+                    repair_hint = (
+                        "Cannot finish: the scene has not passed validation. "
+                        "Fix the remaining issues first, then finish."
+                    )
+                    observations.append({
+                        "tool": "__premature_finish__",
+                        "arguments": {},
+                        "observation": {"premature_finish_blocked": True, "repair_hint": repair_hint},
+                    })
+                    trace = trace.add_step(
+                        AgentStepType.OBSERVATION,
+                        observation=repair_hint,
+                        metadata={"premature_finish_blocked": True, "repair_attempt": True},
+                    )
+                    log.info("[react:%s] step %d — premature finish blocked (scene not passed)", trace.run_id[:8], step_num)
+                    continue
                 log.info("[react:%s] step %d — final answer received", trace.run_id[:8], step_num)
                 final_message = action.final_answer
                 success = True
@@ -200,7 +246,12 @@ class ReactStrategy:
                 break
 
             if len(trace.steps) >= effective_max_steps:
-                error_message = "ReAct strategy reached max_steps before executing next action"
+                error_message = "ReactMaxSteps"
+                trace = trace.add_step(
+                    AgentStepType.ERROR,
+                    error="ReactMaxSteps: max steps reached before executing next action",
+                    metadata={"react_error_type": "ReactMaxSteps"},
+                )
                 break
 
             # --- Guard: repeated action (existing) ---
@@ -229,11 +280,11 @@ class ReactStrategy:
                         trace.run_id[:8], step_num, action.tool_name,
                     )
                     continue
-                error_message = f"ReAct repeated the same action: {action.tool_name}"
+                error_message = "ReactInvalidAction"
                 trace = trace.add_step(
                     AgentStepType.ERROR,
-                    error=error_message,
-                    metadata={"repeated_action": True, "wasted_step": True},
+                    error=f"ReactInvalidAction: repeated action {action.tool_name}",
+                    metadata={"react_error_type": "ReactInvalidAction", "repeated_action": True, "wasted_step": True},
                 )
                 break
             else:
@@ -297,6 +348,7 @@ class ReactStrategy:
                 ]
                 if blocking:
                     wasted_step_count += 1
+                    blocked_export_count += 1
                     blocking_desc = ", ".join({i.code for i in blocking})
                     repair_hint = (
                         f"Cannot export: scene has unresolved issues ({blocking_desc}). "
@@ -361,6 +413,11 @@ class ReactStrategy:
             else:
                 log.info("[react:%s] step %d — tool %s ok (%.2fs)", trace.run_id[:8], step_num, action.tool_name, tool_result.duration_sec or 0)
 
+            # Count repair-driven steps (top_issue was present when action was chosen).
+            _is_repair_step = _top_issue_dict is not None
+            if _is_repair_step:
+                repair_step_count += 1
+
             observations.append({
                 "tool": tool_result.name,
                 "arguments": action.arguments,
@@ -377,6 +434,23 @@ class ReactStrategy:
                 started_at=tool_result.started_at,
                 finished_at=tool_result.finished_at,
                 duration_sec=tool_result.duration_sec,
+                metadata={
+                    "react": {
+                        "step_index": step_num,
+                        "top_issue": _top_issue_dict,
+                        "suggested_repair": _suggested_repair_dict,
+                        "selected_action": {
+                            "tool": action.tool_name,
+                            "arguments": action.arguments,
+                        },
+                        "score_before": _score_before,
+                        "score_after": None,  # filled in after validation below
+                        "issue_count_before": _issue_count_before,
+                        "issue_count_after": None,  # filled in after validation below
+                        "made_progress": None,
+                        "wasted_step": False,
+                    }
+                },
             )
 
             # --- Scene validation check ---
@@ -406,10 +480,22 @@ class ReactStrategy:
                     # Issue-level progress check (P0.5): progress if score improved OR
                     # a priority issue disappeared OR issue count decreased.
                     current_issue_codes = {i.code for i in (val_result.issues if val_result else [])}
+                    if initial_issue_count is None:
+                        initial_issue_count = len(current_issue_codes)
+                        initial_issue_codes = set(current_issue_codes)
                     score_improved = previous_scene_score is None or current_score > previous_scene_score
                     issues_reduced = len(current_issue_codes) < len(previous_issue_codes)
                     priority_resolved = bool(previous_issue_codes - current_issue_codes)
                     made_progress = score_improved or issues_reduced or priority_resolved
+
+                    # Back-fill score_after / issue_count_after / made_progress into last step.
+                    if trace.steps:
+                        last_step = trace.steps[-1]
+                        react_meta = (last_step.metadata or {}).get("react")
+                        if react_meta is not None:
+                            react_meta["score_after"] = current_score
+                            react_meta["issue_count_after"] = len(current_issue_codes)
+                            react_meta["made_progress"] = made_progress
 
                     if not made_progress and not tool_result.error:
                         consecutive_no_progress += 1
@@ -434,14 +520,15 @@ class ReactStrategy:
                             )
                             log.info("[react:%s] step %d — no progress hint injected", trace.run_id[:8], step_num)
                         elif consecutive_no_progress >= agent_config.no_progress_limit:
-                            error_message = (
-                                f"no_progress_detected: score did not improve for "
-                                f"{consecutive_no_progress} consecutive steps"
-                            )
+                            error_message = "ReactNoProgress"
                             trace = trace.add_step(
                                 AgentStepType.ERROR,
                                 error=error_message,
-                                metadata={"no_progress_detected": True, "no_progress_step_count": no_progress_step_count},
+                                metadata={
+                                    "react_error_type": "ReactNoProgress",
+                                    "no_progress_detected": True,
+                                    "no_progress_step_count": no_progress_step_count,
+                                },
                             )
                             break
                     else:
@@ -451,10 +538,24 @@ class ReactStrategy:
                     previous_issue_codes = current_issue_codes
 
         if final_message is None and error_message is None:
-            error_message = "ReAct strategy reached max_steps"
-            trace = trace.add_step(AgentStepType.ERROR, error=error_message)
+            error_message = "ReactMaxSteps"
+            trace = trace.add_step(
+                AgentStepType.ERROR,
+                error="ReactMaxSteps: max steps reached without scene passing",
+                metadata={"react_error_type": "ReactMaxSteps"},
+            )
 
         finished_at = datetime.datetime.now(datetime.timezone.utc)
+        _react_error_type = (
+            "ReactMaxSteps" if error_message == "ReactMaxSteps"
+            else "ReactNoProgress" if error_message == "ReactNoProgress"
+            else "ReactInvalidAction" if error_message == "ReactInvalidAction"
+            else None
+        )
+        _resolved_issues = (
+            len(initial_issue_codes - previous_issue_codes)
+            if initial_issue_codes else 0
+        )
         return trace.model_copy(
             update={
                 "success": success,
@@ -472,6 +573,18 @@ class ReactStrategy:
                     "inspection_before_mutation_rate": (
                         mutation_preceded_by_inspection / mutation_steps
                         if mutation_steps > 0 else "not_available"
+                    ),
+                    # R-10: ReAct aggregate metrics
+                    "react_steps_total": len(trace.steps),
+                    "react_repair_steps": repair_step_count,
+                    "react_wasted_steps": wasted_step_count,
+                    "react_no_progress_count": no_progress_step_count,
+                    "react_blocked_export_count": blocked_export_count,
+                    "react_max_steps_count": 1 if _react_error_type == "ReactMaxSteps" else 0,
+                    "react_error_type": _react_error_type,
+                    "react_issue_resolution_rate": (
+                        _resolved_issues / initial_issue_count
+                        if initial_issue_count and initial_issue_count > 0 else None
                     ),
                 },
             }

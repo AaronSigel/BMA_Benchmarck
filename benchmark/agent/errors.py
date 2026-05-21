@@ -18,6 +18,22 @@ class AgentStepLimitError(AgentRuntimeError):
     """Raised when agent execution exceeds its configured step limit."""
 
 
+class ReactMaxStepsError(AgentStepLimitError):
+    """ReAct reached max steps without the scene passing validation."""
+
+
+class ReactNoProgressError(AgentRuntimeError):
+    """ReAct detected no progress for consecutive steps and stopped."""
+
+
+class ReactInvalidActionError(AgentRuntimeError):
+    """ReAct returned an action that could not be parsed or executed."""
+
+
+class ReactBlockedExportError(AgentRuntimeError):
+    """ReAct attempted export while blocking validation issues were present."""
+
+
 class AgentTraceError(AgentError):
     """Raised when an agent trace cannot be loaded or written."""
 

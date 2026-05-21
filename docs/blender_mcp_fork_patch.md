@@ -117,6 +117,7 @@ Legend: **✓** = allowed, **—** = blocked
 | `bma_set_material` | ✓ | — | ✓ | ✓ | ✓ |
 | `bma_create_light` | ✓ | — | ✓ | ✓ | ✓ |
 | `bma_create_camera` | ✓ | — | ✓ | ✓ | ✓ |
+| `bma_create_camera_look_at` | ✓ | — | ✓ | ✓ | ✓ |
 | `bma_export_scene` | ✓ | — | ✓ | ✓ | ✓ |
 | `get_viewport_screenshot` | — | ✓ | ✓ | ✓ | ✓ |
 | `execute_blender_code` | **—** | **—** | **—** | ✓ | ✓ |

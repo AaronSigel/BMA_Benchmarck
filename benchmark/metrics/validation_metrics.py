@@ -43,6 +43,32 @@ def metrics_from_validation_result(
             _summary_or_count(result, "validators_skipped", "skipped"),
             "validators",
         ),
+        _metric(
+            run_id,
+            task_id,
+            "validators_total",
+            int(result.summary.get("validators_total", len(result.validators))),
+            "validators",
+        ),
+        _metric(
+            run_id,
+            task_id,
+            "validators_run",
+            int(
+                result.summary.get(
+                    "validators_run",
+                    sum(1 for validator in result.validators if validator.status.value != "skipped"),
+                )
+            ),
+            "validators",
+        ),
+        _metric(
+            run_id,
+            task_id,
+            "validation_coverage",
+            _validation_coverage(result),
+            "validators",
+        ),
     ]
 
     for validator in result.validators:
@@ -106,3 +132,13 @@ def _summary_or_count(
     if summary_key in result.summary:
         return int(result.summary[summary_key])
     return sum(1 for validator in result.validators if validator.status.value == status_value)
+
+
+def _validation_coverage(result: SceneValidationResult) -> float:
+    if "validation_coverage" in result.summary:
+        return float(result.summary["validation_coverage"])
+    total = len(result.validators)
+    if total == 0:
+        return 0.0
+    run = sum(1 for validator in result.validators if validator.status.value != "skipped")
+    return run / total

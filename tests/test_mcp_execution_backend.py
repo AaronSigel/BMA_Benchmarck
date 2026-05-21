@@ -42,7 +42,8 @@ def test_execute_returns_execution_result_when_socket_unavailable(tmp_path):
     cfg = make_run_config(tmp_path, mcp_config_path=Path("configs/mcp/minimal.yaml"))
     backend = McpExecutionBackend()
     # No Blender running → socket unavailable → should return ExecutionResult with ok=False
-    result = backend.execute(cfg)
+    with patch("benchmark.mcp.execution_backend.is_blender_socket_available", return_value=False):
+        result = backend.execute(cfg)
     assert result.ok is False
     assert result.error is not None
     # Should still write the result JSON artifact

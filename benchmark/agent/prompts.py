@@ -12,6 +12,7 @@ _PYTHON_RESTRICTED_PROFILES = frozenset({"minimal", "no_python", "inspection_ena
 _EXTERNAL_ASSET_TOOLS = frozenset(
     {"download_asset", "search_assets", "import_external_asset", "load_external_asset"}
 )
+_AGENT_HIDDEN_TOOLS = frozenset({"get_bma_profile_info", "get_scene_info", "get_object_info"})
 
 
 class PromptContext(BaseModel):
@@ -41,10 +42,12 @@ class PromptBuilder:
             f"Strategy: {agent_config.strategy.value}.",
             f"MCP tool profile: {profile}.",
             "Use only the MCP tools listed below; do not invent tools.",
+            "Do not use generic tool names such as create_object, assign_material, get_scene_info, get_object_info, get_bma_profile_info, or export_scene.",
             f"Allowed tools: {', '.join(tool_names) if tool_names else 'none'}.",
             f"Tool contracts:\n{tools_json}",
             "When a task specifies object dimensions, use the dimensions parameter; do not approximate dimensions with scale.",
-            "When a task specifies material names, pass material_name to bma_set_material.",
+            "When assigning materials, prefer bma_assign_material; include material_name, base_color, roughness, and metallic when specified.",
+            "When a camera must look at a target point, use target with bma_create_camera or bma_create_camera_look_at instead of manual Euler rotation.",
             "Return tool_calls when the API supports them, otherwise return a JSON action in content.",
             (
                 "Fallback JSON action format: "
@@ -145,6 +148,8 @@ def _filter_tool_contracts(
     filtered = []
     for contract in tool_contracts:
         name = contract.get("name")
+        if name in _AGENT_HIDDEN_TOOLS:
+            continue
         if name == "execute_blender_code" and (
             profile in _PYTHON_RESTRICTED_PROFILES or not agent_config.allow_python_tools
         ):

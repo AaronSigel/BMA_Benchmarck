@@ -14,11 +14,15 @@ class McpProfile(str, Enum):
 # Fork-only bma_* benchmark-safe structured tools.
 _BMA_SAFE_TOOLS: frozenset[str] = frozenset({
     "bma_get_scene_info",
+    "bma_get_scene_snapshot",
+    "bma_get_object_info",
     "bma_create_object",
     "bma_set_transform",
     "bma_set_material",
+    "bma_assign_material",
     "bma_create_light",
     "bma_create_camera",
+    "bma_create_camera_look_at",
     "bma_export_scene",
 })
 
@@ -77,13 +81,9 @@ _ALLOWED_TOOLS: dict[McpProfile, frozenset[str] | None] = {
         "get_object_info",
     }) | _BMA_SAFE_TOOLS,
 
-    # inspection_enabled — focused read-only scene inspection; no Python, no external.
-    McpProfile.INSPECTION_ENABLED: frozenset({
-        "get_bma_profile_info",
-        "get_scene_info",
-        "get_object_info",
-        "get_viewport_screenshot",
-    }),
+    # inspection_enabled — benchmark-safe mutation tools plus read-only inspection;
+    # no Python, no external assets.
+    McpProfile.INSPECTION_ENABLED: _CORE_TOOLS | frozenset({"get_viewport_screenshot"}),
 
     # no_python — all core + non-asset tools; no Python, no external.
     McpProfile.NO_PYTHON: _CORE_TOOLS,

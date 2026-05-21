@@ -39,6 +39,8 @@ class LlmUsage(BaseModel):
     prompt_tokens: int | None = Field(default=None, ge=0)
     completion_tokens: int | None = Field(default=None, ge=0)
     total_tokens: int | None = Field(default=None, ge=0)
+    cost: float | None = Field(default=None, ge=0.0)
+    provider_name: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

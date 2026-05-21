@@ -143,6 +143,10 @@ class ExternalBlenderMcpServerAdapter:
                 f"Tool '{tool_name}' is not allowed in profile '{self._config.profile}'"
             )
 
+        # Handle if_exists for bma_create_object before dispatching to socket
+        if tool_name == "bma_create_object" and isinstance(params, dict) and "if_exists" in params:
+            return self._call_create_object_with_if_exists(params, profile)
+
         socket_cmd = _TOOL_TO_SOCKET_CMD.get(tool_name, tool_name)
         payload = json.dumps({"type": socket_cmd, "params": params or {}}).encode()
 
@@ -161,24 +165,115 @@ class ExternalBlenderMcpServerAdapter:
             sock.settimeout(self._config.request_timeout_sec)
             sock.sendall(payload)
             raw = _recv_all(sock)
+        except TimeoutError as exc:
+            return _tool_envelope(
+                tool_name,
+                ok=False,
+                result=None,
+                error_type="SocketTimeout",
+                error_message=f"Tool call timed out after {self._config.request_timeout_sec} seconds",
+            )
         except OSError as exc:
-            raise McpExecutionError(f"Socket I/O error calling '{tool_name}': {exc}") from exc
+            return _tool_envelope(
+                tool_name,
+                ok=False,
+                result=None,
+                error_type="SocketError",
+                error_message=f"Socket I/O error calling '{tool_name}': {exc}",
+            )
         finally:
             sock.close()
 
         try:
             response = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise McpExecutionError(
-                f"Invalid JSON response from '{tool_name}': {exc}"
-            ) from exc
-
-        if isinstance(response, dict) and response.get("status") == "error":
-            raise McpExecutionError(
-                f"Tool '{tool_name}' returned error: {response.get('error', response)}"
+            return _tool_envelope(
+                tool_name,
+                ok=False,
+                result=None,
+                error_type="InvalidJsonResponse",
+                error_message=f"Invalid JSON from '{tool_name}': {exc}",
             )
 
-        return response.get("result", response) if isinstance(response, dict) else response
+        if isinstance(response, dict) and response.get("status") == "error":
+            message = response.get("error") or response.get("message") or response
+            return _tool_envelope(
+                tool_name,
+                ok=False,
+                result=None,
+                error_type="ToolError",
+                error_message=str(message),
+            )
+
+        result = response.get("result", response) if isinstance(response, dict) else response
+        return _tool_envelope(tool_name, ok=True, result=result)
+
+    def _call_create_object_with_if_exists(
+        self, params: dict[str, Any], profile: "McpProfile"
+    ) -> dict[str, Any]:
+        """Handle bma_create_object with if_exists semantics."""
+        if_exists = params.get("if_exists", "update")
+        object_name = params.get("name")
+        create_params = {k: v for k, v in params.items() if k != "if_exists"}
+
+        # Check if object already exists via get_object_info
+        existing = None
+        if object_name:
+            try:
+                info_payload = json.dumps(
+                    {"type": "get_object_info", "params": {"name": object_name}}
+                ).encode()
+                sock = socket.create_connection(
+                    (_connect_host(self._config.blender_host), self._config.blender_port),
+                    timeout=self._config.startup_timeout_sec,
+                )
+                try:
+                    sock.settimeout(self._config.request_timeout_sec)
+                    sock.sendall(info_payload)
+                    raw = _recv_all(sock)
+                    info = json.loads(raw)
+                    result = info.get("result", info) if isinstance(info, dict) else None
+                    if isinstance(result, dict) and result.get("name") == object_name:
+                        existing = result
+                except Exception:
+                    existing = None
+                finally:
+                    sock.close()
+            except Exception:
+                existing = None
+
+        if existing is not None:
+            if if_exists == "skip":
+                return {
+                    "ok": True,
+                    "tool": "bma_create_object",
+                    "result": {
+                        "object_name": object_name,
+                        "created": False,
+                        "updated": False,
+                        "skipped": True,
+                    },
+                    "error": None,
+                }
+            if if_exists == "error":
+                return _tool_envelope(
+                    "bma_create_object",
+                    ok=False,
+                    result=None,
+                    error_type="ObjectAlreadyExists",
+                    error_message=f"Object '{object_name}' already exists",
+                )
+            # if_exists == "update": fall through to normal create (Blender will auto-update or rename)
+
+        raw_result = self.call_tool("bma_create_object", create_params)
+        if isinstance(raw_result, dict) and raw_result.get("ok"):
+            inner = raw_result.get("result") or {}
+            if isinstance(inner, dict):
+                inner.setdefault("created", existing is None)
+                inner.setdefault("updated", existing is not None)
+                inner.setdefault("skipped", False)
+                raw_result = {**raw_result, "result": inner}
+        return raw_result
 
     def reset_scene(self) -> dict:
         """Reset the Blender scene unconditionally, bypassing profile restrictions."""
@@ -192,6 +287,7 @@ class ExternalBlenderMcpServerAdapter:
     def execute_code_unrestricted(self, code: str) -> dict:
         """Run Blender Python for harness-only operations, not model-visible tool use."""
         payload = json.dumps({"type": "execute_code", "params": {"code": code}}).encode()
+        sock = None
         try:
             sock = socket.create_connection(
                 (_connect_host(self._config.blender_host), self._config.blender_port),
@@ -200,11 +296,16 @@ class ExternalBlenderMcpServerAdapter:
             sock.settimeout(self._config.request_timeout_sec)
             sock.sendall(payload)
             raw = _recv_all(sock)
-            sock.close()
-            response = json.loads(raw)
+            response = _loads_socket_response(raw, "execute_code")
+            if isinstance(response, dict) and response.get("status") == "error":
+                message = response.get("error") or response.get("message") or response
+                return {"warning": f"execute_code failed: {message}"}
             return response.get("result", response) if isinstance(response, dict) else {}
         except Exception as exc:
             return {"warning": f"execute_code failed: {exc}"}
+        finally:
+            if sock is not None:
+                sock.close()
 
     def list_tools(self) -> list[str]:
         try:
@@ -219,11 +320,15 @@ class ExternalBlenderMcpServerAdapter:
 _TOOL_TO_SOCKET_CMD: dict[str, str] = {
     "execute_blender_code": "execute_code",
     "bma_get_scene_info": "get_scene_info",
+    "bma_get_scene_snapshot": "get_scene_info",
+    "bma_get_object_info": "get_object_info",
     "bma_create_object": "create_object",
     "bma_set_transform": "set_transform",
     "bma_set_material": "set_material",
+    "bma_assign_material": "set_material",
     "bma_create_light": "create_light",
     "bma_create_camera": "create_camera",
+    "bma_create_camera_look_at": "create_camera_look_at",
     "bma_export_scene": "export_scene",
 }
 
@@ -275,3 +380,37 @@ def _recv_all(sock: socket.socket, buffer_size: int = _RECV_BUFFER) -> bytes:
         except json.JSONDecodeError:
             continue
     return b"".join(chunks)
+
+
+def _loads_socket_response(raw: bytes | bytearray | str, command_type: str) -> Any:
+    if not raw:
+        raise McpExecutionError(f"No response from Blender socket for '{command_type}'")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        preview = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else raw
+        preview = preview[:200]
+        raise McpExecutionError(
+            f"Invalid JSON response from '{command_type}': {exc}; response={preview!r}"
+        ) from exc
+
+
+def _tool_envelope(
+    tool_name: str,
+    *,
+    ok: bool,
+    result: Any,
+    error_type: str | None = None,
+    error_message: str | None = None,
+) -> dict[str, Any]:
+    if isinstance(result, dict) and {"ok", "tool", "result", "error"}.issubset(result.keys()):
+        return result
+    return {
+        "ok": ok,
+        "tool": tool_name,
+        "result": result if ok else None,
+        "error": None if ok else {
+            "type": error_type or "ToolError",
+            "message": error_message or "Tool failed",
+        },
+    }

@@ -123,12 +123,14 @@ def test_react_strategy_final_answer_completes_trace() -> None:
     assert trace.steps[-1].step_type == AgentStepType.FINAL
 
 
-def test_react_strategy_rejects_plain_text_pseudo_tool_call_as_final() -> None:
+def test_react_strategy_parses_plain_text_pseudo_tool_call_as_tool_action() -> None:
+    """Pseudo tool calls in plain text should be executed as tool actions, not final answers."""
     llm = MockLlmClient(
         [
             LlmResponse(
                 content='Tool: bma_create_object\nArguments: {"name": "Cube", "type": "cube"}'
-            )
+            ),
+            LlmResponse(content='{"final_answer": "Done."}'),
         ]
     )
 
@@ -141,10 +143,11 @@ def test_react_strategy_rejects_plain_text_pseudo_tool_call_as_final() -> None:
         Path("."),
     )
 
-    assert trace.success is False
-    assert trace.final_message is None
-    assert trace.error == "ReAct response did not include action or final_answer"
-    assert trace.steps[-1].step_type == AgentStepType.ERROR
+    # The pseudo tool call should have been executed as a tool action (not treated as final_answer)
+    assert trace.final_message is not None
+    tool_steps = [s for s in trace.steps if s.step_type == AgentStepType.TOOL_CALL]
+    assert len(tool_steps) == 1, "Expected exactly one tool call step from the pseudo tool call"
+    assert tool_steps[0].tool_name == "bma_create_object"
 
 
 def test_runtime_selects_react_strategy() -> None:

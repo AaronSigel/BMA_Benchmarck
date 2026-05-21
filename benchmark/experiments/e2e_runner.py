@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,10 +12,13 @@ from benchmark.experiments.generator import generate_experiment_config
 from benchmark.experiments.manifests import write_manifest_for_matrix
 from benchmark.experiments.matrix import load_matrix
 from benchmark.experiments.preflight import (
+    PreflightError,
     collect_runtime_metadata,
     latest_artifact_mtime,
     prepare_output_root,
     run_contract_smoke_for_experiment,
+    filter_config_by_profile_preflight,
+    run_profile_preflight_for_experiment,
 )
 from benchmark.experiments.readiness import check_matrix_readiness
 from benchmark.experiments.models import ExperimentMatrix
@@ -38,17 +42,17 @@ class E2EBenchmarkRunner:
     def prepare(self, matrix_path: Path | str) -> ExperimentConfig:
         return self._prepare(matrix_path).config
 
-    def run(self, matrix_path: Path | str) -> ExperimentResult:
-        prepared = self._prepare(matrix_path)
+    def run(self, matrix_path: Path | str, *, fail_fast_profile_preflight: bool = False) -> ExperimentResult:
+        prepared = self._prepare(matrix_path, fail_fast_profile_preflight=fail_fast_profile_preflight)
         return self._run_batch(prepared.config)
 
-    def run_and_analyze(self, matrix_path: Path | str) -> ExperimentAnalysisResult:
-        prepared = self._prepare(matrix_path)
+    def run_and_analyze(self, matrix_path: Path | str, *, fail_fast_profile_preflight: bool = False) -> ExperimentAnalysisResult:
+        prepared = self._prepare(matrix_path, fail_fast_profile_preflight=fail_fast_profile_preflight)
         self._run_batch(prepared.config)
         return _run_analysis(prepared.matrix.output_root)
 
-    def run_and_report(self, matrix_path: Path | str, *, clean_output: bool = False) -> Path:
-        prepared = self._prepare(matrix_path, clean_output=clean_output, run_contract_smoke=True)
+    def run_and_report(self, matrix_path: Path | str, *, clean_output: bool = False, fail_fast_profile_preflight: bool = False) -> Path:
+        prepared = self._prepare(matrix_path, clean_output=clean_output, run_contract_smoke=True, fail_fast_profile_preflight=fail_fast_profile_preflight)
         self._run_batch(prepared.config)
         _refresh_manifest(prepared)
         analysis = _run_analysis(prepared.matrix.output_root)
@@ -60,8 +64,14 @@ class E2EBenchmarkRunner:
         *,
         clean_output: bool = False,
         run_contract_smoke: bool = False,
+        fail_fast_profile_preflight: bool = False,
     ) -> PreparedExperiment:
         matrix = load_matrix(matrix_path)
+        if bool(matrix.metadata.get("timestamp_output_root")):
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+            matrix = matrix.model_copy(
+                update={"output_root": Path("artifacts") / f"{matrix.matrix_id}_{stamp}"}
+            )
         freshness = prepare_output_root(matrix.output_root, clean_output=clean_output)
         readiness = check_matrix_readiness(matrix)
         if not readiness.ok:
@@ -69,12 +79,55 @@ class E2EBenchmarkRunner:
         config = generate_experiment_config(matrix)
         preflight: dict[str, Any] = {
             "artifact_freshness": freshness,
+            "planned_runs": len(config.runs),
+            "expected_runs": matrix.metadata.get("expected_runs"),
         }
-        if run_contract_smoke:
-            preflight["mcp_contract_smoke"] = run_contract_smoke_for_experiment(
-                config,
-                matrix.output_root,
+        preflight_enabled = bool(matrix.metadata.get("preflight", {}).get("enabled") if isinstance(matrix.metadata.get("preflight"), dict) else matrix.metadata.get("preflight_enabled"))
+        if preflight_enabled or fail_fast_profile_preflight or run_contract_smoke:
+            profile_preflight = run_profile_preflight_for_experiment(config)
+            preflight["mcp_profile_preflight"] = profile_preflight
+            preflight_cfg = matrix.metadata.get("preflight", {})
+            preflight_mode = preflight_cfg.get("mode", "diagnostic") if isinstance(preflight_cfg, dict) else "diagnostic"
+            preflight_fail_fast = bool(
+                fail_fast_profile_preflight
+                or (
+                    isinstance(preflight_cfg, dict)
+                    and (preflight_cfg.get("fail_fast") or preflight_cfg.get("fail_fast_on_profile_error"))
+                    and preflight_mode == "strict"
+                )
             )
+            if not profile_preflight["ok"] and preflight_fail_fast:
+                failed = [
+                    item.get("profile")
+                    for item in profile_preflight.get("profiles", [])
+                    if item.get("preflight_status") != "passed"
+                ]
+                raise RuntimeError(f"MCP profile preflight failed: {', '.join(str(x) for x in failed)}")
+            if preflight_mode == "strict" and preflight_fail_fast:
+                config = filter_config_by_profile_preflight(config, profile_preflight)
+            else:
+                config = _mark_profile_preflight(config, profile_preflight)
+            preflight["skipped_by_preflight"] = preflight["planned_runs"] - len(config.runs)
+        if run_contract_smoke:
+            contract_smoke = run_contract_smoke_for_experiment(config, matrix.output_root)
+            preflight["mcp_contract_smoke"] = contract_smoke
+            if not contract_smoke.get("ok"):
+                contract_error = str(contract_smoke.get("error", "unknown"))
+                if "execute_code failed" in contract_error or "reset" in contract_error.lower():
+                    raise PreflightError(
+                        "Blender harness scene reset failed during preflight: "
+                        + contract_error
+                    )
+                _preflight_cfg = matrix.metadata.get("preflight") or {}
+                _smoke_fail_fast = bool(
+                    fail_fast_profile_preflight
+                    or (isinstance(_preflight_cfg, dict) and _preflight_cfg.get("fail_fast"))
+                )
+                if _smoke_fail_fast:
+                    raise PreflightError(
+                        "Socket is reachable, but running server does not support expected BMA contract: "
+                        + contract_error
+                    )
         preflight["runtime"] = collect_runtime_metadata(config, matrix.output_root)
         manifest_path = write_manifest_for_matrix(
             matrix,
@@ -99,12 +152,41 @@ def _default_batch_runner():
     return BatchRunner()
 
 
+def _mark_profile_preflight(config: ExperimentConfig, preflight: dict[str, Any]) -> ExperimentConfig:
+    failed = {
+        item["profile"]: item.get("reason")
+        for item in preflight.get("profiles", [])
+        if item.get("preflight_status") != "passed" and item.get("profile")
+    }
+    if not failed:
+        return config
+    runs = []
+    for run in config.runs:
+        if run.mcp_profile in failed:
+            runs.append(
+                run.model_copy(
+                    update={
+                        "metadata": {
+                            **run.metadata,
+                            "profile_preflight_failed": True,
+                            "profile_preflight_reason": failed[run.mcp_profile],
+                        }
+                    }
+                )
+            )
+        else:
+            runs.append(run)
+    return config.model_copy(update={"runs": runs, "metadata": {**config.metadata, "profile_preflight": preflight}})
+
+
 def _run_analysis(output_root: Path) -> ExperimentAnalysisResult:
     from benchmark.analysis.comparison import analyze_experiment
-    from benchmark.analysis.export import write_experiment_analysis_json
+    from benchmark.analysis.export import write_experiment_analysis_json, write_run_metrics_csv
 
     analysis = analyze_experiment(output_root)
     write_experiment_analysis_json(analysis, output_root / "experiment_analysis.json")
+    write_run_metrics_csv(analysis.runs, output_root / "summary.csv")
+    (output_root / "summary.json").write_text(analysis.summary.model_dump_json(indent=2), encoding="utf-8")
     return analysis
 
 
@@ -121,6 +203,7 @@ def _refresh_manifest(prepared: PreparedExperiment) -> None:
 
 
 def _build_reports(analysis: ExperimentAnalysisResult, matrix: ExperimentMatrix) -> Path:
+    from benchmark.analysis.report_bundle import create_report_bundle, write_figures, write_report_text_ru
     from benchmark.analysis.report_builder import build_html_report, build_markdown_report
 
     report_config = _report_config(matrix)
@@ -129,6 +212,21 @@ def _build_reports(analysis: ExperimentAnalysisResult, matrix: ExperimentMatrix)
     markdown_path.parent.mkdir(parents=True, exist_ok=True)
     markdown_path.write_text(build_markdown_report(analysis, report_config), encoding="utf-8")
     html_path.write_text(build_html_report(analysis, report_config), encoding="utf-8")
+    text_path = Path(report_config.output_dir) / "report_text_ru.md"
+    write_report_text_ru(analysis, text_path)
+    write_figures(analysis, Path(report_config.output_dir) / "figures")
+    create_report_bundle(
+        Path(report_config.output_dir),
+        analysis,
+        [
+            Path(report_config.output_dir) / "summary.csv",
+            Path(report_config.output_dir) / "summary.json",
+            Path(report_config.output_dir) / "experiment_analysis.json",
+            markdown_path,
+            html_path,
+            text_path,
+        ],
+    )
     return markdown_path
 
 

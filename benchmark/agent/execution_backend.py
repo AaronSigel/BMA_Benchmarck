@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 import yaml
@@ -50,6 +51,7 @@ class AgentExecutionBackend(ExecutionBackend):
 
         try:
             agent_config = load_agent_config(agent_config_path)
+            agent_config = _apply_run_overrides(agent_config, config)
             task = _load_task_payload(config)
         except Exception as error:
             return ExecutionResult(
@@ -121,7 +123,10 @@ class AgentExecutionBackend(ExecutionBackend):
             else:
                 log.warning("[task:%s] auto-capture failed: no snapshot produced", config.task_id)
 
+        trace_path = _copy_trace_to_run_root(result.trace_path, output_dir)
         agent_run_result = result
+        if trace_path is not None and trace_path != result.trace_path:
+            agent_run_result = result.model_copy(update={"trace_path": trace_path})
         if scene_snapshot_path is not None and result.scene_snapshot_path != scene_snapshot_path:
             summary = dict(result.summary)
             execution_summary = summary.get("execution")
@@ -139,7 +144,8 @@ class AgentExecutionBackend(ExecutionBackend):
 
         metadata = {
             **result.metadata,
-            "trace_path": str(result.trace_path) if result.trace_path else None,
+            "trace_path": str(trace_path) if trace_path else None,
+            "nested_trace_path": str(result.trace_path) if result.trace_path else None,
             "agent_run": agent_run_result.model_dump(mode="json"),
             "warning": None,
             "mcp_profile": agent_config.mcp_profile,
@@ -154,7 +160,7 @@ class AgentExecutionBackend(ExecutionBackend):
             ok=result.ok and scene_snapshot_path is not None,
             scene_snapshot_path=scene_snapshot_path,
             artifacts_dir=output_dir,
-            output_files=[result.trace_path] if result.trace_path else [],
+            output_files=[trace_path] if trace_path else [],
             error=result.error or (
                 "agent did not produce scene_snapshot_path"
                 if scene_snapshot_path is None
@@ -172,6 +178,49 @@ def _load_task_payload(config: RunConfig) -> dict:
     if config.task_path is None:
         return {"id": config.task_id}
     return load_task(config.task_path).model_dump(mode="json", exclude_none=True)
+
+
+def _copy_trace_to_run_root(trace_path: Path | None, output_dir: Path) -> Path | None:
+    if trace_path is None or not trace_path.exists():
+        return trace_path
+    destination = output_dir / "agent_trace.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if trace_path.resolve() != destination.resolve():
+        shutil.copy2(trace_path, destination)
+    return destination
+
+
+def _apply_run_overrides(agent_config: AgentConfig, config: RunConfig) -> AgentConfig:
+    updates = {}
+    if config.mcp_profile:
+        updates["mcp_profile"] = config.mcp_profile
+    model_id = config.metadata.get("model_id")
+    if (
+        isinstance(model_id, str)
+        and model_id
+        and model_id != "default"
+        and agent_config.llm is not None
+    ):
+        updates["llm"] = agent_config.llm.model_copy(update={"model": model_id})
+    strategy_limits = config.metadata.get("strategy_limits")
+    if isinstance(strategy_limits, dict):
+        limits = strategy_limits.get(agent_config.strategy.value)
+        if isinstance(limits, dict):
+            if isinstance(limits.get("max_steps"), int):
+                updates["max_steps"] = limits["max_steps"]
+            for key in (
+                "stop_after_scene_passed",
+                "detect_repeated_actions",
+                "detect_duplicate_objects",
+                "detect_no_progress",
+                "no_progress_limit",
+                "repeated_action_mode",
+            ):
+                if key in limits:
+                    updates[key] = limits[key]
+    if not updates:
+        return agent_config
+    return agent_config.model_copy(update=updates)
 
 
 def _auto_capture_snapshot(tool_executor: ToolExecutor, output_dir: Path) -> Path | None:
@@ -249,6 +298,11 @@ class _ExportPathFixingExecutor:
             if fp and not Path(fp).is_absolute():
                 arguments = {**arguments, "filepath": str(self._artifacts_dir / fp)}
                 log.info("[export_fix] rewritten filepath → %s", arguments["filepath"])
+            export_path = Path(arguments.get("filepath", "")) if arguments.get("filepath") else None
+            if export_path is not None:
+                export_path.parent.mkdir(parents=True, exist_ok=True)
+                if export_path.exists():
+                    export_path.unlink()
         return self._wrapped.call_tool(tool_name, arguments)
 
     def assert_tool_allowed(self, tool_name: str) -> None:

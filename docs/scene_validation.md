@@ -193,7 +193,30 @@ camera candidate.
 - Render similarity is not implemented.
 - Complex mesh shape validation is simplified to object type, primitive hints,
   transforms, and coarse mesh metadata where available.
-- Camera target visibility is represented through camera placement checks, not
-  through image analysis.
+- Camera target visibility is represented through direction-to-target checks,
+  not through image analysis.
 - Material validation checks basic material parameters and assignment slots,
   not full shader graphs.
+
+## Camera Target Validation
+
+Expected cameras may define `target`, `require_active`, and
+`direction_tolerance_deg`. When `target` is present, `CameraValidator` checks
+the actual camera forward direction against the target point. Euler rotation
+mismatch is not reported as long as the camera is looking at the target within
+tolerance.
+
+## Type-aware Object Counts
+
+Scene snapshots and validation summaries expose `mesh_object_count`,
+`light_count`, `camera_count`, and `all_object_count`. Contamination warnings
+compare expected mesh objects, lights, and cameras separately, so expected
+lights and cameras no longer appear as unexpected mesh objects.
+
+## GLB Import-back Validation
+
+`ExportValidator` checks file existence and size. `GlbImportBackValidator`
+imports expected GLB exports into a clean temporary Blender scene, takes a
+snapshot, and checks mesh count, expected names, material presence and base
+colors, transforms, duplicate base names, and suspicious object counts. Its
+score is reported separately as `export_import_score`.

@@ -19,7 +19,7 @@ from benchmark.agent.models import (
     ToolCallResult,
     ToolCallStatus,
 )
-from benchmark.agent.trace import dump_agent_trace, load_agent_trace
+from benchmark.agent.trace import read_agent_trace, write_agent_trace
 
 
 def test_agent_model_enums_match_stage_contract() -> None:
@@ -270,8 +270,8 @@ def test_agent_trace_sorts_steps_and_round_trips_json(tmp_path: Path) -> None:
     parsed = AgentTrace.model_validate_json(trace.model_dump_json())
     assert parsed == trace
     trace_path = tmp_path / "agent_trace.json"
-    dump_agent_trace(trace, trace_path)
-    loaded = load_agent_trace(trace_path)
+    write_agent_trace(trace, trace_path)
+    loaded = read_agent_trace(trace_path)
 
     assert loaded == trace
 

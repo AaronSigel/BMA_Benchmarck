@@ -158,7 +158,7 @@ def test_call_tool_returns_result():
     with patch("benchmark.mcp.server_adapter.socket.create_connection", return_value=mock_sock):
         result = adapter.call_tool("get_scene_info")
 
-    assert result == {"objects": []}
+    assert result == {"ok": True, "tool": "get_scene_info", "result": {"objects": []}, "error": None}
 
 
 def test_call_tool_maps_bma_tool_name_to_socket_command():
@@ -170,9 +170,29 @@ def test_call_tool_maps_bma_tool_name_to_socket_command():
         result = adapter.call_tool("bma_export_scene", {"filepath": "exports/result.glb"})
 
     payload = json.loads(mock_sock.sendall.call_args.args[0].decode())
-    assert result == {"ok": True}
+    assert result == {"ok": True, "tool": "bma_export_scene", "result": {"ok": True}, "error": None}
     assert payload["type"] == "export_scene"
     assert payload["params"] == {"filepath": "exports/result.glb"}
+
+
+def test_call_tool_maps_camera_look_at_to_socket_command():
+    cfg = make_config(profile="no_python")
+    adapter = ExternalBlenderMcpServerAdapter(cfg)
+    mock_sock = _make_socket_mock({"result": {"name": "Front_Camera"}})
+
+    args = {"name": "Front_Camera", "location": [0, -6, 2], "target": [0, 0, 1]}
+    with patch("benchmark.mcp.server_adapter.socket.create_connection", return_value=mock_sock):
+        result = adapter.call_tool("bma_create_camera_look_at", args)
+
+    payload = json.loads(mock_sock.sendall.call_args.args[0].decode())
+    assert result == {
+        "ok": True,
+        "tool": "bma_create_camera_look_at",
+        "result": {"name": "Front_Camera"},
+        "error": None,
+    }
+    assert payload["type"] == "create_camera_look_at"
+    assert payload["params"] == args
 
 
 def test_call_tool_disabled_in_profile_raises():
@@ -196,6 +216,30 @@ def test_collect_scene_snapshot_bypasses_profile_tool_gating():
     assert "collect_snapshot" in payload["params"]["code"]
 
 
+def test_reset_scene_reports_empty_execute_code_response():
+    cfg = make_config(profile="no_python")
+    adapter = ExternalBlenderMcpServerAdapter(cfg)
+    mock_sock = MagicMock()
+    mock_sock.recv.return_value = b""
+
+    with patch("benchmark.mcp.server_adapter.socket.create_connection", return_value=mock_sock):
+        result = adapter.reset_scene()
+
+    assert "warning" in result
+    assert "No response from Blender socket for 'execute_code'" in result["warning"]
+
+
+def test_reset_scene_reports_execute_code_error_response():
+    cfg = make_config(profile="no_python")
+    adapter = ExternalBlenderMcpServerAdapter(cfg)
+    mock_sock = _make_socket_mock({"status": "error", "message": "python disabled"})
+
+    with patch("benchmark.mcp.server_adapter.socket.create_connection", return_value=mock_sock):
+        result = adapter.reset_scene()
+
+    assert result == {"warning": "execute_code failed: python disabled"}
+
+
 def test_call_tool_socket_error_raises():
     cfg = make_config(profile="full")
     adapter = ExternalBlenderMcpServerAdapter(cfg)
@@ -207,14 +251,17 @@ def test_call_tool_socket_error_raises():
             adapter.call_tool("get_scene_info")
 
 
-def test_call_tool_error_response_raises():
+def test_call_tool_error_response_returns_error_envelope():
     cfg = make_config(profile="full")
     adapter = ExternalBlenderMcpServerAdapter(cfg)
     mock_sock = _make_socket_mock({"status": "error", "error": "boom"})
 
     with patch("benchmark.mcp.server_adapter.socket.create_connection", return_value=mock_sock):
-        with pytest.raises(McpExecutionError, match="boom"):
-            adapter.call_tool("get_scene_info")
+        result = adapter.call_tool("get_scene_info")
+
+    assert result["ok"] is False
+    assert result["tool"] == "get_scene_info"
+    assert result["error"]["message"] == "boom"
 
 
 def test_list_tools_returns_profile_tools():

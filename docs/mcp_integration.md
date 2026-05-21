@@ -186,3 +186,24 @@ The following are explicitly out of scope for Stage 5:
 - **Blender rendering pipeline** — render submission and image comparison live in the Blender Automation layer (Stage 2/3), not in the MCP integration.
 - **Automated Blender installation** — `HeadlessBlenderMcpLauncher` assumes `blender` is already on `PATH` or discoverable via `BLENDER_PATH`.
 - **Fork publication** — `blender-mcp-bma` is a local fork intended for benchmark use; it is not published to PyPI.
+
+## Camera look-at tool
+
+The fork exposes `bma_create_camera_look_at` in the safe structured tool set
+for `minimal`, `no_python`, `python_enabled`, and `full`.
+
+```json
+{
+  "name": "Front_Camera",
+  "location": [0, -6, 2],
+  "target": [0, 0, 1],
+  "focal_length": 35,
+  "make_active": true
+}
+```
+
+The tool creates a camera, computes rotation with Blender's
+`to_track_quat("-Z", "Y")`, applies focal length and optional clipping/sensor
+parameters, optionally sets `scene.camera`, and returns the resulting
+`rotation_euler` and `is_active`. Prefer it over manual Euler rotation for
+camera tasks.

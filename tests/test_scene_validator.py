@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from benchmark.blender.models import (
+    CameraSnapshot,
+    LightSnapshot,
     ObjectSnapshot,
     RenderSettingsSnapshot,
     SceneSnapshot,
@@ -50,13 +52,46 @@ def object_snapshot(name: str = "Cube") -> ObjectSnapshot:
     )
 
 
-def scene_snapshot(objects: list[ObjectSnapshot] | None = None) -> SceneSnapshot:
+def light_snapshot(name: str = "Key") -> LightSnapshot:
+    return LightSnapshot(
+        name=name,
+        type="AREA",
+        location=snapshot_vector(),
+        rotation_euler=snapshot_vector(),
+        energy=500.0,
+        color=None,
+    )
+
+
+def camera_snapshot(name: str = "Camera") -> CameraSnapshot:
+    return CameraSnapshot(
+        name=name,
+        location=snapshot_vector(),
+        rotation_euler=snapshot_vector(),
+        lens=35.0,
+        sensor_width=36.0,
+        is_active=True,
+    )
+
+
+def scene_snapshot(
+    objects: list[ObjectSnapshot] | None = None,
+    lights: list[LightSnapshot] | None = None,
+    cameras: list[CameraSnapshot] | None = None,
+) -> SceneSnapshot:
+    objects = objects or []
+    lights = lights or []
+    cameras = cameras or []
     return SceneSnapshot(
         scene_name="Scene",
-        objects=objects or [],
+        objects=objects,
         materials=[],
-        lights=[],
-        cameras=[],
+        lights=lights,
+        cameras=cameras,
+        mesh_object_count=len(objects),
+        light_count=len(lights),
+        camera_count=len(cameras),
+        all_object_count=len(objects) + len(lights) + len(cameras),
         collections=["Collection"],
         render_settings=RenderSettingsSnapshot(
             engine="CYCLES",
@@ -153,8 +188,8 @@ def test_scene_validator_returns_scene_validation_result_for_passed_scene() -> N
     assert result.task_id == task.id
     assert result.overall_status is ValidationStatus.PASSED
     assert result.total_score == 1.0
-    assert result.summary["validators_total"] == 6
-    assert result.summary["validators_skipped"] == 4
+    assert result.summary["validators_total"] == 7
+    assert result.summary["validators_skipped"] == 5
     assert result.summary["actual_object_count"] == 1
     assert result.summary["expected_object_count"] == 1
     assert result.summary["extra_object_count"] == 0
@@ -191,6 +226,63 @@ def test_scene_validator_warns_when_scene_contains_unexpected_objects() -> None:
     assert result.summary["expected_object_count"] == 1
     assert result.summary["extra_object_count"] == 1
     assert any(issue.code == "scene_contains_unexpected_objects" for issue in result.issues)
+
+
+def test_scene_validator_ignores_non_mesh_entries_in_legacy_snapshot_objects() -> None:
+    task = task_with_scene(
+        ExpectedScene(objects=[ExpectedObject(name="Cube", type="MESH", primitive="cube")])
+    )
+    legacy_light = object_snapshot("Key_Light").model_copy(update={"type": "LIGHT"})
+    legacy_camera = object_snapshot("Camera").model_copy(update={"type": "CAMERA"})
+
+    result = SceneValidator().validate(
+        task,
+        scene_snapshot([object_snapshot("Cube"), legacy_light, legacy_camera]),
+    )
+
+    assert result.summary["actual_object_count"] == 1
+    assert result.summary["extra_object_count"] == 0
+    assert not any(issue.code == "scene_contains_unexpected_objects" for issue in result.issues)
+
+
+def test_scene_validator_does_not_count_expected_lights_as_unexpected_meshes() -> None:
+    from benchmark.tasks.models import ExpectedLight
+
+    task = task_with_scene(
+        ExpectedScene(
+            objects=[ExpectedObject(name="Cube", type="MESH", primitive="cube")],
+            lights=[ExpectedLight(name="Key", type="AREA")],
+        )
+    )
+
+    result = SceneValidator().validate(
+        task,
+        scene_snapshot([object_snapshot("Cube")], lights=[light_snapshot("Key")]),
+    )
+
+    assert result.summary["mesh_object_count"] == 1
+    assert result.summary["light_count"] == 1
+    assert not any(issue.code == "scene_contains_unexpected_objects" for issue in result.issues)
+
+
+def test_scene_validator_does_not_count_expected_cameras_as_unexpected_meshes() -> None:
+    from benchmark.tasks.models import ExpectedCamera
+
+    task = task_with_scene(
+        ExpectedScene(
+            objects=[ExpectedObject(name="Cube", type="MESH", primitive="cube")],
+            cameras=[ExpectedCamera(name="Camera")],
+        )
+    )
+
+    result = SceneValidator().validate(
+        task,
+        scene_snapshot([object_snapshot("Cube")], cameras=[camera_snapshot("Camera")]),
+    )
+
+    assert result.summary["mesh_object_count"] == 1
+    assert result.summary["camera_count"] == 1
+    assert not any(issue.code == "scene_contains_unexpected_objects" for issue in result.issues)
 
 
 def test_scene_validator_counts_duplicate_blender_base_names() -> None:

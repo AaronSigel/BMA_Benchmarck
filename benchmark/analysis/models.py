@@ -93,6 +93,12 @@ class RunAnalysisResult(BaseModel):
     # Validation
     total_score: float | None = Field(default=None, ge=0.0, le=1.0)
     validation_status: str | None = None
+    run_status: str | None = None
+    agent_status: str | None = None
+    scene_status: str | None = None
+
+    # Pass classification: clean_pass | soft_pass | failed_validation | runtime_error
+    pass_type: str | None = None
 
     # Agent / trajectory counters
     tool_call_count: int = Field(default=0, ge=0)
@@ -118,7 +124,34 @@ class ExperimentSummary(BaseModel):
     failed_runs: int = Field(default=0, ge=0)
     error_runs: int = Field(default=0, ge=0)
 
+    # Pass-type breakdown
+    clean_pass_count: int = Field(default=0, ge=0)
+    soft_pass_count: int = Field(default=0, ge=0)
+    failed_validation_count: int = Field(default=0, ge=0)
+    runtime_error_count: int = Field(default=0, ge=0)
+    failure_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    # Backward-compatible aliases for older tests and consumers.
+    failed_count: int = Field(default=0, ge=0)
+    error_count: int = Field(default=0, ge=0)
+    clean_pass_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    soft_pass_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    strict_success_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    reported_success_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    # Agent completion breakdown
+    agent_completed_count: int = Field(default=0, ge=0)
+    agent_completed_after_scene_passed_count: int = Field(default=0, ge=0)
+    agent_incomplete_count: int = Field(default=0, ge=0)
+    agent_error_count: int = Field(default=0, ge=0)
+
     average_scene_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    average_score_completed: float | None = Field(default=None, ge=0.0, le=1.0)
+    average_score_strict: float | None = Field(default=None, ge=0.0, le=1.0)
+    average_score_passed_only: float | None = Field(default=None, ge=0.0, le=1.0)
+    scene_success_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    run_success_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    agent_completion_rate: float | None = Field(default=None, ge=0.0, le=1.0)
     average_tool_call_count: float | None = Field(default=None, ge=0.0)
     average_duration_sec: float | None = Field(default=None, ge=0.0)
     average_llm_calls: float | None = Field(default=None, ge=0.0)
@@ -161,6 +194,8 @@ class ComparisonGroup(BaseModel):
     avg_score: float | None = Field(default=None, ge=0.0, le=1.0)
     avg_tool_calls: float | None = Field(default=None, ge=0.0)
     avg_duration_sec: float | None = Field(default=None, ge=0.0)
+    avg_cost: float | None = Field(default=None, ge=0.0)
+    validation_failures: int = Field(default=0, ge=0)
 
 
 class ComparisonReport(BaseModel):

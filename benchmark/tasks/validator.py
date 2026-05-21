@@ -113,10 +113,15 @@ def _validate_tool_consistency(task: BenchmarkTask) -> list[str]:
             "but allowed_tools does not include set_light_properties"
         )
 
-    if scene.cameras and "create_camera" not in tools and "set_camera" not in tools:
+    if (
+        scene.cameras
+        and "create_camera" not in tools
+        and "create_camera_look_at" not in tools
+        and "set_camera" not in tools
+    ):
         warnings.append(
             f"{task.id}: expected_scene has cameras but allowed_tools does not include "
-            "create_camera or set_camera"
+            "create_camera, create_camera_look_at, or set_camera"
         )
 
     if scene.exports and "export_scene" not in tools:

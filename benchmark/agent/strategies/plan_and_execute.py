@@ -10,7 +10,7 @@ from typing import Any
 from benchmark.agent.errors import AgentRuntimeError, LlmResponseParseError
 from benchmark.agent.llm.base import LlmClient, LlmMessage, LlmResponse
 from benchmark.agent.models import AgentConfig, AgentStepType, AgentTrace, ToolCallStatus
-from benchmark.agent.prompts import PromptBuilder
+from benchmark.agent.prompts import PromptBuilder, _AGENT_HIDDEN_TOOLS
 from benchmark.agent.tool_context import AgentToolContext, ToolSchemaProvider
 from benchmark.agent.tool_executor import ToolExecutor
 
@@ -51,7 +51,10 @@ class PlanAndExecuteStrategy:
             metadata={"output_dir": str(output_dir)},
         )
 
-        tool_contracts = self.tool_schema_provider.get_tools_for_profile(agent_config.mcp_profile)
+        tool_contracts = [
+            contract for contract in self.tool_schema_provider.get_tools_for_profile(agent_config.mcp_profile)
+            if contract.name not in _AGENT_HIDDEN_TOOLS
+        ]
         tool_contract_dicts = [contract.model_dump(mode="json") for contract in tool_contracts]
         system_prompt = self.prompt_builder.build_system_prompt(
             agent_config,

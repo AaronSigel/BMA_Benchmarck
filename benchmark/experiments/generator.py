@@ -73,6 +73,7 @@ def generate_experiment_config(matrix: ExperimentMatrix) -> ExperimentConfig:
                                         "mcp_profile": mcp_profile["profile"],
                                         "model_id": model_id,
                                         "repetition": repetition,
+                                        "strategy_limits": matrix.metadata.get("strategy_limits", {}),
                                     },
                                 )
                             )

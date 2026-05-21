@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from benchmark.env import load_project_dotenv
 from benchmark.agent.config_loader import load_agent_config
 from benchmark.agent.errors import AgentError
 from benchmark.agent.llm import LlmResponse, MockLlmClient
@@ -41,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_project_dotenv()
     args = build_parser().parse_args(argv)
     if args.command == "run":
         return _run(args.task, args.agent_config, args.output_dir)

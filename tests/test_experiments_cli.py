@@ -56,6 +56,7 @@ def test_readiness_prints_pass_and_writes_json(tmp_path: Path, capsys) -> None:
 
 
 def test_readiness_prints_warnings_for_api_matrix(capsys, monkeypatch) -> None:
+    monkeypatch.setenv("BMA_DISABLE_DOTENV", "1")
     for key in ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]:
         monkeypatch.delenv(key, raising=False)
 

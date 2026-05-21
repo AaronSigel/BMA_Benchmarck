@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from benchmark.env import load_project_dotenv
 from benchmark.experiments.e2e_runner import E2EBenchmarkRunner
 from benchmark.experiments.generator import generate_experiment_config
 from benchmark.experiments.matrix import load_matrix
@@ -12,6 +13,7 @@ from benchmark.runner.config_loader import dump_experiment_config
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_project_dotenv()
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -49,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
             report_path = E2EBenchmarkRunner().run_and_report(
                 args.matrix,
                 clean_output=args.clean_output,
+                fail_fast_profile_preflight=args.fail_fast_profile_preflight,
             )
         except PreflightError as exc:
             print(f"ERROR: {exc}")
@@ -96,6 +99,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--clean-output",
         action="store_true",
         help="Remove an existing output_root before running to avoid stale artifacts.",
+    )
+    run_and_report.add_argument(
+        "--fail-fast-profile-preflight",
+        action="store_true",
+        help="Stop before running if any selected MCP profile fails preflight.",
     )
 
     list_matrices = subparsers.add_parser("list-matrices", help="List matrix YAML files.")

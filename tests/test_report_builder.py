@@ -170,6 +170,17 @@ class TestBuildMarkdownReportStructure:
         md = build_markdown_report(exp, _default_config())
         assert "## 9. Artifact Links" in md
 
+    def test_artifact_links_are_relative_to_report_output_dir(self, tmp_path):
+        output_dir = tmp_path / "artifacts" / "experiments" / "pilot"
+        artifact = output_dir / "run-1" / "agent_trace.json"
+        run = _run().model_copy(update={"artifacts": [str(artifact)]})
+        exp = _experiment(run)
+
+        md = build_markdown_report(exp, _default_config(output_dir=output_dir))
+
+        assert f"({artifact})" not in md
+        assert "(run-1/agent_trace.json)" in md
+
     def test_artifact_links_hidden_when_disabled(self):
         exp = _experiment(_run())
         md = build_markdown_report(exp, _default_config(include_artifact_links=False))
@@ -368,12 +379,10 @@ class TestBuildHtmlReportContent:
         assert "<style>" in html
 
     def test_artifact_link_rendered(self):
-        run = RunAnalysisResult(
-            run_id="r1", task_id="t1", agent_id="a", strategy="react",
-            artifacts=["/tmp/artifact.json"],
-        )
+        run = RunAnalysisResult(run_id="r1", task_id="t1", agent_id="a", strategy="react", artifacts=["/tmp/artifact.json"])
         exp = _experiment(run)
-        html = build_html_report(exp, _default_config())
+        html = build_html_report(exp, _default_config(output_dir="/tmp"))
+        assert 'href="artifact.json"' in html
         assert "/tmp/artifact.json" in html
 
 

@@ -6,9 +6,11 @@ import yaml
 from benchmark.agent.execution_backend import (
     AgentExecutionBackend,
     RemoteAgentExecutionBackend,
+    _apply_run_overrides,
     _prepare_blender_scene,
     _wrap_export_paths,
 )
+from benchmark.agent.config_loader import load_agent_config
 from benchmark.agent.models import AgentRunResult, AgentRunStatus
 from benchmark.agent.tool_executor import McpToolExecutor
 from benchmark.runner.models import ExecutionMode, RunConfig
@@ -60,6 +62,22 @@ def test_runner_models_accept_agent_execution_modes(tmp_path: Path) -> None:
     assert config.execution_mode == ExecutionMode.AGENT_MCP
     assert config.agent_config_path == tmp_path / "agent.yaml"
     assert config.agent_output_dir == tmp_path / "agent-output"
+
+
+def test_run_metadata_overrides_agent_model_and_mcp_profile(tmp_path: Path) -> None:
+    agent_path = make_agent_config(tmp_path / "agent.yaml")
+    run_config = make_run_config(tmp_path, agent_path, ExecutionMode.AGENT_MCP).model_copy(
+        update={
+            "mcp_profile": "no_python",
+            "metadata": {"model_id": "qwen/qwen3-14b"},
+        }
+    )
+
+    config = _apply_run_overrides(load_agent_config(agent_path), run_config)
+
+    assert config.mcp_profile == "no_python"
+    assert config.llm is not None
+    assert config.llm.model == "qwen/qwen3-14b"
 
 
 def test_agent_mcp_requires_agent_config_path(tmp_path: Path) -> None:

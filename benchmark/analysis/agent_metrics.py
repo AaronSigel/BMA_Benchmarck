@@ -44,7 +44,12 @@ class AgentMetricsSummary(BaseModel):
     prompt_tokens: int | None = Field(default=None, ge=0)
     completion_tokens: int | None = Field(default=None, ge=0)
     total_tokens: int | None = Field(default=None, ge=0)
-    estimated_cost: float | None = Field(default=None, ge=0.0)
+    provider_name: str | None = None
+    provider_reported_prompt_tokens: int | None = Field(default=None, ge=0)
+    provider_reported_completion_tokens: int | None = Field(default=None, ge=0)
+    provider_reported_total_tokens: int | None = Field(default=None, ge=0)
+    provider_reported_cost_usd: float | None = Field(default=None, ge=0.0)
+    provider_cost_available: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -52,9 +57,9 @@ class AgentMetricsSummary(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _extract_usage_from_step(step_metadata: dict[str, Any] | None, raw_llm: Any) -> dict[str, int | None]:
+def _extract_usage_from_step(step_metadata: dict[str, Any] | None, raw_llm: Any) -> dict[str, Any]:
     """Try to extract token usage from a step's raw_llm_response dict."""
-    usage: dict[str, int | None] = {}
+    usage: dict[str, Any] = {}
     src: dict[str, Any] | None = None
 
     if isinstance(raw_llm, dict):
@@ -66,6 +71,10 @@ def _extract_usage_from_step(step_metadata: dict[str, Any] | None, raw_llm: Any)
         usage["prompt_tokens"] = src.get("prompt_tokens") or src.get("input_tokens")
         usage["completion_tokens"] = src.get("completion_tokens") or src.get("output_tokens")
         usage["total_tokens"] = src.get("total_tokens")
+        usage["cost"] = src.get("cost")
+        usage["provider_name"] = src.get("provider_name")
+        if not usage["provider_name"] and isinstance(src.get("metadata"), dict):
+            usage["provider_name"] = src["metadata"].get("provider_name")
         if usage["prompt_tokens"] and usage["completion_tokens"] and not usage["total_tokens"]:
             usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
 
@@ -95,6 +104,34 @@ def _aggregate_token_usage(trace: AgentTrace) -> tuple[int | None, int | None, i
         return None, None, None
     total = total_prompt + total_completion
     return total_prompt or None, total_completion or None, total or None
+
+
+def _aggregate_provider_usage(trace: AgentTrace) -> dict[str, Any]:
+    prompt_tokens, completion_tokens, total_tokens = _aggregate_token_usage(trace)
+    provider_name: str | None = None
+    total_cost = 0.0
+    found_cost = False
+    for step in trace.steps:
+        if step.step_type not in {AgentStepType.LLM_CALL, AgentStepType.PLAN}:
+            continue
+        usage = _extract_usage_from_step(step.metadata, step.raw_llm_response)
+        if provider_name is None and usage.get("provider_name"):
+            provider_name = str(usage["provider_name"])
+        cost = usage.get("cost")
+        if cost is not None:
+            try:
+                total_cost += float(cost)
+                found_cost = True
+            except (TypeError, ValueError):
+                pass
+    return {
+        "provider_name": provider_name,
+        "provider_reported_prompt_tokens": prompt_tokens,
+        "provider_reported_completion_tokens": completion_tokens,
+        "provider_reported_total_tokens": total_tokens,
+        "provider_reported_cost_usd": total_cost if found_cost else None,
+        "provider_cost_available": found_cost,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -165,11 +202,10 @@ def compute_agent_summary(trace: AgentTrace) -> AgentMetricsSummary:
     retry_count = int(trace.metadata.get("retry_count", 0))
 
     # Token usage
-    prompt_tokens, completion_tokens, total_tokens = _aggregate_token_usage(trace)
-    estimated_cost: float | None = None
-    if total_tokens is not None:
-        # Rough estimate: $2 per 1M tokens (mid-range model cost)
-        estimated_cost = total_tokens * 2e-6
+    provider_usage = _aggregate_provider_usage(trace)
+    prompt_tokens = provider_usage["provider_reported_prompt_tokens"]
+    completion_tokens = provider_usage["provider_reported_completion_tokens"]
+    total_tokens = provider_usage["provider_reported_total_tokens"]
 
     return AgentMetricsSummary(
         llm_call_count=llm_call_count,
@@ -187,7 +223,12 @@ def compute_agent_summary(trace: AgentTrace) -> AgentMetricsSummary:
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
-        estimated_cost=estimated_cost,
+        provider_name=provider_usage["provider_name"],
+        provider_reported_prompt_tokens=provider_usage["provider_reported_prompt_tokens"],
+        provider_reported_completion_tokens=provider_usage["provider_reported_completion_tokens"],
+        provider_reported_total_tokens=provider_usage["provider_reported_total_tokens"],
+        provider_reported_cost_usd=provider_usage["provider_reported_cost_usd"],
+        provider_cost_available=provider_usage["provider_cost_available"],
     )
 
 
@@ -239,15 +280,30 @@ def extract_agent_metrics(trace: AgentTrace) -> RunAnalysisResult:
         ("prompt_tokens", agent_summary.prompt_tokens),
         ("completion_tokens", agent_summary.completion_tokens),
         ("total_tokens", agent_summary.total_tokens),
-        ("estimated_cost", agent_summary.estimated_cost),
+        ("provider_name", agent_summary.provider_name),
+        ("provider_reported_prompt_tokens", agent_summary.provider_reported_prompt_tokens),
+        ("provider_reported_completion_tokens", agent_summary.provider_reported_completion_tokens),
+        ("provider_reported_total_tokens", agent_summary.provider_reported_total_tokens),
+        ("provider_reported_cost_usd", agent_summary.provider_reported_cost_usd),
     ]:
         if val is not None:
             metrics[key] = val
+    metrics["provider_cost_available"] = agent_summary.provider_cost_available
 
     # Per-tool breakdown
     for tm in per_tool:
         metrics[f"tool.{tm.tool_name}.calls"] = tm.total_calls
         metrics[f"tool.{tm.tool_name}.success_rate"] = tm.success_rate
+
+    if tool_summary.tool_call_count > 0:
+        bad_calls = tool_summary.invalid_tool_call_count + tool_summary.disabled_tool_call_count
+        metrics["tool_selection_accuracy"] = max(
+            0.0,
+            min(1.0, 1.0 - (bad_calls / tool_summary.tool_call_count)),
+        )
+    else:
+        metrics["tool_selection_accuracy"] = "not_available"
+    metrics["parameter_correctness"] = "not_available"
 
     return RunAnalysisResult(
         run_id=trace.run_id,

@@ -7,13 +7,13 @@ from benchmark.agent.runtime import (
     AgentRuntime,
     create_llm_client,
     create_remote_agent_client,
-    create_strategy,
     load_agent_config,
     run_task,
 )
+from benchmark.agent.strategies import create_agent_strategy
 from benchmark.agent.strategies import DirectToolCallingStrategy, RemoteAgentStrategy
 from benchmark.agent.tool_executor import MockToolExecutor
-from benchmark.agent.trace import load_agent_trace
+from benchmark.agent.trace import read_agent_trace
 
 
 def test_runtime_load_agent_config_wrapper() -> None:
@@ -31,8 +31,8 @@ def test_runtime_factory_wrappers() -> None:
         .__class__.__name__
         == "MockRemoteAgentClient"
     )
-    assert isinstance(create_strategy(AgentStrategyName.DIRECT_TOOL_CALLING), DirectToolCallingStrategy)
-    assert isinstance(create_strategy(AgentStrategyName.REMOTE_AGENT), RemoteAgentStrategy)
+    assert isinstance(create_agent_strategy(AgentStrategyName.DIRECT_TOOL_CALLING), DirectToolCallingStrategy)
+    assert isinstance(create_agent_strategy(AgentStrategyName.REMOTE_AGENT), RemoteAgentStrategy)
 
 
 def test_run_task_mock_agent_works_without_api_and_writes_trace(tmp_path: Path) -> None:
@@ -55,7 +55,7 @@ def test_run_task_mock_agent_works_without_api_and_writes_trace(tmp_path: Path) 
     assert result.ok is True
     assert result.trace_path == result.artifacts_dir / "agent_trace.json"
     assert result.trace_path.exists()
-    trace = load_agent_trace(result.trace_path)
+    trace = read_agent_trace(result.trace_path)
     assert trace.success is True
     assert result.summary["steps_count"] == len(trace.steps)
     assert result.summary["tool_calls_count"] == 1
@@ -103,5 +103,5 @@ def test_runtime_preserves_errors_in_agent_run_result(tmp_path: Path) -> None:
     assert result.error == "planned llm failure"
     assert result.trace_path == result.artifacts_dir / "agent_trace.json"
     assert result.trace_path.exists()
-    trace = load_agent_trace(result.trace_path)
+    trace = read_agent_trace(result.trace_path)
     assert trace.error == "planned llm failure"

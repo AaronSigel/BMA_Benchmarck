@@ -117,13 +117,15 @@ def test_tool_calls_with_invalid_json_arguments(monkeypatch: pytest.MonkeyPatch)
 
 def test_complete_usage_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
-    usage = {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30}
+    usage = {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30, "cost": 0.000123}
     with patch("httpx.post", return_value=_make_response(usage=usage)):
         result = OpenRouterClient(_make_config()).complete(_messages())
     assert result.usage is not None
     assert result.usage.prompt_tokens == 20
     assert result.usage.completion_tokens == 10
     assert result.usage.total_tokens == 30
+    assert result.usage.cost == pytest.approx(0.000123)
+    assert result.usage.provider_name == "openrouter"
 
 
 def test_complete_passes_tools_in_payload(monkeypatch: pytest.MonkeyPatch) -> None:

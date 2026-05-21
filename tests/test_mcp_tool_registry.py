@@ -66,6 +66,7 @@ def test_list_available_tools_no_python(registry):
     tools = registry.list_available_tools(McpProfile.NO_PYTHON)
     names = {tc.name for tc in tools}
     assert "execute_blender_code" not in names
+    assert "bma_create_camera_look_at" in names
 
 
 def test_list_available_tools_full_includes_all(registry):

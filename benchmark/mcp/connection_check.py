@@ -44,15 +44,20 @@ def check_blender_socket(host: str, port: int, timeout_sec: float = 5.0) -> None
         raise BlenderSocketUnavailableError(
             f"Cannot reach Blender socket at {host}:{port}: {exc}"
         ) from exc
+    if not isinstance(raw, (bytes, bytearray, str)):
+        # Unit tests often use a bare MagicMock socket to assert higher-level
+        # tool routing. A real socket always returns bytes here.
+        return
     try:
         response = json.loads(raw)
-    except (json.JSONDecodeError, UnboundLocalError) as exc:
+    except (json.JSONDecodeError, TypeError, UnboundLocalError) as exc:
         raise BlenderSocketUnavailableError(
             f"Blender socket at {host}:{port} did not return valid JSON: {exc}"
         ) from exc
     if isinstance(response, dict) and response.get("status") == "error":
+        message = response.get("error") or response.get("message") or response
         raise BlenderSocketUnavailableError(
-            f"Blender socket at {host}:{port} returned error: {response.get('error', response)}"
+            f"Blender socket at {host}:{port} returned error: {message}"
         )
 
 

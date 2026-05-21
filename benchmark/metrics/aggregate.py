@@ -1,7 +1,7 @@
 from collections import defaultdict
 
 from benchmark.metrics.models import MetricSummary, MetricsSummary, RunMetric, RunMetricRow
-from benchmark.runner.models import RunResult, RunStatus
+from benchmark.runner.models import AgentStatus, RunResult, RunStatus, SceneStatus
 
 
 def aggregate_metric_rows(rows: list[RunMetricRow]) -> MetricSummary:
@@ -19,10 +19,13 @@ def aggregate_metric_rows(rows: list[RunMetricRow]) -> MetricSummary:
 def aggregate_run_results(results: list[RunResult]) -> MetricsSummary:
     scores = [result.total_score for result in results if result.total_score is not None]
     average_score_on_validated_runs = sum(scores) / len(scores) if scores else None
+    passed_scores = [result.total_score for result in results if result.status is RunStatus.PASSED and result.total_score is not None]
     attempted_runs = len(results)
     passed_runs = sum(1 for result in results if result.status is RunStatus.PASSED)
     failed_runs = sum(1 for result in results if result.status is RunStatus.FAILED)
     error_runs = sum(1 for result in results if result.status is RunStatus.ERROR)
+    # agent_completion_rate counts both COMPLETED and COMPLETED_AFTER_SCENE_PASSED
+    _agent_complete_statuses = {AgentStatus.COMPLETED, AgentStatus.COMPLETED_AFTER_SCENE_PASSED}
     return MetricsSummary(
         total_runs=attempted_runs,
         attempted_runs=attempted_runs,
@@ -33,11 +36,21 @@ def aggregate_run_results(results: list[RunResult]) -> MetricsSummary:
         error_runs=error_runs,
         average_score=average_score_on_validated_runs,
         average_score_on_validated_runs=average_score_on_validated_runs,
+        average_score_completed=average_score_on_validated_runs,
+        average_score_strict=(sum((result.total_score or 0.0) for result in results) / attempted_runs if attempted_runs else None),
+        average_score_passed_only=(sum(passed_scores) / len(passed_scores) if passed_scores else None),
+        scene_success_rate=(
+            sum(1 for result in results if result.scene_status is SceneStatus.PASSED or result.overall_status == "passed") / attempted_runs
+            if attempted_runs else None
+        ),
+        run_success_rate=(passed_runs / attempted_runs if attempted_runs else None),
+        agent_completion_rate=(
+            sum(1 for result in results if result.agent_status in _agent_complete_statuses) / attempted_runs
+            if attempted_runs else None
+        ),
         min_score=(min(scores) if scores else None),
         max_score=(max(scores) if scores else None),
-        success_rate_on_all_attempted_runs=(
-            passed_runs / attempted_runs if attempted_runs else None
-        ),
+        success_rate_on_all_attempted_runs=(passed_runs / attempted_runs if attempted_runs else None),
         metrics=_summary_metrics(results),
     )
 

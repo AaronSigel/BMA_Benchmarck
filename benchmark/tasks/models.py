@@ -56,6 +56,8 @@ class ExpectedLight(BaseModel):
     type: Literal["AREA", "SUN", "POINT", "SPOT"]
     location: Vector3 | None = None
     rotation: Vector3 | None = None
+    target: Vector3 | None = None
+    direction_tolerance_deg: float = Field(default=10.0, gt=0.0)
     energy: float | None = None
     tolerance: float = Field(default=0.05, gt=0.0)
 
@@ -65,7 +67,9 @@ class ExpectedCamera(BaseModel):
     location: Vector3 | None = None
     rotation: Vector3 | None = None
     focal_length: float | None = None
-    target: str | None = None
+    target: Vector3 | None = None
+    require_active: bool | None = None
+    direction_tolerance_deg: float = Field(default=5.0, gt=0.0)
     tolerance: float = Field(default=0.05, gt=0.0)
 
 

@@ -8,7 +8,7 @@ from typing import Any
 from benchmark.agent.errors import AgentRuntimeError
 from benchmark.agent.llm.base import LlmClient, LlmMessage, LlmResponse, LlmToolCall
 from benchmark.agent.models import AgentConfig, AgentStepType, AgentTrace, ToolCallStatus
-from benchmark.agent.prompts import PromptBuilder
+from benchmark.agent.prompts import PromptBuilder, _AGENT_HIDDEN_TOOLS
 from benchmark.agent.tool_context import AgentToolContext, ToolSchemaProvider
 from benchmark.agent.tool_executor import ToolExecutor
 
@@ -49,7 +49,10 @@ class DirectToolCallingStrategy:
             metadata={"output_dir": str(output_dir)},
         )
 
-        tool_contracts = self.tool_schema_provider.get_tools_for_profile(agent_config.mcp_profile)
+        tool_contracts = [
+            contract for contract in self.tool_schema_provider.get_tools_for_profile(agent_config.mcp_profile)
+            if contract.name not in _AGENT_HIDDEN_TOOLS
+        ]
         tool_contract_dicts = [contract.model_dump(mode="json") for contract in tool_contracts]
         tool_schemas = [
             self.tool_schema_provider.to_openai_tool_schema(contract)

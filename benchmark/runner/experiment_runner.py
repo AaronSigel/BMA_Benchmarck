@@ -17,7 +17,7 @@ from benchmark.runner.execution import (
     ExternalSnapshotBackend,
     ReplayBackend,
 )
-from benchmark.runner.models import ExecutionMode, RunConfig, RunResult, RunStatus
+from benchmark.runner.models import AgentStatus, ExecutionMode, RunConfig, RunResult, RunStatus, SceneStatus
 from benchmark.runner.paths import RunArtifactLayout
 from benchmark.tasks.loader import load_task
 from benchmark.tasks.registry import TaskRegistry
@@ -108,11 +108,16 @@ class ExperimentRunner:
                 summary={"execution": execution_result.metadata},
             )
 
-        status = _run_status_from_validation(validation_result.overall_status)
+        agent_status = _agent_status_from_execution(execution_result.metadata, None, config.execution_mode)
+        scene_status = _scene_status_from_validation(validation_result.overall_status)
+        status = _combined_run_status(agent_status, scene_status)
         result = RunResult(
             run_id=config.run_id,
             task_id=config.task_id,
             status=status,
+            run_status=status,
+            agent_status=agent_status,
+            scene_status=scene_status,
             execution_mode=config.execution_mode,
             validation_result_path=validation_result_path,
             scene_snapshot_path=snapshot_path,
@@ -126,6 +131,7 @@ class ExperimentRunner:
             summary={
                 "validation": validation_result.summary,
                 "execution": execution_result.metadata,
+                **_run_metadata_summary(config, execution_result.metadata),
             },
         )
         _write_run_result(result, layout.run_result_json())
@@ -156,6 +162,9 @@ class ExperimentRunner:
         summary: dict | None = None,
     ) -> RunResult:
         validation_result_path: Path | None = None
+        total_score: float | None = None
+        overall_status: str | None = None
+        scene_status = SceneStatus.NOT_AVAILABLE
         if scene_snapshot_path is not None and scene_snapshot_path.exists():
             try:
                 scene_snapshot_path = _copy_snapshot_to_layout(
@@ -177,24 +186,51 @@ class ExperimentRunner:
                 _write_validation_result(validation_result, validation_result_path)
                 metrics = metrics_from_validation_result(config.run_id, config.task_id, validation_result)
                 _write_metrics(metrics, layout.metrics_json())
+                total_score = validation_result.total_score
+                overall_status = validation_result.overall_status.value
+                scene_status = _scene_status_from_validation(validation_result.overall_status)
                 log.info("[run:%s] partial validation written (run still error)", config.run_id[:8])
             except Exception as val_error:
                 log.warning("[run:%s] partial validation failed: %s", config.run_id[:8], val_error)
+        agent_status = _agent_status_from_execution(summary, error, config.execution_mode)
+        run_status = RunStatus.ERROR
+        if config.execution_mode in {ExecutionMode.AGENT_MCP, ExecutionMode.REMOTE_AGENT} and scene_status is SceneStatus.PASSED and agent_status in {
+            AgentStatus.MAX_STEPS_REACHED,
+            AgentStatus.INVALID_RESPONSE,
+            AgentStatus.REPEATED_ACTION_DETECTED,
+            AgentStatus.DUPLICATE_OBJECT_DETECTED,
+            AgentStatus.NO_PROGRESS_DETECTED,
+            AgentStatus.RUNTIME_ERROR,
+        }:
+            agent_status = AgentStatus.COMPLETED_AFTER_SCENE_PASSED
+            run_status = RunStatus.PASSED
+        _error_summary: dict = {**(summary or {})}
+        if validation_result_path is not None and "validation" not in _error_summary:
+            try:
+                _vr = SceneValidationResult.model_validate_json(
+                    validation_result_path.read_text(encoding="utf-8")
+                )
+                _error_summary["validation"] = _vr.summary
+            except Exception:
+                pass
         result = RunResult(
             run_id=config.run_id,
             task_id=config.task_id,
-            status=RunStatus.ERROR,
+            status=run_status,
+            run_status=run_status,
+            agent_status=agent_status,
+            scene_status=scene_status,
             execution_mode=config.execution_mode,
             validation_result_path=validation_result_path,
             scene_snapshot_path=scene_snapshot_path,
             artifacts_dir=layout.run_dir(),
-            total_score=None,
-            overall_status=None,
+            total_score=total_score,
+            overall_status=overall_status,
             started_at=started_at,
             finished_at=_now_utc(),
             duration_sec=time.perf_counter() - started_perf,
             error=error,
-            summary=summary or {},
+            summary={**_error_summary, **_run_metadata_summary(config, summary)},
         )
         _write_run_result(result, layout.run_result_json())
         return result
@@ -238,6 +274,99 @@ def _run_status_from_validation(status: ValidationStatus) -> RunStatus:
     if status is ValidationStatus.PASSED:
         return RunStatus.PASSED
     return RunStatus.FAILED
+
+
+def _scene_status_from_validation(status: ValidationStatus | None) -> SceneStatus:
+    if status is ValidationStatus.PASSED or status is ValidationStatus.WARNING:
+        return SceneStatus.PASSED
+    if status is ValidationStatus.FAILED:
+        return SceneStatus.FAILED
+    if status is ValidationStatus.SKIPPED:
+        return SceneStatus.SKIPPED
+    return SceneStatus.NOT_AVAILABLE
+
+
+def _combined_run_status(agent_status: AgentStatus, scene_status: SceneStatus) -> RunStatus:
+    if (
+        agent_status in {AgentStatus.COMPLETED, AgentStatus.COMPLETED_AFTER_SCENE_PASSED}
+        and scene_status is SceneStatus.PASSED
+    ):
+        return RunStatus.PASSED
+    if scene_status is SceneStatus.FAILED:
+        return RunStatus.FAILED
+    return RunStatus.ERROR
+
+
+def _agent_status_from_execution(
+    metadata: dict | None,
+    error: str | None,
+    execution_mode: ExecutionMode | None = None,
+) -> AgentStatus:
+    if execution_mode not in {ExecutionMode.AGENT_MCP, ExecutionMode.REMOTE_AGENT}:
+        return AgentStatus.COMPLETED if error is None else AgentStatus.RUNTIME_ERROR
+    agent_run = None
+    if isinstance(metadata, dict):
+        execution = metadata.get("execution")
+        if isinstance(execution, dict):
+            agent_run = execution.get("agent_run")
+        if agent_run is None:
+            agent_run = metadata.get("agent_run")
+    if isinstance(agent_run, dict):
+        status = agent_run.get("status")
+        run_error = str(agent_run.get("error") or "")
+        if status == "passed":
+            return AgentStatus.COMPLETED
+        metadata = agent_run.get("metadata")
+        if isinstance(metadata, dict):
+            if int(metadata.get("repeated_action_count", 0) or 0) > 0:
+                return AgentStatus.REPEATED_ACTION_DETECTED
+            if int(metadata.get("duplicate_object_count", 0) or 0) > 0:
+                return AgentStatus.DUPLICATE_OBJECT_DETECTED
+        if "no_progress_detected" in run_error:
+            return AgentStatus.NO_PROGRESS_DETECTED
+        if "max_steps" in run_error or "reached max_steps" in run_error:
+            return AgentStatus.MAX_STEPS_REACHED
+        if "repeated the same action" in run_error:
+            return AgentStatus.REPEATED_ACTION_DETECTED
+        if "duplicate object" in run_error:
+            return AgentStatus.DUPLICATE_OBJECT_DETECTED
+        if "did not include action" in run_error or "No tool call" in run_error or "Invalid JSON" in run_error:
+            return AgentStatus.INVALID_RESPONSE
+        if "Tool" in run_error or "tool" in run_error or "Unknown" in run_error:
+            return AgentStatus.TOOL_ERROR
+    text = error or ""
+    if "no_progress_detected" in text:
+        return AgentStatus.NO_PROGRESS_DETECTED
+    if "max_steps" in text:
+        return AgentStatus.MAX_STEPS_REACHED
+    if "No tool call" in text or "Invalid JSON" in text or "did not include action" in text:
+        return AgentStatus.INVALID_RESPONSE
+    if "Tool" in text or "tool" in text or "Unknown" in text:
+        return AgentStatus.TOOL_ERROR
+    return AgentStatus.RUNTIME_ERROR
+
+
+def _run_metadata_summary(config: RunConfig, execution_metadata: dict | None = None) -> dict[str, object]:
+    return {
+        "agent_id": config.metadata.get("agent_id"),
+        "strategy": config.metadata.get("agent_strategy"),
+        "mcp_profile": config.metadata.get("mcp_profile") or config.mcp_profile,
+        "model": _effective_model(config, execution_metadata),
+        "repetition": config.metadata.get("repetition"),
+    }
+
+
+def _effective_model(config: RunConfig, execution_metadata: dict | None = None) -> str | None:
+    model_id = config.metadata.get("model_id")
+    if isinstance(model_id, str) and model_id and model_id != "default":
+        return model_id
+    if isinstance(execution_metadata, dict):
+        agent_run = execution_metadata.get("agent_run")
+        if isinstance(agent_run, dict):
+            metadata = agent_run.get("metadata")
+            if isinstance(metadata, dict) and metadata.get("model"):
+                return str(metadata["model"])
+    return None
 
 
 def _now_utc() -> str:

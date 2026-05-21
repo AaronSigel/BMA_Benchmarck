@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from benchmark.agent.models import AgentStep, AgentStepType, AgentTrace, AgentStrategy
+from benchmark.agent.models import AgentStep, AgentStepType, AgentStrategyName, AgentTrace
 from benchmark.analysis.tool_metrics import (
     ToolCallSummary,
     compute_tool_summary,
@@ -28,7 +28,7 @@ def _trace(*steps: AgentStep, run_id: str = "r1", task_id: str = "t1") -> AgentT
         run_id=run_id,
         task_id=task_id,
         agent_id="agent",
-        strategy=AgentStrategy.REACT,
+        strategy=AgentStrategyName.REACT,
         model="mock",
         steps=list(steps),
         started_at=_NOW,

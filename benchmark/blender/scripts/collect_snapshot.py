@@ -196,14 +196,21 @@ def collect_snapshot(payload: dict) -> dict:
     import bpy
 
     scene = bpy.context.scene
-    objects = list(getattr(scene, "objects", bpy.data.objects))
+    all_objects = list(getattr(scene, "objects", bpy.data.objects))
+    objects = [obj for obj in all_objects if getattr(obj, "type", None) == "MESH"]
+    lights = [obj for obj in all_objects if getattr(obj, "type", None) == "LIGHT"]
+    cameras = [obj for obj in all_objects if getattr(obj, "type", None) == "CAMERA"]
 
     snapshot = {
         "scene_name": scene.name,
         "objects": [_object_snapshot(obj) for obj in objects],
         "materials": [_material_snapshot(material) for material in bpy.data.materials],
-        "lights": [_light_snapshot(obj) for obj in objects if getattr(obj, "type", None) == "LIGHT"],
-        "cameras": [_camera_snapshot(scene, obj) for obj in objects if getattr(obj, "type", None) == "CAMERA"],
+        "lights": [_light_snapshot(obj) for obj in lights],
+        "cameras": [_camera_snapshot(scene, obj) for obj in cameras],
+        "mesh_object_count": len(objects),
+        "light_count": len(lights),
+        "camera_count": len(cameras),
+        "all_object_count": len(all_objects),
         "collections": [collection.name for collection in bpy.data.collections],
         "render_settings": _render_settings(scene),
         "frame_current": int(scene.frame_current),

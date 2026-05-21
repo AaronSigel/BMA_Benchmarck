@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 from pathlib import Path
 from typing import Any
 
@@ -297,6 +296,9 @@ def _check_mcp_connectivity(
     errors: list[str],
     requirements: list[EnvironmentRequirement],
 ) -> None:
+    from benchmark.mcp.connection_check import check_blender_socket
+    from benchmark.mcp.errors import BlenderSocketUnavailableError
+
     seen: set[tuple[str, int]] = set()
     for profile in mcp_profiles:
         host = str(profile.get("blender_host", "localhost"))
@@ -313,10 +315,9 @@ def _check_mcp_connectivity(
             )
         )
         try:
-            sock = socket.create_connection((host, port), timeout=_SOCKET_TIMEOUT_SEC)
-            sock.close()
-        except OSError as error:
-            errors.append(f"Cannot reach Blender socket at {host}:{port}: {error}")
+            check_blender_socket(host, port, timeout_sec=_SOCKET_TIMEOUT_SEC)
+        except BlenderSocketUnavailableError as error:
+            errors.append(str(error))
 
 
 def _requires_blender(modes: list[ExecutionMode]) -> bool:

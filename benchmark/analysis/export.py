@@ -72,17 +72,50 @@ def to_html(rows: list[dict[str, Any]], title: str = "") -> str:
 _RUN_METRICS_COLUMNS = [
     "run_id",
     "task_id",
-    "agent_id",
+    "task_category",
     "strategy",
     "model",
     "mcp_profile",
-    "success",
-    "scene_total_score",
-    "validation_status",
-    "tool_call_count",
-    "invalid_tool_call_count",
-    "llm_call_count",
+    "repetition",
+    "pass_type",
+    "run_status",
+    "scene_status",
+    "agent_status",
+    "score",
+    "validation_coverage",
     "duration_sec",
+    "tool_call_count",
+    "llm_call_count",
+    "invalid_tool_call_count",
+    "disabled_tool_call_count",
+    "tool_error_count",
+    "provider_name",
+    "provider_reported_prompt_tokens",
+    "provider_reported_completion_tokens",
+    "provider_reported_total_tokens",
+    "provider_reported_cost_usd",
+    "provider_cost_available",
+    "validation_issues",
+    "agent_issues",
+    "tool_issues",
+    "export_issues",
+    "all_issues",
+    "export_status",
+    "export_failure_type",
+    "artifact_dir",
+    # Extra diagnostic columns retained for analysis convenience.
+    "agent_id",
+    "success",
+    "validation_status",
+    "validators_total",
+    "validators_run",
+    "validators_skipped",
+    "validators_passed",
+    "validators_failed",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "retry_count",
     "error_count",
     "most_common_error",
 ]
@@ -100,23 +133,151 @@ def _most_common_error(result: RunAnalysisResult) -> str:
 
 
 def _run_to_row(result: RunAnalysisResult) -> dict[str, Any]:
+    validation_issues = _format_issue_counts(result, "validation")
+    agent_issues = _format_issue_counts(result, "agent")
+    tool_issues = _format_issue_counts(result, "tool")
+    export_issues = _format_issue_counts(result, "export")
+    all_issues = _join_issues(validation_issues, agent_issues, tool_issues, export_issues)
+    export_status, export_failure_type = _export_status(result, export_issues)
     return {
         "run_id": result.run_id,
         "task_id": result.task_id,
-        "agent_id": result.agent_id,
+        "task_category": _task_category(result),
         "strategy": result.strategy,
         "model": result.model or "",
         "mcp_profile": result.mcp_profile or "",
-        "success": result.success,
-        "scene_total_score": result.total_score,
-        "validation_status": result.validation_status or "",
-        "tool_call_count": result.tool_call_count,
-        "invalid_tool_call_count": result.invalid_tool_call_count,
-        "llm_call_count": result.llm_call_count,
+        "repetition": result.metrics.get("run_summary.repetition", result.metrics.get("repetition", "")),
+        "pass_type": _effective_pass_type(result),
+        "run_status": result.run_status or "",
+        "scene_status": result.scene_status or "",
+        "agent_status": result.agent_status or "",
+        "score": result.total_score,
+        "validation_coverage": result.metrics.get("validation_coverage", ""),
         "duration_sec": result.duration_sec,
+        "tool_call_count": result.tool_call_count,
+        "llm_call_count": result.llm_call_count,
+        "invalid_tool_call_count": result.invalid_tool_call_count,
+        "disabled_tool_call_count": result.metrics.get("disabled_tool_call_count", ""),
+        "tool_error_count": result.metrics.get("tool_error_count", ""),
+        "provider_name": result.metrics.get("provider_name", ""),
+        "provider_reported_prompt_tokens": result.metrics.get("provider_reported_prompt_tokens", ""),
+        "provider_reported_completion_tokens": result.metrics.get("provider_reported_completion_tokens", ""),
+        "provider_reported_total_tokens": result.metrics.get("provider_reported_total_tokens", ""),
+        "provider_reported_cost_usd": result.metrics.get("provider_reported_cost_usd", ""),
+        "provider_cost_available": result.metrics.get("provider_cost_available", ""),
+        "validation_issues": validation_issues,
+        "agent_issues": agent_issues,
+        "tool_issues": tool_issues,
+        "export_issues": export_issues,
+        "all_issues": all_issues,
+        "export_status": export_status,
+        "export_failure_type": export_failure_type,
+        "artifact_dir": _artifact_dir(result),
+        "agent_id": result.agent_id,
+        "success": result.success,
+        "validation_status": result.validation_status or "",
+        "validators_total": result.metrics.get("validators_total", ""),
+        "validators_run": result.metrics.get("validators_run", ""),
+        "validators_skipped": result.metrics.get("skipped_validator_count", ""),
+        "validators_passed": result.metrics.get("passed_validator_count", ""),
+        "validators_failed": result.metrics.get("failed_validator_count", ""),
+        "prompt_tokens": result.metrics.get("prompt_tokens", ""),
+        "completion_tokens": result.metrics.get("completion_tokens", ""),
+        "total_tokens": result.metrics.get("total_tokens", ""),
+        "retry_count": result.retry_count,
         "error_count": result.error_count,
         "most_common_error": _most_common_error(result),
     }
+
+
+def _task_category(result: RunAnalysisResult) -> str:
+    explicit = result.metrics.get("task_category") or result.metrics.get("run_summary.task_category")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    task_id = result.task_id.lower()
+    for category in ("geometry", "materials", "lighting", "camera", "export"):
+        if category in task_id:
+            return category
+    return "unknown"
+
+
+def _effective_pass_type(result: RunAnalysisResult) -> str:
+    if result.pass_type in {"clean_pass", "soft_pass", "failed_validation", "runtime_error"}:
+        return str(result.pass_type)
+    if result.pass_type == "failed":
+        return "failed_validation"
+    if result.pass_type == "error":
+        return "runtime_error"
+    if result.success is True:
+        return "clean_pass"
+    if result.success is False:
+        return "failed_validation"
+    return "runtime_error"
+
+
+def _artifact_dir(result: RunAnalysisResult) -> str:
+    for artifact in result.artifacts:
+        path = Path(artifact)
+        if path.name in {"agent_trace.json", "run_result.json", "validation_result.json", "scene_snapshot.json"}:
+            return str(path.parent)
+    return ""
+
+
+def _join_issues(*values: str) -> str:
+    items = [value for value in values if value and value != "null"]
+    return "; ".join(items) if items else "null"
+
+
+def _export_status(result: RunAnalysisResult, export_issues: str) -> tuple[str, str]:
+    is_export = _task_category(result) == "export" or "export" in result.task_id.lower()
+    if not is_export:
+        return "not_applicable", ""
+    pass_type = _effective_pass_type(result)
+    if pass_type in {"clean_pass", "soft_pass"} and export_issues == "null":
+        return "passed", ""
+    if pass_type == "runtime_error":
+        return "failed", "pre_export_scene_incomplete"
+    if export_issues != "null":
+        first_issue = export_issues.split(":", 1)[0].split(";", 1)[0].strip()
+        mapping = {
+            "export_missing": "export_file_missing",
+            "scene_export_missing": "export_file_missing",
+            "export_file_invalid": "export_tool_failed",
+            "export_import_missing": "import_back_failed",
+            "export_import_material_missing": "import_back_material_mismatch",
+            "export_import_transform_mismatch": "import_back_transform_mismatch",
+        }
+        return "failed", mapping.get(first_issue, first_issue or "export_tool_failed")
+    return "failed", "pre_export_scene_incomplete"
+
+
+def _format_issue_counts(result: RunAnalysisResult, kind: str) -> str:
+    counts: dict[str, int] = {}
+    if kind == "validation":
+        for issue in result.issues:
+            code = issue.get("code") if isinstance(issue, dict) else None
+            if isinstance(code, str):
+                counts[code] = counts.get(code, 0) + 1
+    elif kind == "agent":
+        for key in ("repeated_action_count", "duplicate_object_count", "wasted_step_count"):
+            value = result.metrics.get(key)
+            if isinstance(value, int) and value > 0:
+                counts[key] = value
+        if result.run_status == "error" or result.agent_status in {"runtime_error", "invalid_response", "max_steps_reached"}:
+            counts[result.agent_status or "agent_error"] = 1
+    elif kind == "tool":
+        for key in ("invalid_tool_call_count", "disabled_tool_call_count", "tool_error_count"):
+            value = result.metrics.get(key)
+            if isinstance(value, int) and value > 0:
+                counts[key] = value
+    elif kind == "export":
+        for issue in result.issues:
+            code = issue.get("code") if isinstance(issue, dict) else None
+            if isinstance(code, str) and ("export" in code or "glb" in code):
+                counts[code] = counts.get(code, 0) + 1
+    if not counts:
+        return "null"
+    return "; ".join(f"{key}:{counts[key]}" for key in sorted(counts))
 
 
 def write_run_analysis_json(result: RunAnalysisResult, path: Path | str) -> None:
@@ -148,7 +309,17 @@ def write_group_comparison_csv(groups: list[ComparisonGroup], path: Path | str) 
     """Write ComparisonGroup rows to a CSV file."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    columns = ["dimension", "value", "run_count", "success_rate", "avg_score", "avg_tool_calls", "avg_duration_sec"]
+    columns = [
+        "dimension",
+        "value",
+        "run_count",
+        "success_rate",
+        "avg_score",
+        "avg_tool_calls",
+        "avg_duration_sec",
+        "avg_cost",
+        "validation_failures",
+    ]
     with p.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=columns)
         writer.writeheader()
@@ -161,6 +332,8 @@ def write_group_comparison_csv(groups: list[ComparisonGroup], path: Path | str) 
                 "avg_score": g.avg_score,
                 "avg_tool_calls": g.avg_tool_calls,
                 "avg_duration_sec": g.avg_duration_sec,
+                "avg_cost": g.avg_cost,
+                "validation_failures": g.validation_failures,
             })
 
 

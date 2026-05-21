@@ -12,6 +12,20 @@ from benchmark.mcp.server_adapter import ExternalBlenderMcpServerAdapter
 from benchmark.mcp.tool_registry import McpToolRegistry
 
 
+_TOOL_ALIASES = {
+    "create_object": "bma_create_object",
+    "assign_material": "bma_assign_material",
+    "set_material": "bma_set_material",
+    "set_material_properties": "bma_assign_material",
+    "create_camera": "bma_create_camera",
+    "create_camera_look_at": "bma_create_camera_look_at",
+    "create_light": "bma_create_light",
+    "set_transform": "bma_set_transform",
+    "get_scene_snapshot": "bma_get_scene_snapshot",
+    "export_scene": "bma_export_scene",
+}
+
+
 @runtime_checkable
 class ToolExecutor(Protocol):
     def call_tool(
@@ -28,11 +42,6 @@ class ToolExecutor(Protocol):
         """Normalize arbitrary tool output into a JSON-compatible mapping."""
 
 
-class NoopToolSchemaProvider(ToolSchemaProvider):
-    def list_tool_schemas(self, profile: McpProfile | str = McpProfile.MINIMAL) -> list[dict[str, Any]]:
-        return []
-
-
 class MockToolExecutor:
     def __init__(
         self,
@@ -47,6 +56,7 @@ class MockToolExecutor:
         self.calls: list[ToolCallRequest] = []
 
     def assert_tool_allowed(self, tool_name: str) -> None:
+        tool_name = _TOOL_ALIASES.get(tool_name, tool_name)
         if self.allowed_tools and tool_name not in self.allowed_tools:
             raise ToolInvocationError(f"Tool is not allowed: {tool_name}", tool_name=tool_name)
 
@@ -101,6 +111,7 @@ class McpToolExecutor:
         self.registry = registry or McpToolRegistry()
 
     def assert_tool_allowed(self, tool_name: str) -> None:
+        tool_name = _TOOL_ALIASES.get(tool_name, tool_name)
         try:
             self.registry.assert_tool_allowed(tool_name, self.profile)
         except McpLayerError as error:
@@ -117,8 +128,16 @@ class McpToolExecutor:
             self.assert_tool_allowed(request.name)
             raw_result = self.adapter.call_tool(request.name, request.arguments)
             result = self.normalize_tool_result(raw_result)
-            status = ToolCallStatus.SUCCEEDED
-            error_message = None
+            if result.get("ok") is False:
+                status = ToolCallStatus.FAILED
+                error = result.get("error")
+                if isinstance(error, dict):
+                    error_message = str(error.get("message") or error)
+                else:
+                    error_message = str(error or f"Tool failed: {request.name}")
+            else:
+                status = ToolCallStatus.SUCCEEDED
+                error_message = None
         except ToolInvocationError as error:
             result = None
             status = ToolCallStatus.FAILED
@@ -175,7 +194,7 @@ def _coerce_request(
         args: dict[str, Any] = {}
     else:
         args = arguments
-    return ToolCallRequest(name=tool_name, arguments=args)
+    return ToolCallRequest(name=_TOOL_ALIASES.get(tool_name, tool_name), arguments=args)
 
 
 def _coerce_profile(profile: McpProfile | str) -> McpProfile:

@@ -571,3 +571,124 @@ python -m benchmark.runner.cli experiment \
     --config configs/example_experiment.yaml \
     --report
 ```
+
+### Pilot comparison v3
+
+Run the existing five-category pilot:
+
+```bash
+python -m benchmark.experiments.cli run-and-report \
+  --matrix configs/matrices/pilot_5category_openrouter_v2.yaml \
+  --clean-output
+```
+
+Run the comparison matrix:
+
+```bash
+python -m benchmark.experiments.cli run-and-report \
+  --matrix configs/matrices/pilot_comparison_openrouter_v3.yaml \
+  --clean-output
+```
+
+`pilot_comparison_openrouter_v3` runs `model x strategy x MCP profile x task x
+repetition`: `3 x 3 x 2 x 5 x 3 = 270` runs. It uses only OpenRouter model ids
+and does not add Ollama, local models, or GigaChat. The matrix model id
+overrides the base model in each agent config.
+
+`summary.json` is the runner aggregate. `experiment_analysis.json` is the
+analysis artifact for reports and papers. Per run it includes model, strategy,
+MCP profile, total score, validation status, validator counts,
+`validation_coverage`, tool-call metrics, token usage when available, estimated
+cost, and issues.
+
+`validation_coverage = validators_run / validators_total`. A high score with
+low coverage means the result passed only a partial validation surface.
+
+`export_score` checks that the expected file exists and is non-empty.
+`export_import_score` imports an exported GLB into a clean temporary Blender
+scene and checks that object structure, materials, transforms, duplicate names,
+and coarse scene bounds still match expectations.
+
+`no_python` is the primary MCP-tool-use regime: agents can use structured
+benchmark-safe `bma_*` tools, but cannot solve tasks by executing arbitrary
+Blender Python.
+
+## Report-ready MVP run
+
+The main report-ready benchmark entrypoint is:
+
+```bash
+python -m bma_benchmark run-matrix \
+  --config configs/matrices/diagnostic_repeat_gemini_v5.yaml
+```
+
+This matrix runs 18 Blender tasks across three strategies
+(`direct_tool_calling`, `plan_and_execute`, `react`), five MCP profiles
+(`minimal`, `no_python`, `inspection_enabled`, `python_enabled`, `full`), one
+OpenRouter model (`google/gemini-2.5-flash-lite`), and one repetition: 270 runs
+total. The command creates a timestamped output directory:
+
+```text
+artifacts/diagnostic_repeat_gemini_v5_<timestamp>/report_bundle/
+```
+
+The benchmark pipeline is:
+
+```text
+matrix config -> run configs -> agent/MCP execution -> validation
+-> per-run artifacts -> analysis summary -> report bundle
+```
+
+`summary.csv` in `report_bundle` is the primary source for tables and
+post-processing. `report.md` and `report.html` contain ready-to-copy tables and
+key findings. `report_text_ru.md` contains Russian scientific/technical prose
+for insertion into a report. `figures/*.png` contains static charts suitable
+for document insertion.
+
+### Metrics and statuses
+
+The main reporting status is `pass_type`:
+
+| pass_type | Meaning |
+| --- | --- |
+| `clean_pass` | Scene passed validation without validation issues. |
+| `soft_pass` | Scene passed by score/status but has validation issues. |
+| `failed_validation` | Agent completed and a scene is available, but validation failed. |
+| `runtime_error` | The run did not reach a correct final scene because of an agent, tool, or runtime error. |
+
+Derived rates use the same formulas in CSV, JSON, Markdown, and HTML:
+
+```text
+reported_success_rate = (clean_pass + soft_pass) / total_runs
+strict_success_rate = clean_pass / total_runs
+failure_rate = (failed_validation + runtime_error) / total_runs
+```
+
+Technical fields such as `run_status`, `scene_status`, and `agent_status`
+remain in `summary.csv`, but report tables use `pass_type`.
+
+### Strategies and MCP profiles
+
+`direct_tool_calling` issues tool calls directly, `plan_and_execute` separates
+planning from execution, and `react` uses an iterative reasoning/action loop.
+ReAct in the MVP is retained as a diagnostic strategy. A low ReAct success rate
+is not a benchmark failure; it reflects current limitations of the agent loop
+on multi-step Blender tasks.
+
+MCP profiles define the available tool surface. `minimal` is the smallest
+surface, `no_python` disables arbitrary Python while keeping structured BMA
+tools, `inspection_enabled` adds scene inspection, `python_enabled` enables
+Python-oriented tools, and `full` exposes the broadest profile.
+
+### OpenRouter cost
+
+Cost is reported only from provider-reported OpenRouter usage fields. Internal
+token-to-price estimation formulas are not used for report totals.
+
+### MVP limitations
+
+The MVP focuses on producing a reproducible report package, not on maximizing
+success rate. It intentionally preserves real failures from agents, strategies,
+tools, validators, and MCP profiles as classified benchmark results. Multi-model
+comparison, repeated statistical runs, render similarity, visual feedback loops,
+and human-in-the-loop workflows are outside this MVP scope.

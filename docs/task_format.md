@@ -121,7 +121,9 @@ Fields:
 - `location: Vector3 | None`
 - `rotation: Vector3 | None`
 - `focal_length: float | None`
-- `target: str | None`
+- `target: Vector3 | None`
+- `require_active: bool | None`
+- `direction_tolerance_deg: float`
 - `tolerance: float = 0.05`
 
 Camera tasks should provide `location` and at least one of `rotation` or `target`.

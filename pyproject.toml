@@ -13,7 +13,8 @@ dependencies = [
     "pyyaml",
     "jsonschema",
     "httpx",
-    "jinja2"
+    "jinja2",
+    "matplotlib"
 ]
 
 [project.optional-dependencies]
@@ -48,4 +49,4 @@ markers = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["benchmark*"]
+include = ["benchmark*", "bma_benchmark*"]

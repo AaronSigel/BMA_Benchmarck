@@ -18,6 +18,7 @@ _VALIDATOR_SCORE_MAP: dict[str, str] = {
     "light_validator": "light_score",
     "camera_validator": "camera_score",
     "export_validator": "export_score",
+    "glb_import_back_validator": "export_import_score",
 }
 
 _UNKNOWN_STATUS = "unknown"
@@ -41,6 +42,7 @@ class ValidationMetricsSummary(BaseModel):
     light_score: float | None = Field(default=None, ge=0.0, le=1.0)
     camera_score: float | None = Field(default=None, ge=0.0, le=1.0)
     export_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    export_import_score: float | None = Field(default=None, ge=0.0, le=1.0)
 
     # Issue counts (across top-level + all validators)
     validation_error_count: int = Field(default=0, ge=0)
@@ -50,6 +52,9 @@ class ValidationMetricsSummary(BaseModel):
     passed_validator_count: int = Field(default=0, ge=0)
     failed_validator_count: int = Field(default=0, ge=0)
     skipped_validator_count: int = Field(default=0, ge=0)
+    validators_total: int = Field(default=0, ge=0)
+    validators_run: int = Field(default=0, ge=0)
+    validation_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +92,9 @@ def compute_validation_summary(val: SceneValidationResult | None) -> ValidationM
                 failed += 1
             if field_name is not None:
                 scores[field_name] = v.score
+    validators_total = len(val.validators)
+    validators_run = validators_total - skipped
+    validation_coverage = validators_run / validators_total if validators_total else None
 
     error_count = 0
     warning_count = 0
@@ -105,11 +113,15 @@ def compute_validation_summary(val: SceneValidationResult | None) -> ValidationM
         light_score=scores["light_score"],
         camera_score=scores["camera_score"],
         export_score=scores["export_score"],
+        export_import_score=scores["export_import_score"],
         validation_error_count=error_count,
         validation_warning_count=warning_count,
         passed_validator_count=passed,
         failed_validator_count=failed,
         skipped_validator_count=skipped,
+        validators_total=validators_total,
+        validators_run=validators_run,
+        validation_coverage=validation_coverage,
     )
 
 

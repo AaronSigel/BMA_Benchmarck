@@ -304,7 +304,18 @@
           ]
         },
         "target": {
-          "$ref": "#/$defs/NullableString"
+          "$ref": "#/$defs/NullableVector3"
+        },
+        "require_active": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "direction_tolerance_deg": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 5.0
         },
         "tolerance": {
           "type": "number",

@@ -76,6 +76,10 @@ class SceneSnapshot(BaseModel):
     materials: list[MaterialSnapshot]
     lights: list[LightSnapshot]
     cameras: list[CameraSnapshot]
+    mesh_object_count: int | None = None
+    light_count: int | None = None
+    camera_count: int | None = None
+    all_object_count: int | None = None
     collections: list[str]
     render_settings: RenderSettingsSnapshot
     frame_current: int
@@ -161,4 +165,3 @@ class BlenderCommandResult(BaseModel):
     stderr: str | None
     error: str | None
     duration_sec: float | None
-

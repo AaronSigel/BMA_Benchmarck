@@ -183,6 +183,62 @@ def test_camera_validator_checks_rotation_with_tolerance() -> None:
     assert result.issues[0].code == "camera_rotation_mismatch"
 
 
+def test_camera_validator_checks_look_at_target_instead_of_euler_when_target_is_set() -> None:
+    task = task_with_cameras(
+        [
+            ExpectedCamera(
+                name="Front_Camera",
+                location=vector(0.0, -6.0, 2.0),
+                rotation=vector(0.0, 0.0, 0.0),
+                target=vector(0.0, 0.0, 1.0),
+                focal_length=35.0,
+                require_active=True,
+                direction_tolerance_deg=5.0,
+                tolerance=0.1,
+            )
+        ]
+    )
+    snapshot = scene_snapshot(
+        [
+            camera_snapshot(
+                "Front_Camera",
+                location=snapshot_vector(0.0, -6.0, 2.0),
+                rotation_euler=snapshot_vector(math.atan2(6.0, 1.0), 0.0, 0.0),
+                lens=35.0,
+                is_active=True,
+            )
+        ]
+    )
+
+    result = CameraValidator().validate(task, snapshot)
+
+    assert result.status is ValidationStatus.PASSED
+    assert metric_score(result, "camera_direction_score") == 1.0
+    assert not any(issue.code == "camera_rotation_mismatch" for issue in result.issues)
+
+
+def test_camera_validator_reports_target_direction_mismatch() -> None:
+    task = task_with_cameras(
+        [ExpectedCamera(name="Camera", target=vector(0.0, 0.0, 1.0), direction_tolerance_deg=5.0)]
+    )
+    snapshot = scene_snapshot(
+        [
+            camera_snapshot(
+                "Camera",
+                location=snapshot_vector(0.0, -6.0, 2.0),
+                rotation_euler=snapshot_vector(0.0, 0.0, 0.0),
+                is_active=True,
+            )
+        ]
+    )
+
+    result = CameraValidator().validate(task, snapshot)
+
+    assert result.status is ValidationStatus.FAILED
+    assert metric_score(result, "camera_direction_score") < 1.0
+    assert any(issue.code == "camera_direction_mismatch" for issue in result.issues)
+
+
 def test_single_expected_camera_must_be_active() -> None:
     task = task_with_cameras([ExpectedCamera(name="Camera")])
     snapshot = scene_snapshot([camera_snapshot("Camera", is_active=False)])

@@ -1,0 +1,49 @@
+matrix_id: pilot_comparison_openrouter_v3
+title: Pilot comparison OpenRouter v3
+description: >
+  Low-cost comparison matrix across five core Blender benchmark tasks,
+  three agent strategies, two MCP profiles, three OpenRouter models, and
+  three repetitions.
+
+tasks:
+  ids:
+    - geometry_001_basic_primitives
+    - materials_001_basic_colors
+    - lighting_001_area_light
+    - camera_001_front_view
+    - export_002_glb_file
+
+agents:
+  ids:
+    - direct_openrouter
+    - plan_execute_openrouter
+    - react_openrouter
+  config_root: configs/agents
+
+mcp_profiles:
+  - no_python
+  - inspection_enabled
+
+models:
+  ids:
+    - google/gemini-2.5-flash-lite
+    - qwen/qwen3-14b
+    - deepseek/deepseek-chat-v3.1
+
+execution_modes:
+  - agent_mcp
+
+repetitions: 3
+
+output_root: artifacts/experiments/pilot_comparison_openrouter_v3
+report_config_path: configs/reports/default_report.yaml
+
+metadata:
+  purpose: live_openrouter_model_strategy_profile_comparison
+  local_models: false
+  ollama: false
+  gigachat: false
+  external_assets: false
+  notes:
+    - Models are OpenRouter model ids and override the base model in each agent config.
+    - inspection_enabled is intentionally inspection-only to measure the impact of profile restrictions.

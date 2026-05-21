@@ -54,3 +54,18 @@ def test_pilot_5category_openrouter_v2_generates_readiness_gate_runs() -> None:
         "camera_001_front_view",
         "export_002_glb_file",
     ]
+
+
+def test_pilot_comparison_openrouter_v3_generates_full_comparison_matrix() -> None:
+    config = generate_experiment_config(load_matrix("configs/matrices/pilot_comparison_openrouter_v3.yaml"))
+
+    assert config.experiment_id == "pilot_comparison_openrouter_v3"
+    assert len(config.runs) == 5 * 3 * 2 * 3 * 3
+    assert all(run.execution_mode is ExecutionMode.AGENT_MCP for run in config.runs)
+    assert {run.mcp_profile for run in config.runs} == {"no_python", "inspection_enabled"}
+    assert {run.metadata["model_id"] for run in config.runs} == {
+        "google/gemini-2.5-flash-lite",
+        "qwen/qwen3-14b",
+        "deepseek/deepseek-chat-v3.1",
+    }
+    assert all("google-gemini-2.5-flash-lite" in run.run_id or "qwen-qwen3-14b" in run.run_id or "deepseek-deepseek-chat-v3.1" in run.run_id for run in config.runs)

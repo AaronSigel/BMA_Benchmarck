@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from benchmark.mcp.config import load_mcp_config
+from benchmark.mcp.profiles import McpProfile
 from benchmark.mcp.server_adapter import ExternalBlenderMcpServerAdapter
 from benchmark.mcp.tool_contract import TOOL_CONTRACT_MAP
+from benchmark.mcp.tool_registry import McpToolRegistry
 from benchmark.runner.models import ExecutionMode, ExperimentConfig, RunConfig
 
 
@@ -71,7 +73,9 @@ def run_contract_smoke_for_experiment(config: ExperimentConfig, output_root: Pat
     }
 
     try:
-        adapter.reset_scene()
+        reset_result = adapter.reset_scene()
+        if isinstance(reset_result, dict) and reset_result.get("warning"):
+            raise RuntimeError(str(reset_result["warning"]))
         create_result = adapter.call_tool(
             "bma_create_object",
             {
@@ -80,6 +84,10 @@ def run_contract_smoke_for_experiment(config: ExperimentConfig, output_root: Pat
                 "dimensions": [2.0, 2.0, 2.0],
             },
         )
+        if not create_result.get("ok"):
+            _err = create_result.get("error") or {}
+            _msg = _err.get("message") if isinstance(_err, dict) else str(_err)
+            raise RuntimeError(f"bma_create_object probe failed: {_msg}")
         material_result = adapter.call_tool(
             "bma_set_material",
             {
@@ -90,23 +98,22 @@ def run_contract_smoke_for_experiment(config: ExperimentConfig, output_root: Pat
                 "metallic": 0.0,
             },
         )
+        if not material_result.get("ok"):
+            _err = material_result.get("error") or {}
+            _msg = _err.get("message") if isinstance(_err, dict) else str(_err)
+            raise RuntimeError(f"bma_set_material probe failed: {_msg}")
         adapter.collect_scene_snapshot(snapshot_path)
         snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
         _assert_contract_snapshot(snapshot)
     except Exception as exc:  # noqa: BLE001
         metadata["finished_at"] = _utc_now()
         metadata["error"] = str(exc)
-        try:
-            adapter.reset_scene()
-        except Exception:  # noqa: BLE001
-            pass
-        raise PreflightError(
-            "Socket is reachable, but running server does not support expected BMA contract: "
-            f"{exc}"
-        ) from exc
+        return metadata  # ok remains False; caller decides whether to abort
     finally:
         try:
-            adapter.reset_scene()
+            reset_result = adapter.reset_scene()
+            if isinstance(reset_result, dict) and reset_result.get("warning"):
+                metadata["cleanup_warning"] = str(reset_result["warning"])
         except Exception:  # noqa: BLE001
             pass
 
@@ -119,6 +126,90 @@ def run_contract_smoke_for_experiment(config: ExperimentConfig, output_root: Pat
         }
     )
     return metadata
+
+
+EXPECTED_BMA_CONTRACT = frozenset({
+    "bma_create_object",
+    "bma_set_transform",
+    "bma_assign_material",
+    "bma_create_light",
+    "bma_create_camera_look_at",
+    "bma_export_scene",
+    "bma_get_scene_snapshot",
+    "bma_get_object_info",
+})
+DISALLOWED_AGENT_TOOLS = frozenset({
+    "create_object",
+    "assign_material",
+    "export_scene",
+})
+
+
+def run_profile_preflight_for_experiment(config: ExperimentConfig) -> dict[str, Any]:
+    profiles = sorted({run.mcp_profile for run in config.runs if run.mcp_profile})
+    registry = McpToolRegistry()
+    results = []
+    for profile_name in profiles:
+        try:
+            profile = McpProfile(profile_name)
+            advertised = {contract.name for contract in registry.list_for_profile(profile)}
+            missing = sorted(EXPECTED_BMA_CONTRACT - advertised)
+            disallowed = sorted(DISALLOWED_AGENT_TOOLS & advertised)
+            disabled_for_safe_profiles = []
+            if profile in {McpProfile.MINIMAL, McpProfile.NO_PYTHON, McpProfile.INSPECTION_ENABLED}:
+                disabled_for_safe_profiles = sorted({"execute_blender_code"} & advertised)
+            ok = not missing and not disallowed and not disabled_for_safe_profiles
+            reason = None
+            if missing:
+                reason = f"Missing expected contract tools: {', '.join(missing)}"
+            elif disallowed:
+                reason = f"Unknown tool in advertised contract: {', '.join(disallowed)}"
+            elif disabled_for_safe_profiles:
+                reason = f"Disabled tools advertised for safe profile: {', '.join(disabled_for_safe_profiles)}"
+            results.append({
+                "profile": profile_name,
+                "preflight_status": "passed" if ok else "failed",
+                "reason": reason,
+                "advertised_tools": sorted(advertised),
+                "expected_contract": sorted(EXPECTED_BMA_CONTRACT),
+                "checks": {
+                    "create_object_tool": "bma_create_object" in advertised,
+                    "material_tool": bool({"bma_assign_material", "bma_set_material"} & advertised),
+                    "camera_tool": "bma_create_camera_look_at" in advertised,
+                    "export_tool": "bma_export_scene" in advertised,
+                    "inspection_tools": {"bma_get_scene_snapshot", "bma_get_object_info"}.issubset(advertised),
+                    "disabled_tools_blocked": not disabled_for_safe_profiles,
+                },
+            })
+        except Exception as exc:  # noqa: BLE001
+            results.append({
+                "profile": profile_name,
+                "preflight_status": "failed",
+                "reason": str(exc),
+            })
+    return {
+        "enabled": True,
+        "ok": all(item.get("preflight_status") == "passed" for item in results),
+        "profiles": results,
+    }
+
+
+def filter_config_by_profile_preflight(config: ExperimentConfig, preflight: dict[str, Any]) -> ExperimentConfig:
+    failed = {
+        item["profile"]
+        for item in preflight.get("profiles", [])
+        if item.get("preflight_status") != "passed"
+    }
+    if not failed:
+        return config
+    runs = [run for run in config.runs if run.mcp_profile not in failed]
+    metadata = {
+        **config.metadata,
+        "profile_preflight": preflight,
+        "skipped_by_preflight": len(config.runs) - len(runs),
+        "excluded_profiles": sorted(failed),
+    }
+    return config.model_copy(update={"runs": runs, "metadata": metadata})
 
 
 def collect_runtime_metadata(config: ExperimentConfig, output_root: Path) -> dict[str, Any]:

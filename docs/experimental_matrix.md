@@ -508,3 +508,17 @@ python -m benchmark.experiments.cli run-and-report \
 - External asset tools
 - Human-in-the-loop
 - Visual feedback workflow
+
+## Pilot comparison OpenRouter v3
+
+```bash
+python -m benchmark.experiments.cli run-and-report \
+  --matrix configs/matrices/pilot_comparison_openrouter_v3.yaml \
+  --clean-output
+```
+
+Матрица содержит пять core-задач, стратегии `direct_tool_calling`,
+`plan_and_execute`, `react`, профили `no_python` и `inspection_enabled`,
+три OpenRouter-модели и три повторности. `models.ids` переопределяет
+`llm.model` из agent config, поэтому группировка по model отражает реальную
+модель прогона.

@@ -65,8 +65,9 @@ def _collect_artifacts(bundle: RunArtifactBundle) -> list[str]:
         p = bundle.run_dir / name
         if p.exists():
             paths.append(str(p))
-    for trace_path in sorted(bundle.run_dir.glob("agent_runs/*/agent_trace.json")):
-        paths.append(str(trace_path))
+    if not (bundle.run_dir / "agent_trace.json").exists():
+        for trace_path in sorted(bundle.run_dir.glob("agent_runs/*/agent_trace.json")):
+            paths.append(str(trace_path))
     for export_path in sorted((bundle.run_dir / "exports").glob("*")):
         if export_path.is_file():
             paths.append(str(export_path))
@@ -198,6 +199,11 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
             "python_tool_call_count": tool_summary.python_tool_call_count,
             "asset_tool_call_count": tool_summary.asset_tool_call_count,
             "tool_repetition_count": tool_summary.tool_repetition_count,
+            "duplicate_object_count": int(trace.metadata.get("duplicate_object_count", 0)),
+            "repeated_action_count": int(trace.metadata.get("repeated_action_count", 0)),
+            "inspection_before_mutation_rate": trace.metadata.get("inspection_before_mutation_rate", "not_available"),
+            "successful_correction_count": int(trace.metadata.get("successful_correction_count", 0)),
+            "wasted_step_count": int(trace.metadata.get("wasted_step_count", 0)),
         })
         for key, val in [
             ("average_step_duration_sec", agent_summary.average_step_duration_sec),
@@ -206,10 +212,15 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
             ("prompt_tokens", agent_summary.prompt_tokens),
             ("completion_tokens", agent_summary.completion_tokens),
             ("total_tokens", agent_summary.total_tokens),
-            ("estimated_cost", agent_summary.estimated_cost),
+            ("provider_name", agent_summary.provider_name),
+            ("provider_reported_prompt_tokens", agent_summary.provider_reported_prompt_tokens),
+            ("provider_reported_completion_tokens", agent_summary.provider_reported_completion_tokens),
+            ("provider_reported_total_tokens", agent_summary.provider_reported_total_tokens),
+            ("provider_reported_cost_usd", agent_summary.provider_reported_cost_usd),
         ]:
             if val is not None:
                 metrics[key] = val
+        metrics["provider_cost_available"] = agent_summary.provider_cost_available
 
         tool_call_count = tool_summary.tool_call_count
         invalid_tool_call_count = tool_summary.invalid_tool_call_count
@@ -234,16 +245,22 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
     metrics["passed_validator_count"] = val_summary.passed_validator_count
     metrics["failed_validator_count"] = val_summary.failed_validator_count
     metrics["skipped_validator_count"] = val_summary.skipped_validator_count
+    metrics["validators_total"] = val_summary.validators_total
+    metrics["validators_run"] = val_summary.validators_run
     metrics["validation_error_count"] = val_summary.validation_error_count
     metrics["validation_warning_count"] = val_summary.validation_warning_count
+    if val_summary.validation_coverage is not None:
+        metrics["validation_coverage"] = val_summary.validation_coverage
 
     for field in (
         "object_score", "transform_score", "material_score",
-        "light_score", "camera_score", "export_score",
+        "light_score", "camera_score", "export_score", "export_import_score",
     ):
         v = getattr(val_summary, field)
         if v is not None:
             metrics[field] = v
+    metrics["tool_selection_accuracy"] = _tool_selection_accuracy(metrics)
+    metrics["parameter_correctness"] = _parameter_correctness(validation)
 
     # -----------------------------------------------------------------------
     # Error taxonomy
@@ -286,6 +303,21 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
     if total_score is None and run_result is not None:
         total_score = run_result.total_score
 
+    _run_status_str = (
+        run_result.run_status.value if run_result is not None and run_result.run_status
+        else run_result.status.value if run_result is not None
+        else None
+    )
+    _agent_status_str = (
+        run_result.agent_status.value if run_result is not None and run_result.agent_status
+        else None
+    )
+    _scene_status_str = (
+        run_result.scene_status.value if run_result is not None and run_result.scene_status
+        else val_summary.scene_overall_status
+    )
+    pass_type = _classify_pass_type(_run_status_str, _scene_status_str, _agent_status_str, issues)
+
     return RunAnalysisResult(
         run_id=run_id,
         task_id=task_id,
@@ -295,6 +327,10 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
         mcp_profile=mcp_profile,
         total_score=total_score,
         validation_status=val_summary.scene_overall_status,
+        run_status=_run_status_str,
+        agent_status=_agent_status_str,
+        scene_status=_scene_status_str,
+        pass_type=pass_type,
         tool_call_count=tool_call_count,
         invalid_tool_call_count=invalid_tool_call_count,
         trajectory_length=trajectory_length,
@@ -307,3 +343,55 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
         issues=issues,
         artifacts=artifacts,
     )
+
+
+def _classify_pass_type(
+    run_status: str | None,
+    scene_status: str | None,
+    agent_status: str | None,
+    issues: list[dict[str, Any]],
+) -> str:
+    """Classify a run as clean_pass, soft_pass, failed_validation, or runtime_error."""
+    if run_status == "error" or run_status is None or scene_status in {None, "not_available", "skipped"}:
+        return "runtime_error"
+    if run_status == "passed" and scene_status == "passed":
+        agent_ok = agent_status in (
+            "completed",
+            "completed_after_scene_passed",
+            None,
+        )
+        if issues and agent_ok:
+            return "soft_pass"
+        return "clean_pass"
+    if scene_status == "failed":
+        return "failed_validation"
+    return "runtime_error"
+
+
+def _tool_selection_accuracy(metrics: dict[str, Any]) -> float | str:
+    tool_calls = metrics.get("tool_call_count")
+    invalid = metrics.get("invalid_tool_call_count", 0)
+    disabled = metrics.get("disabled_tool_call_count", 0)
+    if not isinstance(tool_calls, int) or tool_calls <= 0:
+        return "not_available"
+    bad = (invalid if isinstance(invalid, int) else 0) + (disabled if isinstance(disabled, int) else 0)
+    return max(0.0, min(1.0, 1.0 - (bad / tool_calls)))
+
+
+def _parameter_correctness(validation: SceneValidationResult | None) -> float | str:
+    if validation is None:
+        return "not_available"
+    scores = [
+        validator.score
+        for validator in validation.validators
+        if validator.name in {
+            "transform_validator",
+            "material_validator",
+            "light_validator",
+            "camera_validator",
+        }
+        and validator.status is not ValidationStatus.SKIPPED
+    ]
+    if not scores:
+        return "not_available"
+    return sum(scores) / len(scores)

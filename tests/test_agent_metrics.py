@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from benchmark.agent.models import AgentStep, AgentStepType, AgentTrace, AgentStrategy
+from benchmark.agent.models import AgentStep, AgentStepType, AgentStrategyName, AgentTrace
 from benchmark.analysis.agent_metrics import (
     AgentMetricsSummary,
     _aggregate_token_usage,
@@ -34,7 +34,7 @@ def _trace(
         run_id=run_id,
         task_id=task_id,
         agent_id="agent",
-        strategy=AgentStrategy.REACT,
+        strategy=AgentStrategyName.REACT,
         model="mock",
         steps=list(steps),
         error=error,
@@ -125,7 +125,8 @@ class TestEmptyTrace:
         assert s.prompt_tokens is None
         assert s.completion_tokens is None
         assert s.total_tokens is None
-        assert s.estimated_cost is None
+        assert s.provider_reported_cost_usd is None
+        assert s.provider_cost_available is False
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +353,8 @@ class TestTokenUsage:
         assert s.prompt_tokens is None
         assert s.completion_tokens is None
         assert s.total_tokens is None
-        assert s.estimated_cost is None
+        assert s.provider_reported_cost_usd is None
+        assert s.provider_cost_available is False
 
     def test_sums_across_llm_steps(self):
         s = compute_agent_summary(_trace(
@@ -363,11 +365,11 @@ class TestTokenUsage:
         assert s.completion_tokens == 130
         assert s.total_tokens == 430
 
-    def test_estimated_cost_computed(self):
+    def test_provider_cost_not_inferred_from_tokens(self):
         s = compute_agent_summary(_trace(_llm(0, prompt=500_000, completion=500_000)))
-        # 1M tokens × $2/M = $2.00
         assert s.total_tokens == 1_000_000
-        assert s.estimated_cost == pytest.approx(2.0, rel=1e-3)
+        assert s.provider_reported_cost_usd is None
+        assert s.provider_cost_available is False
 
     def test_partial_usage_per_step(self):
         # One step with usage, one without
@@ -384,7 +386,8 @@ class TestTokenUsage:
         assert s.prompt_tokens == 120
         assert s.completion_tokens == 40
         assert s.total_tokens == 160
-        assert s.estimated_cost == pytest.approx(160 * 2e-6)
+        assert s.provider_reported_cost_usd is None
+        assert s.provider_cost_available is False
 
     def test_fixture_react_success_aggregates_all_llm_steps(self):
         from benchmark.agent.models import AgentTrace as AT
@@ -484,7 +487,8 @@ class TestExtractAgentMetrics:
         assert "prompt_tokens" in result.metrics
         assert result.metrics["prompt_tokens"] == 100
         assert "total_tokens" in result.metrics
-        assert "estimated_cost" in result.metrics
+        assert "estimated_cost" not in result.metrics
+        assert result.metrics["provider_cost_available"] is False
 
     def test_no_token_metrics_when_absent(self):
         trace = _trace(_llm(0))

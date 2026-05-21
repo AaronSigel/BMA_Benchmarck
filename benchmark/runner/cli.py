@@ -3,6 +3,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from benchmark.env import load_project_dotenv
 from benchmark.metrics.aggregate import aggregate_run_results
 from benchmark.runner.batch_runner import BatchRunner
 from benchmark.runner.config_loader import load_experiment_config, load_run_config
@@ -13,6 +14,7 @@ from benchmark.runner.paths import RunArtifactLayout
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_project_dotenv()
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -73,6 +75,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Build Markdown and HTML reports after the matrix batch run (implies --analyze).",
     )
+    matrix_parser.add_argument(
+        "--fail-fast-profile-preflight",
+        action="store_true",
+        help="Stop before running if any selected MCP profile fails preflight.",
+    )
+    matrix_parser.add_argument("--max-estimated-cost", type=float)
+    matrix_parser.add_argument("--max-runtime-minutes", type=float)
 
     return parser
 
@@ -162,16 +171,25 @@ def _experiment(args: argparse.Namespace) -> int:
 
 def _matrix(args: argparse.Namespace) -> int:
     from benchmark.experiments.e2e_runner import E2EBenchmarkRunner
+    from benchmark.experiments.matrix import load_matrix
 
     config_path: Path = args.config
     try:
         runner = E2EBenchmarkRunner()
-        if args.report:
-            report_path = runner.run_and_report(config_path)
+        matrix = load_matrix(config_path)
+        report_ready_default = bool(matrix.metadata.get("report_ready_mvp"))
+        if args.report or report_ready_default:
+            report_path = runner.run_and_report(
+                config_path,
+                fail_fast_profile_preflight=args.fail_fast_profile_preflight,
+            )
             print(f"report: {report_path}")
             return 0
         if args.analyze:
-            analysis = runner.run_and_analyze(config_path)
+            analysis = runner.run_and_analyze(
+                config_path,
+                fail_fast_profile_preflight=args.fail_fast_profile_preflight,
+            )
             print(
                 "\n".join(
                     [
@@ -184,8 +202,11 @@ def _matrix(args: argparse.Namespace) -> int:
                 )
             )
             return 0
-        result = runner.run(config_path)
-    except (RuntimeError, OSError, ValidationError) as error:
+        result = runner.run(
+            config_path,
+            fail_fast_profile_preflight=args.fail_fast_profile_preflight,
+        )
+    except (RuntimeError, OSError, ValueError, ValidationError) as error:
         print(f"ERROR: {error}")
         return 1
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from benchmark.agent.models import AgentStep, AgentStepType, AgentTrace, AgentStrategy
+from benchmark.agent.models import AgentStep, AgentStepType, AgentStrategyName, AgentTrace
 from benchmark.analysis.error_taxonomy import (
     aggregate_errors,
     classify_trace_error,
@@ -41,7 +41,7 @@ def _step_with_error(error: str, index: int = 0,
 def _trace(*steps: AgentStep) -> AgentTrace:
     return AgentTrace(
         run_id="r1", task_id="t1", agent_id="a",
-        strategy=AgentStrategy.REACT, model="mock",
+        strategy=AgentStrategyName.REACT, model="mock",
         steps=list(steps),
         started_at=_NOW, finished_at=_NOW, duration_sec=1.0,
     )

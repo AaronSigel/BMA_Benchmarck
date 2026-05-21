@@ -65,6 +65,7 @@ def test_bma_star_tools_are_benchmark_safe():
         "bma_set_material",
         "bma_create_light",
         "bma_create_camera",
+        "bma_create_camera_look_at",
         "bma_export_scene",
     ]
     for name in bma_tools:
@@ -95,6 +96,9 @@ def test_bma_light_and_camera_contract_support_checked_fields() -> None:
     assert "rotation" in light_params
     assert "rotation" in camera_params
     assert "lens" in camera_params
+
+    look_at_params = {p.name for p in TOOL_CONTRACT_MAP["bma_create_camera_look_at"].parameters}
+    assert {"name", "location", "target", "focal_length", "make_active"}.issubset(look_at_params)
 
 
 def test_tool_categories_populated():

@@ -143,13 +143,27 @@ def _group_results(
 
     stats: list[ComparisonGroup] = []
     for value, items in sorted(groups.items()):
-        successes = [i for i in items if i.success is True]
+        successes = [i for i in items if _effective_pass_type(i) in {"clean_pass", "soft_pass"}]
         success_rate = len(successes) / len(items) if items else None
 
         scores = [i.total_score for i in items if i.total_score is not None]
         avg_score = _avg(scores)  # type: ignore[arg-type]
         avg_tool_calls = _avg([float(i.tool_call_count) for i in items])
         avg_duration = _avg([i.duration_sec for i in items if i.duration_sec is not None])  # type: ignore[arg-type]
+        costs = [
+            float(i.metrics["provider_reported_cost_usd"])
+            for i in items
+            if isinstance(i.metrics.get("provider_reported_cost_usd"), (int, float))
+        ]
+        validation_failures = sum(
+            1
+            for i in items
+            if i.validation_status == "failed"
+            or (
+                isinstance(i.metrics.get("failed_validator_count"), int)
+                and int(i.metrics["failed_validator_count"]) > 0
+            )
+        )
 
         stats.append(
             ComparisonGroup(
@@ -160,6 +174,8 @@ def _group_results(
                 avg_score=avg_score,
                 avg_tool_calls=avg_tool_calls,
                 avg_duration_sec=avg_duration,
+                avg_cost=_avg(costs),
+                validation_failures=validation_failures,
             )
         )
 
@@ -238,14 +254,14 @@ def compare_models(results: list[RunAnalysisResult]) -> ComparisonReport:
 
 def _build_summary(results: list[RunAnalysisResult]) -> ExperimentSummary:
     total = len(results)
-    successful = [r for r in results if r.success is True]
-    failed = [r for r in results if r.success is False]
-    errored = [r for r in results if r.success is None]
+    successful = [r for r in results if _effective_pass_type(r) in {"clean_pass", "soft_pass"}]
+    failed = [r for r in results if _effective_pass_type(r) in {"failed_validation", "runtime_error"}]
 
     active_runs = [r for r in results if r.success is not None]
     scored_runs = [r for r in active_runs if r.total_score is not None]
 
     avg_score = _avg([r.total_score for r in scored_runs])  # type: ignore[misc]
+    passed_scores = [r.total_score for r in results if r.run_status == "passed" and r.total_score is not None]
     avg_tool_calls = _avg([float(r.tool_call_count) for r in active_runs]) if active_runs else None
     avg_duration = _avg([r.duration_sec for r in active_runs if r.duration_sec is not None]) if active_runs else None
     avg_llm = _avg([float(r.llm_call_count) for r in active_runs]) if active_runs else None
@@ -265,12 +281,58 @@ def _build_summary(results: list[RunAnalysisResult]) -> ExperimentSummary:
     all_scored = [(r.run_id, r.total_score) for r in results if r.total_score is not None]
     worst_run: str | None = min(all_scored, key=lambda x: x[1])[0] if all_scored else (failed[0].run_id if failed else None)
 
+    clean_pass = sum(1 for r in results if _effective_pass_type(r) == "clean_pass")
+    soft_pass = sum(1 for r in results if _effective_pass_type(r) == "soft_pass")
+    failed_ct = sum(1 for r in results if _effective_pass_type(r) == "failed_validation")
+    error_ct = sum(1 for r in results if _effective_pass_type(r) == "runtime_error")
+    agent_completed = sum(1 for r in results if r.agent_status == "completed")
+    agent_completed_after = sum(1 for r in results if r.agent_status == "completed_after_scene_passed")
+    agent_incomplete = sum(
+        1 for r in results
+        if r.agent_status in {"max_steps_reached", "invalid_response", "repeated_action_detected",
+                              "duplicate_object_detected", "no_progress_detected"}
+    )
+    agent_err = sum(
+        1 for r in results
+        if r.agent_status in {"tool_error", "runtime_error", None}
+        and r.run_status == "error"
+    )
+
     return ExperimentSummary(
         total_runs=total,
         successful_runs=len(successful),
-        failed_runs=len(failed),
-        error_runs=len(errored),
+        failed_runs=failed_ct,
+        error_runs=error_ct,
+        clean_pass_count=clean_pass,
+        soft_pass_count=soft_pass,
+        failed_validation_count=failed_ct,
+        runtime_error_count=error_ct,
+        failure_rate=((failed_ct + error_ct) / total if total else None),
+        failed_count=failed_ct,
+        error_count=error_ct,
+        clean_pass_rate=(clean_pass / total if total else None),
+        soft_pass_rate=(soft_pass / total if total else None),
+        strict_success_rate=(clean_pass / total if total else None),
+        reported_success_rate=((clean_pass + soft_pass) / total if total else None),
+        agent_completed_count=agent_completed,
+        agent_completed_after_scene_passed_count=agent_completed_after,
+        agent_incomplete_count=agent_incomplete,
+        agent_error_count=agent_err,
         average_scene_score=avg_score,
+        average_score_completed=avg_score,
+        average_score_strict=(
+            sum((r.total_score or 0.0) for r in results) / total if total else None
+        ),
+        average_score_passed_only=_avg(passed_scores),  # type: ignore[arg-type]
+        scene_success_rate=(
+            sum(1 for r in results if (r.scene_status or r.validation_status) == "passed") / total
+            if total else None
+        ),
+        run_success_rate=(sum(1 for r in results if r.run_status == "passed" or r.success is True) / total if total else None),
+        agent_completion_rate=(
+            sum(1 for r in results if r.agent_status in {"completed", "completed_after_scene_passed"}) / total
+            if total else None
+        ),
         average_tool_call_count=avg_tool_calls,
         average_duration_sec=avg_duration,
         average_llm_calls=avg_llm,
@@ -278,6 +340,20 @@ def _build_summary(results: list[RunAnalysisResult]) -> ExperimentSummary:
         best_run=best_run,
         worst_run=worst_run,
     )
+
+
+def _effective_pass_type(result: RunAnalysisResult) -> str:
+    if result.pass_type in {"clean_pass", "soft_pass", "failed_validation", "runtime_error"}:
+        return str(result.pass_type)
+    if result.pass_type == "failed":
+        return "failed_validation"
+    if result.pass_type == "error":
+        return "runtime_error"
+    if result.success is True:
+        return "clean_pass"
+    if result.success is False:
+        return "failed_validation"
+    return "runtime_error"
 
 
 def analyze_run_results(
@@ -450,8 +526,48 @@ def analyze_experiment(experiment_dir: Path | str) -> ExperimentAnalysisResult:
                 metadata.update(raw_metadata)
             metadata["manifest_path"] = str(manifest_path)
             metadata["manifest_generated_at"] = manifest.get("generated_at")
+            metadata["models_used"] = manifest.get("models")
+            metadata["strategies_used"] = manifest.get("agent_ids")
+            metadata["mcp_profiles_used"] = manifest.get("mcp_profiles")
+            metadata["tasks_used"] = manifest.get("task_ids")
+            metadata["_manifest_agent_ids"] = manifest.get("agent_ids")
+            metadata["repetitions"] = manifest.get("repetitions")
             metadata["tool_contract_hash"] = raw_metadata.get("runtime", {}).get("tool_contract_hash") if isinstance(raw_metadata, dict) else None
         except (OSError, json.JSONDecodeError) as exc:
             metadata["manifest_error"] = str(exc)
+    # Derive strategies and profiles from actual run results (more reliable than manifest agent IDs)
+    unique_strategies = sorted(set(
+        r.strategy for r in results if r.strategy and r.strategy not in {"unknown", ""}
+    ))
+    if unique_strategies:
+        metadata["strategies_used"] = unique_strategies
+    unique_profiles = sorted(set(
+        r.mcp_profile for r in results if r.mcp_profile and r.mcp_profile not in {"unknown", ""}
+    ))
+    if unique_profiles:
+        metadata["mcp_profiles_used"] = unique_profiles
+    unique_models = sorted(set(
+        r.model for r in results if r.model and r.model not in {"unknown", ""}
+    ))
+    if unique_models:
+        metadata["models_used"] = unique_models
+    unique_tasks = sorted(set(
+        r.task_id for r in results if r.task_id and r.task_id not in {"unknown", ""}
+    ))
+    if unique_tasks:
+        metadata["tasks_used"] = unique_tasks
+
+    metadata["executed_runs"] = len(results)
+    metadata["artifact_count"] = sum(len(r.artifacts) for r in results)
+    provider_costs = [
+        float(r.metrics["provider_reported_cost_usd"])
+        for r in results
+        if isinstance(r.metrics.get("provider_reported_cost_usd"), (int, float))
+    ]
+    metadata["total_provider_reported_cost_usd"] = sum(provider_costs) if provider_costs else None
+    metadata["runs_with_provider_cost"] = sum(1 for r in results if r.metrics.get("provider_cost_available") is True)
+    metadata["runs_without_provider_cost"] = sum(1 for r in results if r.metrics.get("provider_cost_available") is not True)
+    planned = metadata.get("planned_runs") or metadata.get("expected_runs")
+    metadata["missing_artifacts"] = max(0, int(planned) - len(results)) if isinstance(planned, int) else 0
 
     return analyze_run_results(results, experiment_id=root.name, metadata=metadata)

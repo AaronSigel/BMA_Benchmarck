@@ -105,11 +105,11 @@ def test_collect_snapshot_returns_scene_snapshot_compatible_dict(monkeypatch) ->
     validated = SceneSnapshot.model_validate(snapshot)
 
     assert validated.scene_name == "Fixture"
-    assert [obj.name for obj in validated.objects] == [
-        "FixtureCube",
-        "FixtureAreaLight",
-        "FixtureCamera",
-    ]
+    assert [obj.name for obj in validated.objects] == ["FixtureCube"]
+    assert validated.mesh_object_count == 1
+    assert validated.light_count == 1
+    assert validated.camera_count == 1
+    assert validated.all_object_count == 3
     assert validated.objects[0].primitive_hint == "cube"
     assert validated.objects[0].vertex_count == 8
     assert validated.objects[0].polygon_count == 6

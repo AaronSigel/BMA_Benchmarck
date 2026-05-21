@@ -34,7 +34,7 @@ class ObjectValidator:
         type_match_count = 0
         primitive_expected_count = 0
         primitive_match_count = 0
-        available_objects = list(snapshot.objects)
+        available_objects = [obj for obj in snapshot.objects if obj.type.upper() == "MESH"]
 
         for expected_index, expected in enumerate(expected_objects):
             actual = self.matcher.match_expected_object(expected, available_objects)

@@ -185,6 +185,8 @@ def _parse_response(data: dict[str, Any]) -> LlmResponse:
                 (usage_data.get("input_tokens") or 0)
                 + (usage_data.get("output_tokens") or 0)
             ) or None,
+            provider_name="anthropic",
+            metadata={"raw_usage": usage_data},
         )
 
     return LlmResponse(

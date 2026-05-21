@@ -116,6 +116,12 @@ class AgentConfig(BaseModel):
     max_steps: int = Field(default=20, gt=0)
     max_retries: int = Field(default=1, ge=0)
     step_timeout_sec: int = Field(default=120, gt=0)
+    stop_after_scene_passed: bool = False
+    detect_repeated_actions: bool = True
+    detect_duplicate_objects: bool = True
+    detect_no_progress: bool = True
+    no_progress_limit: int = Field(default=2, ge=1)
+    repeated_action_mode: str = "debug"
     allow_python_tools: bool = False
     allow_inspection_tools: bool = True
     system_prompt_template: str | None = None
@@ -250,11 +256,6 @@ class AgentRunResult(BaseModel):
         if not value.strip():
             raise ValueError("value must not be empty")
         return value
-
-
-# Backward-compatible names from the initial stage-6.1 scaffold.
-AgentStrategy = AgentStrategyName
-AgentStatus = AgentRunStatus
 
 
 class AgentBackendType(str, Enum):

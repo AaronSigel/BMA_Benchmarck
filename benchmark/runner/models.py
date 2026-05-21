@@ -23,6 +23,25 @@ class RunStatus(str, Enum):
     ERROR = "error"
 
 
+class AgentStatus(str, Enum):
+    COMPLETED = "completed"
+    COMPLETED_AFTER_SCENE_PASSED = "completed_after_scene_passed"
+    MAX_STEPS_REACHED = "max_steps_reached"
+    INVALID_RESPONSE = "invalid_response"
+    TOOL_ERROR = "tool_error"
+    RUNTIME_ERROR = "runtime_error"
+    REPEATED_ACTION_DETECTED = "repeated_action_detected"
+    DUPLICATE_OBJECT_DETECTED = "duplicate_object_detected"
+    NO_PROGRESS_DETECTED = "no_progress_detected"
+
+
+class SceneStatus(str, Enum):
+    PASSED = "passed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    NOT_AVAILABLE = "not_available"
+
+
 class RunConfig(BaseModel):
     run_id: str
     task_id: str
@@ -64,6 +83,9 @@ class RunResult(BaseModel):
     run_id: str
     task_id: str
     status: RunStatus
+    run_status: RunStatus | None = None
+    agent_status: AgentStatus | None = None
+    scene_status: SceneStatus | None = None
     execution_mode: ExecutionMode
     validation_result_path: Path | None
     scene_snapshot_path: Path | None

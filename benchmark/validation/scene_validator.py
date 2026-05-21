@@ -18,6 +18,7 @@ from benchmark.validation.scoring import weighted_average
 from benchmark.validation.validators import (
     CameraValidator,
     ExportValidator,
+    GlbImportBackValidator,
     LightValidator,
     MaterialValidator,
     ObjectValidator,
@@ -32,6 +33,7 @@ VALIDATOR_METRIC_ALIASES: dict[str, set[str]] = {
     "light_validator": {"light_existence", "lighting_correctness", "parameter_correctness"},
     "camera_validator": {"camera_existence", "camera_correctness", "target_visibility"},
     "export_validator": {"export_validity"},
+    "glb_import_back_validator": {"export_validity"},
 }
 
 
@@ -44,6 +46,7 @@ class SceneValidator:
             LightValidator(),
             CameraValidator(),
             ExportValidator(),
+            GlbImportBackValidator(),
         ]
 
     def validate(
@@ -72,6 +75,7 @@ class SceneValidator:
         ]
         contamination_summary, contamination_issues = self._scene_contamination_summary(task, snapshot)
         issues.extend(contamination_issues)
+        issue_counts = Counter(issue.code for issue in issues)
         has_required_error = any(
             self._has_required_error(result, task.success_criteria)
             for result in active_results
@@ -80,6 +84,7 @@ class SceneValidator:
 
         summary = self._summary(validator_results, active_results, task.success_criteria)
         summary["issues_total"] = int(summary["issues_total"]) + len(contamination_issues)
+        summary["issue_counts"] = dict(sorted(issue_counts.items()))
         summary.update(contamination_summary)
 
         return SceneValidationResult(
@@ -164,6 +169,9 @@ class SceneValidator:
             "validators_failed": sum(
                 1 for result in validator_results if result.status is ValidationStatus.FAILED
             ),
+            "validation_coverage": (
+                len(active_results) / len(validator_results) if validator_results else 0.0
+            ),
             "issues_total": sum(len(result.issues) for result in validator_results),
             "error_count": sum(
                 1
@@ -182,10 +190,17 @@ class SceneValidator:
         task: BenchmarkTask,
         snapshot: SceneSnapshot,
     ) -> tuple[dict[str, object], list[ValidationIssue]]:
-        actual_object_count = len(snapshot.objects)
+        mesh_objects = [obj for obj in snapshot.objects if obj.type.upper() == "MESH"]
+        actual_object_count = len(mesh_objects)
         expected_object_count = len(task.expected_scene.objects)
         extra_object_count = max(0, actual_object_count - expected_object_count)
-        duplicate_name_count = _duplicate_base_name_count([obj.name for obj in snapshot.objects])
+        actual_light_count = len(snapshot.lights)
+        expected_light_count = len(task.expected_scene.lights)
+        extra_light_count = max(0, actual_light_count - expected_light_count)
+        actual_camera_count = len(snapshot.cameras)
+        expected_camera_count = len(task.expected_scene.cameras)
+        extra_camera_count = max(0, actual_camera_count - expected_camera_count)
+        duplicate_name_count = _duplicate_base_name_count([obj.name for obj in mesh_objects])
 
         issues: list[ValidationIssue] = []
         if extra_object_count > 0:
@@ -203,12 +218,64 @@ class SceneValidator:
                     actual_value=actual_object_count,
                 )
             )
+        if extra_light_count > 0:
+            issues.append(
+                ValidationIssue(
+                    code="scene_contains_unexpected_lights",
+                    message=(
+                        "Scene contains more lights than expected; this may indicate "
+                        "cross-run contamination."
+                    ),
+                    severity=ValidationSeverity.WARNING,
+                    expected_path="expected_scene.lights",
+                    actual_path="snapshot.lights",
+                    expected_value=expected_light_count,
+                    actual_value=actual_light_count,
+                )
+            )
+        if extra_camera_count > 0:
+            issues.append(
+                ValidationIssue(
+                    code="scene_contains_unexpected_cameras",
+                    message=(
+                        "Scene contains more cameras than expected; this may indicate "
+                        "cross-run contamination."
+                    ),
+                    severity=ValidationSeverity.WARNING,
+                    expected_path="expected_scene.cameras",
+                    actual_path="snapshot.cameras",
+                    expected_value=expected_camera_count,
+                    actual_value=actual_camera_count,
+                )
+            )
+        if duplicate_name_count > 0:
+            issues.append(
+                ValidationIssue(
+                    code="duplicate_object_detected",
+                    message="Scene contains duplicate Blender base object names.",
+                    severity=ValidationSeverity.ERROR,
+                    expected_path="expected_scene.objects",
+                    actual_path="snapshot.objects",
+                    expected_value=0,
+                    actual_value=duplicate_name_count,
+                )
+            )
 
         return (
             {
                 "actual_object_count": actual_object_count,
                 "expected_object_count": expected_object_count,
                 "extra_object_count": extra_object_count,
+                "mesh_object_count": snapshot.mesh_object_count if snapshot.mesh_object_count is not None else actual_object_count,
+                "light_count": snapshot.light_count if snapshot.light_count is not None else actual_light_count,
+                "camera_count": snapshot.camera_count if snapshot.camera_count is not None else actual_camera_count,
+                "all_object_count": snapshot.all_object_count
+                if snapshot.all_object_count is not None
+                else actual_object_count + actual_light_count + actual_camera_count,
+                "expected_light_count": expected_light_count,
+                "extra_light_count": extra_light_count,
+                "expected_camera_count": expected_camera_count,
+                "extra_camera_count": extra_camera_count,
                 "duplicate_name_count": duplicate_name_count,
             },
             issues,

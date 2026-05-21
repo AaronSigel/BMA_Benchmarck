@@ -6,7 +6,9 @@ difficulty: easy
 prompt: >
   Create a cube named Center_Cube at location (0, 0, 1) with dimensions
   (2, 2, 2). Place a camera named Front_Camera at location (0, -6, 2) with
-  rotation (75, 0, 0) degrees and focal length 35.
+  focal length 35 and make it look at target point (0, 0, 1). Make this
+  camera active. If using a manual camera rotation instead of look_at, the
+  approximate rotation is (80.5, 0, 0) degrees.
 tags:
   - camera
   - front-view
@@ -14,6 +16,7 @@ tags:
 allowed_tools:
   - create_object
   - create_camera
+  - create_camera_look_at
   - set_camera
   - set_transform
   - inspect_scene
@@ -31,7 +34,10 @@ expected_scene:
     - name: Front_Camera
       location: { x: 0.0, y: -6.0, z: 2.0 }
       rotation: { x: 75.0, y: 0.0, z: 0.0 }
+      target: { x: 0.0, y: 0.0, z: 1.0 }
       focal_length: 35.0
+      require_active: true
+      direction_tolerance_deg: 5.0
       tolerance: 0.1
   exports: []
 success_criteria:
@@ -51,4 +57,3 @@ metadata:
   author: benchmark
   version: "1.0"
   description: Baseline camera placement task for a front view of one object.
-

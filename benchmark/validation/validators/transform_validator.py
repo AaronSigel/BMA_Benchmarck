@@ -31,7 +31,7 @@ class TransformValidator:
 
     def validate(self, task: BenchmarkTask, snapshot: SceneSnapshot) -> ValidatorResult:
         expected_objects = task.expected_scene.objects
-        available_objects = list(snapshot.objects)
+        available_objects = [obj for obj in snapshot.objects if obj.type.upper() == "MESH"]
         issues: list[ValidationIssue] = []
         metric_scores: list[MetricScore] = []
 

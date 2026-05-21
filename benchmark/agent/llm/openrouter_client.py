@@ -66,7 +66,7 @@ class OpenRouterClient:
                 raw_response=response.text,
             ) from exc
 
-        return _parse_response(data)
+        return _parse_response(data, provider_name="openrouter")
 
     def _resolve_api_key(self) -> str:
         env_var = self.config.api_key_env or "OPENROUTER_API_KEY"
@@ -89,7 +89,7 @@ def _message_to_dict(message: LlmMessage) -> dict[str, Any]:
     return result
 
 
-def _parse_response(data: dict[str, Any]) -> LlmResponse:
+def _parse_response(data: dict[str, Any], provider_name: str | None = None) -> LlmResponse:
     choices = data.get("choices", [])
     if not choices:
         raise LlmResponseParseError("No choices in OpenRouter response", raw_response=data)
@@ -121,6 +121,9 @@ def _parse_response(data: dict[str, Any]) -> LlmResponse:
             prompt_tokens=usage_data.get("prompt_tokens"),
             completion_tokens=usage_data.get("completion_tokens"),
             total_tokens=usage_data.get("total_tokens"),
+            cost=usage_data.get("cost"),
+            provider_name=provider_name,
+            metadata={"raw_usage": usage_data},
         )
 
     return LlmResponse(

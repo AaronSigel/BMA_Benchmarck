@@ -76,6 +76,7 @@ class AgentRuntime:
                         }
                     }
                 )
+            _inject_scene_validator(strategy, self.config, self.tool_executor, task_data)
             trace = strategy.run(
                 task_data,
                 self.config,
@@ -145,7 +146,7 @@ class AgentRuntime:
             finished_at=finished_at,
             duration_sec=trace.duration_sec,
             summary=summarize_trace(trace),
-            metadata={"strategy": self.config.strategy.value},
+            metadata={"strategy": self.config.strategy.value, "model": self.config.llm.model if self.config.llm else None},
         )
 
     def get_strategy(self) -> AgentStrategy:
@@ -214,10 +215,6 @@ def create_remote_agent_client(config: Any) -> RemoteAgentClient:
     return _create_remote_agent_client(config)
 
 
-def create_strategy(strategy_name: Any) -> AgentStrategy:
-    return create_agent_strategy(strategy_name)
-
-
 def run_task(
     task: Any,
     agent_config: AgentConfig,
@@ -259,3 +256,43 @@ def _scene_snapshot_path_from_trace(trace: AgentTrace) -> Path | None:
     if value is None:
         return None
     return Path(str(value))
+
+
+def _inject_scene_validator(
+    strategy: Any,
+    config: AgentConfig,
+    tool_executor: Any,
+    task_data: dict[str, Any],
+) -> None:
+    """Inject a scene validation callback into ReactStrategy when stop_after_scene_passed is enabled."""
+    if not config.stop_after_scene_passed:
+        return
+    from benchmark.agent.strategies.react import ReactStrategy
+    if not isinstance(strategy, ReactStrategy):
+        return
+    adapter = getattr(tool_executor, "adapter", None)
+    if adapter is None or not hasattr(adapter, "collect_scene_snapshot"):
+        return
+
+    import logging as _log_mod
+    _log = _log_mod.getLogger(__name__)
+
+    def _scene_validator_fn(snap_path: Path) -> tuple[bool, float | None]:
+        try:
+            adapter.collect_scene_snapshot(snap_path)
+            if not snap_path.exists():
+                return False, None
+            from benchmark.blender.models import SceneSnapshot
+            from benchmark.tasks.models import BenchmarkTask
+            from benchmark.validation.scene_validator import SceneValidator
+            from benchmark.validation.models import ValidationStatus
+            snapshot = SceneSnapshot.model_validate_json(snap_path.read_text())
+            task_obj = BenchmarkTask.model_validate(task_data)
+            result = SceneValidator().validate(task_obj, snapshot)
+            scene_ok = result.overall_status in {ValidationStatus.PASSED, ValidationStatus.WARNING}
+            return scene_ok, result.total_score
+        except Exception as exc:
+            _log.debug("stop_after_scene_passed: scene check error: %s", exc)
+            return False, None
+
+    strategy.scene_validator_fn = _scene_validator_fn

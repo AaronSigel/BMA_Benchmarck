@@ -28,9 +28,22 @@ class RunArtifactLayout:
     def metrics_json(self) -> Path:
         return self.run_dir() / "metrics.json"
 
+    def artifact_manifest_json(self) -> Path:
+        return self.run_dir() / "artifact_manifest.json"
+
+    def exports_dir(self) -> Path:
+        return self.run_dir() / "exports"
+
+    def result_glb(self) -> Path:
+        return self.exports_dir() / "result.glb"
+
+    def result_blend(self) -> Path:
+        return self.exports_dir() / "result.blend"
+
     def logs_dir(self) -> Path:
         return self.run_dir() / "logs"
 
     def ensure(self) -> None:
         self.run_dir().mkdir(parents=True, exist_ok=True)
         self.logs_dir().mkdir(parents=True, exist_ok=True)
+        self.exports_dir().mkdir(parents=True, exist_ok=True)

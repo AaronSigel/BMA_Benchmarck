@@ -295,8 +295,9 @@ class _ExportPathFixingExecutor:
     ):
         if tool_name == "bma_export_scene" and isinstance(arguments, dict):
             fp = arguments.get("filepath", "")
-            if fp and not Path(fp).is_absolute():
-                arguments = {**arguments, "filepath": str(self._artifacts_dir / fp)}
+            export_path = _run_export_path(self._artifacts_dir, fp) if fp else None
+            if export_path is not None:
+                arguments = {**arguments, "filepath": str(export_path)}
                 log.info("[export_fix] rewritten filepath → %s", arguments["filepath"])
             export_path = Path(arguments.get("filepath", "")) if arguments.get("filepath") else None
             if export_path is not None:
@@ -316,6 +317,18 @@ def _wrap_export_paths(tool_executor: ToolExecutor, artifacts_dir: Path) -> Tool
     if not isinstance(tool_executor, McpToolExecutor):
         return tool_executor
     return _ExportPathFixingExecutor(tool_executor, artifacts_dir)  # type: ignore[return-value]
+
+
+def _run_export_path(artifacts_dir: Path, requested: object) -> Path | None:
+    requested_path = Path(str(requested))
+    suffix = requested_path.suffix.lower()
+    if suffix == ".glb":
+        return artifacts_dir / "exports" / "result.glb"
+    if suffix == ".blend":
+        return artifacts_dir / "exports" / "result.blend"
+    if requested_path.is_absolute():
+        return requested_path
+    return artifacts_dir / "exports" / requested_path.name
 
 
 def _mcp_executor(tool_executor: ToolExecutor) -> McpToolExecutor | None:

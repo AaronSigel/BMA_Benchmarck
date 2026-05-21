@@ -59,6 +59,7 @@ def _collect_artifacts(bundle: RunArtifactBundle) -> list[str]:
         "scene_snapshot.json",
         "metrics.json",
         "summary.json",
+        "artifact_manifest.json",
     )
     paths: list[str] = []
     for name in known_files:
@@ -287,6 +288,29 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
         for key, val in (run_result.summary or {}).items():
             if isinstance(val, (float, str, int, bool)):
                 metrics.setdefault(f"run_summary.{key}", val)
+        structured_error = (run_result.summary or {}).get("structured_error")
+        if isinstance(structured_error, dict):
+            error_type = structured_error.get("error_type")
+            source = structured_error.get("source")
+            if isinstance(error_type, str) and error_type:
+                metrics["structured_error_type"] = error_type
+                metrics[f"error.{error_type}"] = int(metrics.get(f"error.{error_type}", 0) or 0) + 1
+            if isinstance(source, str) and source:
+                metrics["structured_error_source"] = source
+            failure_stage = structured_error.get("failure_stage")
+            if isinstance(failure_stage, str) and failure_stage:
+                metrics["failure_stage"] = failure_stage
+    if trace is not None and isinstance(trace.error, dict):
+        error_type = trace.error.get("error_type")
+        source = trace.error.get("source")
+        failure_stage = trace.error.get("failure_stage")
+        if isinstance(error_type, str) and error_type and "structured_error_type" not in metrics:
+            metrics.setdefault("structured_error_type", error_type)
+            metrics[f"error.{error_type}"] = int(metrics.get(f"error.{error_type}", 0) or 0) + 1
+        if isinstance(source, str) and source:
+            metrics.setdefault("structured_error_source", source)
+        if isinstance(failure_stage, str) and failure_stage:
+            metrics.setdefault("failure_stage", failure_stage)
 
     # -----------------------------------------------------------------------
     # Artifact paths

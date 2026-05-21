@@ -130,6 +130,15 @@ class GeneratedExperimentManifest(BaseModel):
     repetitions: int = Field(gt=0)
     env_requirements: list[EnvironmentRequirement] = Field(default_factory=list)
     config_hash: str | None = None
+    benchmark_protocol_version: str = "0.1.0"
+    task_schema_version: str = "0.1.0"
+    validator_version: str = "0.1.0"
+    tool_contract_version: str = "0.1.0"
+    report_schema_version: str = "0.1.0"
+    matrix_config_hash: str | None = None
+    task_set_hash: str | None = None
+    tool_contract_hash: str | None = None
+    report_config_hash: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("matrix_id")

@@ -32,6 +32,7 @@ def write_report_text_ru(analysis: ExperimentAnalysisResult, path: Path) -> None
     top_validation = _top_issue_text(analysis, "validation")
     top_agent = _top_issue_text(analysis, "agent")
     top_tool = _top_issue_text(analysis, "tool")
+    error_groups = _top_error_type_text(analysis)
     react = [r for r in runs if r.strategy == "react"]
     react_counts = _status_counts(react)
     react_cost = _cost_total(react)
@@ -60,7 +61,7 @@ def write_report_text_ru(analysis: ExperimentAnalysisResult, path: Path) -> None
 
 ## 6. Анализ ошибок
 
-Основные validation issues: {top_validation}. Основные agent issues: {top_agent}. Основные tool issues: {top_tool}. Ошибки включены в отчётный результат и классифицированы через `pass_type`, поэтому они не требуют ручной переработки raw artifacts.
+Основные validation issues: {top_validation}. Основные agent issues: {top_agent}. Основные tool issues: {top_tool}. Runtime errors по типам: {error_groups}. Ошибки включены в отчётный результат и классифицированы через `pass_type` и `error_type`, поэтому они не требуют ручной переработки raw artifacts.
 
 ## 7. Ограничения прогона
 
@@ -165,8 +166,72 @@ def create_report_bundle(output_root: Path, analysis: ExperimentAnalysisResult, 
         shutil.copy2(manifest, bundle / "manifest.json")
     else:
         (bundle / "manifest.json").write_text(json.dumps({"experiment_id": analysis.experiment_id}, indent=2), encoding="utf-8")
+    _write_run_manifest_index(output_root, bundle)
+    _augment_bundle_manifest(bundle)
     write_readme_report(bundle / "README_REPORT.md")
     return bundle
+
+
+def _write_run_manifest_index(output_root: Path, bundle: Path) -> None:
+    runs = []
+    complete = 0
+    missing_total = 0
+    for path in sorted(output_root.glob("*/artifact_manifest.json")):
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            missing_total += 1
+            runs.append({
+                "run_id": path.parent.name,
+                "pass_type": "runtime_error",
+                "artifact_manifest_path": str(path.relative_to(output_root)),
+                "missing_required_artifacts": ["artifact_manifest_unreadable"],
+            })
+            continue
+        missing = _missing_required_artifacts(manifest, path.parent)
+        if not missing:
+            complete += 1
+        missing_total += len(missing)
+        runs.append({
+            "run_id": str(manifest.get("run_id") or path.parent.name),
+            "pass_type": str(manifest.get("status") or "runtime_error"),
+            "artifact_manifest_path": str(path.relative_to(output_root)),
+            "missing_required_artifacts": missing,
+        })
+    payload = {
+        "total_runs": len(runs),
+        "complete_manifests": complete,
+        "missing_required_artifacts": missing_total,
+        "runs": runs,
+    }
+    (bundle / "run_artifact_manifests.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _missing_required_artifacts(manifest: dict, run_dir: Path) -> list[str]:
+    missing: list[str] = []
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return ["artifact_manifest_invalid"]
+    for name, entry in artifacts.items():
+        if name == "exports" or not isinstance(entry, dict):
+            continue
+        if entry.get("required") is True and not (run_dir / str(entry.get("path", ""))).is_file():
+            missing.append(str(entry.get("path") or name))
+    return missing
+
+
+def _augment_bundle_manifest(bundle: Path) -> None:
+    manifest_path = bundle / "manifest.json"
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        data = {}
+    data["report_bundle_files"] = sorted(
+        str(path.relative_to(bundle))
+        for path in bundle.rglob("*")
+        if path.is_file() and path.name != "manifest.json"
+    )
+    manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _success_series(runs, key_fn) -> tuple[list[str], list[float]]:
@@ -232,6 +297,15 @@ def _weak_categories(analysis: ExperimentAnalysisResult) -> str:
 def _top_issue_text(analysis: ExperimentAnalysisResult, kind: str) -> str:
     items = _issue_counts(analysis.runs, kind).most_common(5)
     return ", ".join(f"{code} ({count})" for code, count in items) if items else "не зафиксированы"
+
+
+def _top_error_type_text(analysis: ExperimentAnalysisResult) -> str:
+    counter: Counter[str] = Counter()
+    for run in analysis.runs:
+        error_type = run.metrics.get("structured_error_type")
+        if isinstance(error_type, str) and error_type:
+            counter[error_type] += 1
+    return ", ".join(f"{code} ({count})" for code, count in counter.most_common(5)) if counter else "не зафиксированы"
 
 
 def _num(value: object, digits: int = 3) -> str:

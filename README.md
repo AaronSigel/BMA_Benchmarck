@@ -149,6 +149,78 @@ python -m bma_benchmark run-matrix \
 
 Матрица `diagnostic_repeat_gemini_v5` рассчитана на 270 запусков: 18 задач, 3 стратегии, 5 MCP-профилей, 1 модель и 1 повтор. Для неё включён `report_ready_mvp`, поэтому отчёты и `report_bundle/` создаются автоматически.
 
+### Стабилизированный workflow
+
+Перед большим запуском можно сохранить отдельный preflight-артефакт:
+
+```bash
+python -m bma_benchmark preflight \
+  --config configs/matrices/diagnostic_repeat_gemini_v5.yaml
+```
+
+Для возобновления прерванной матрицы используйте `--resume`. Уже завершённые run-директории с валидным `artifact_manifest.json` будут пропущены, неполные или повреждённые — перезапущены.
+
+```bash
+python -m bma_benchmark run-matrix \
+  --config configs/matrices/diagnostic_repeat_gemini_v5.yaml \
+  --resume
+```
+
+Анализ и отчёт можно пересобрать из raw artifacts без повторного запуска LLM:
+
+```bash
+python -m bma_benchmark analyze --input artifacts/experiments/<run>
+python -m bma_benchmark build-report --input artifacts/experiments/<run>
+python -m bma_benchmark validate-report-bundle artifacts/experiments/<run>/report_bundle
+```
+
+`validate-report-bundle` возвращает exit code `0` только для валидного пакета. Результат проверки сохраняется в:
+
+```text
+report_bundle/bundle_validation_result.json
+report_bundle/bundle_validation_result.md
+```
+
+Дополнительные эксплуатационные команды:
+
+```bash
+python -m bma_benchmark list-strategies
+python -m bma_benchmark compare-bundles run_a/report_bundle run_b/report_bundle
+```
+
+Для локальной проверки report pipeline без OpenRouter, Blender и MCP socket есть offline-матрица:
+
+```bash
+python -m bma_benchmark run-matrix \
+  --config configs/matrices/mock_report_ready.yaml
+```
+
+Каждый run содержит обязательные `run_result.json`, `artifact_manifest.json` и `metrics.json`. Для `agent_mcp` и `remote_agent` запусков обязателен `agent_trace.json`; если сбой произошёл до agent loop, создаётся stub trace со structured error. Отсутствующие optional artifacts объясняются marker-файлами: `scene_snapshot_not_available.json`, `validation_result_not_available.json`, `exports_not_available.json`.
+
+Runtime ошибки нормализуются в единый contract:
+
+```json
+{
+  "error_type": "SnapshotUnavailable",
+  "message": "pre-run scene snapshot could not be collected",
+  "source": "blender",
+  "recoverable": true,
+  "failure_stage": "pre_run_snapshot",
+  "raw_error": "pre-run scene snapshot could not be collected"
+}
+```
+
+`summary.csv` включает `error_type`, `error_source` и `failure_stage`. `UnknownError` не используется для известных failure patterns; редкий fallback называется `UnclassifiedError`.
+
+При `--resume` дополнительно создаются:
+
+```text
+resume_report.json
+resume_report.md
+```
+
+`report_bundle/run_artifact_manifests.json` содержит агрегированную сводку по run manifests: число runs, количество complete manifests, суммарные missing required artifacts и краткую запись по каждому run. Общий `manifest.json` содержит версии протокола и hashes конфигурации, task set, tool contract и report config.
+
 ### Как читать report_bundle
 
 `summary.csv` является главным источником данных для таблиц. `experiment_analysis.json` и `summary.json` содержат машинно-читаемые агрегаты. `report.md` и `report.html` содержат таблицы, key findings и diagnostics. `report_text_ru.md` содержит готовый русский текст анализа. `README_REPORT.md` объясняет назначение файлов и интерпретацию статусов. PNG-графики находятся в `figures/`.

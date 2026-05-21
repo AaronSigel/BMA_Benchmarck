@@ -19,6 +19,7 @@ from benchmark.experiments.preflight import (
     run_contract_smoke_for_experiment,
     filter_config_by_profile_preflight,
     run_profile_preflight_for_experiment,
+    write_preflight_report,
 )
 from benchmark.experiments.readiness import check_matrix_readiness
 from benchmark.experiments.models import ExperimentMatrix
@@ -42,21 +43,21 @@ class E2EBenchmarkRunner:
     def prepare(self, matrix_path: Path | str) -> ExperimentConfig:
         return self._prepare(matrix_path).config
 
-    def run(self, matrix_path: Path | str, *, fail_fast_profile_preflight: bool = False) -> ExperimentResult:
-        prepared = self._prepare(matrix_path, fail_fast_profile_preflight=fail_fast_profile_preflight)
-        return self._run_batch(prepared.config)
+    def run(self, matrix_path: Path | str, *, fail_fast_profile_preflight: bool = False, resume: bool = False, clean_output: bool = False) -> ExperimentResult:
+        prepared = self._prepare(matrix_path, fail_fast_profile_preflight=fail_fast_profile_preflight, resume=resume, clean_output=clean_output)
+        return self._run_batch(prepared.config, resume=resume)
 
-    def run_and_analyze(self, matrix_path: Path | str, *, fail_fast_profile_preflight: bool = False) -> ExperimentAnalysisResult:
-        prepared = self._prepare(matrix_path, fail_fast_profile_preflight=fail_fast_profile_preflight)
-        self._run_batch(prepared.config)
-        return _run_analysis(prepared.matrix.output_root)
+    def run_and_analyze(self, matrix_path: Path | str, *, fail_fast_profile_preflight: bool = False, resume: bool = False, clean_output: bool = False) -> ExperimentAnalysisResult:
+        prepared = self._prepare(matrix_path, fail_fast_profile_preflight=fail_fast_profile_preflight, resume=resume, clean_output=clean_output)
+        self._run_batch(prepared.config, resume=resume)
+        return run_analysis(prepared.matrix.output_root)
 
-    def run_and_report(self, matrix_path: Path | str, *, clean_output: bool = False, fail_fast_profile_preflight: bool = False) -> Path:
-        prepared = self._prepare(matrix_path, clean_output=clean_output, run_contract_smoke=True, fail_fast_profile_preflight=fail_fast_profile_preflight)
-        self._run_batch(prepared.config)
+    def run_and_report(self, matrix_path: Path | str, *, clean_output: bool = False, fail_fast_profile_preflight: bool = False, resume: bool = False) -> Path:
+        prepared = self._prepare(matrix_path, clean_output=clean_output, run_contract_smoke=True, fail_fast_profile_preflight=fail_fast_profile_preflight, resume=resume)
+        self._run_batch(prepared.config, resume=resume)
         _refresh_manifest(prepared)
-        analysis = _run_analysis(prepared.matrix.output_root)
-        return _build_reports(analysis, prepared.matrix)
+        analysis = run_analysis(prepared.matrix.output_root)
+        return build_reports(analysis, prepared.matrix)
 
     def _prepare(
         self,
@@ -65,14 +66,17 @@ class E2EBenchmarkRunner:
         clean_output: bool = False,
         run_contract_smoke: bool = False,
         fail_fast_profile_preflight: bool = False,
+        resume: bool = False,
     ) -> PreparedExperiment:
         matrix = load_matrix(matrix_path)
-        if bool(matrix.metadata.get("timestamp_output_root")):
+        if resume:
+            matrix = _matrix_for_resume(matrix)
+        elif bool(matrix.metadata.get("timestamp_output_root")):
             stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
             matrix = matrix.model_copy(
                 update={"output_root": Path("artifacts") / f"{matrix.matrix_id}_{stamp}"}
             )
-        freshness = prepare_output_root(matrix.output_root, clean_output=clean_output)
+        freshness = prepare_output_root(matrix.output_root, clean_output=clean_output, allow_existing=resume)
         readiness = check_matrix_readiness(matrix)
         if not readiness.ok:
             raise RuntimeError("; ".join(readiness.errors))
@@ -82,6 +86,8 @@ class E2EBenchmarkRunner:
             "planned_runs": len(config.runs),
             "expected_runs": matrix.metadata.get("expected_runs"),
         }
+        preflight_report = write_preflight_report(config, matrix.output_root)
+        preflight["preflight_report"] = preflight_report
         preflight_enabled = bool(matrix.metadata.get("preflight", {}).get("enabled") if isinstance(matrix.metadata.get("preflight"), dict) else matrix.metadata.get("preflight_enabled"))
         if preflight_enabled or fail_fast_profile_preflight or run_contract_smoke:
             profile_preflight = run_profile_preflight_for_experiment(config)
@@ -141,9 +147,9 @@ class E2EBenchmarkRunner:
             metadata=preflight,
         )
 
-    def _run_batch(self, config: ExperimentConfig) -> ExperimentResult:
+    def _run_batch(self, config: ExperimentConfig, *, resume: bool = False) -> ExperimentResult:
         runner = self.batch_runner or _default_batch_runner()
-        return runner.run_experiment(config)
+        return runner.run_experiment(config, resume=resume)
 
 
 def _default_batch_runner():
@@ -179,7 +185,7 @@ def _mark_profile_preflight(config: ExperimentConfig, preflight: dict[str, Any])
     return config.model_copy(update={"runs": runs, "metadata": {**config.metadata, "profile_preflight": preflight}})
 
 
-def _run_analysis(output_root: Path) -> ExperimentAnalysisResult:
+def run_analysis(output_root: Path) -> ExperimentAnalysisResult:
     from benchmark.analysis.comparison import analyze_experiment
     from benchmark.analysis.export import write_experiment_analysis_json, write_run_metrics_csv
 
@@ -202,9 +208,10 @@ def _refresh_manifest(prepared: PreparedExperiment) -> None:
     )
 
 
-def _build_reports(analysis: ExperimentAnalysisResult, matrix: ExperimentMatrix) -> Path:
+def build_reports(analysis: ExperimentAnalysisResult, matrix: ExperimentMatrix) -> Path:
     from benchmark.analysis.report_bundle import create_report_bundle, write_figures, write_report_text_ru
     from benchmark.analysis.report_builder import build_html_report, build_markdown_report
+    from benchmark.analysis.report_bundle_validator import validate_report_bundle_result
 
     report_config = _report_config(matrix)
     markdown_path = Path(report_config.output_dir) / "report.md"
@@ -215,7 +222,7 @@ def _build_reports(analysis: ExperimentAnalysisResult, matrix: ExperimentMatrix)
     text_path = Path(report_config.output_dir) / "report_text_ru.md"
     write_report_text_ru(analysis, text_path)
     write_figures(analysis, Path(report_config.output_dir) / "figures")
-    create_report_bundle(
+    bundle = create_report_bundle(
         Path(report_config.output_dir),
         analysis,
         [
@@ -225,9 +232,54 @@ def _build_reports(analysis: ExperimentAnalysisResult, matrix: ExperimentMatrix)
             markdown_path,
             html_path,
             text_path,
+            Path(report_config.output_dir) / "preflight_report.json",
+            Path(report_config.output_dir) / "preflight_report.md",
+            Path(report_config.output_dir) / "resume_report.json",
+            Path(report_config.output_dir) / "resume_report.md",
         ],
     )
+    validation = validate_report_bundle_result(bundle)
+    _append_bundle_validation_section(markdown_path, validation)
+    bundle_report = bundle / "report.md"
+    if bundle_report.exists():
+        _append_bundle_validation_section(bundle_report, validation)
     return markdown_path
+
+
+_run_analysis = run_analysis
+_build_reports = build_reports
+
+
+def _append_bundle_validation_section(path: Path, validation: dict[str, Any]) -> None:
+    status = validation.get("status", "unknown")
+    failed = sum(1 for check in validation.get("checks", []) if isinstance(check, dict) and check.get("status") == "failed")
+    section = (
+        "\n## Bundle Validation\n\n"
+        f"| Metric | Value |\n| --- | --- |\n| status | {status} |\n| failed_checks | {failed} |\n"
+    )
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    if "## Bundle Validation" in text:
+        text = text.split("## Bundle Validation", 1)[0].rstrip() + "\n"
+    path.write_text(text.rstrip() + section, encoding="utf-8")
+
+
+def _matrix_for_resume(matrix: ExperimentMatrix) -> ExperimentMatrix:
+    if not bool(matrix.metadata.get("timestamp_output_root")):
+        return matrix
+    parent = matrix.output_root.parent
+    prefix = f"{matrix.matrix_id}_"
+    candidates = sorted(
+        (path for path in parent.glob(f"{prefix}*") if path.is_dir()),
+        key=lambda path: path.stat().st_mtime,
+    )
+    if not candidates:
+        return matrix.model_copy(update={"metadata": {**matrix.metadata, "timestamp_output_root": False}})
+    return matrix.model_copy(
+        update={
+            "output_root": candidates[-1],
+            "metadata": {**matrix.metadata, "timestamp_output_root": False, "resume_from": str(candidates[-1])},
+        }
+    )
 
 
 def _report_config(matrix: ExperimentMatrix):

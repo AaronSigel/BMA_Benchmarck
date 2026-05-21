@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,17 +17,124 @@ from benchmark.mcp.server_adapter import ExternalBlenderMcpServerAdapter
 from benchmark.mcp.tool_contract import TOOL_CONTRACT_MAP
 from benchmark.mcp.tool_registry import McpToolRegistry
 from benchmark.runner.models import ExecutionMode, ExperimentConfig, RunConfig
+from benchmark.blender.config import find_blender_executable
 
 
 class PreflightError(RuntimeError):
     """Raised when an experiment cannot safely start."""
 
 
-def prepare_output_root(output_root: Path, *, clean_output: bool) -> dict[str, Any]:
+def write_preflight_report(config: ExperimentConfig, output_root: Path) -> dict[str, Any]:
+    output_root.mkdir(parents=True, exist_ok=True)
+    report = build_preflight_report(config, output_root)
+    (output_root / "preflight_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    (output_root / "preflight_report.md").write_text(_preflight_markdown(report), encoding="utf-8")
+    return report
+
+
+def build_preflight_report(config: ExperimentConfig, output_root: Path) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+
+    def add(name: str, status: str, started: float, details: dict[str, Any] | None = None) -> None:
+        checks.append({
+            "name": name,
+            "status": status,
+            "duration_sec": round(time.perf_counter() - started, 6),
+            "details": details or {},
+        })
+
+    started = time.perf_counter()
+    add("python_environment", "passed", started, {"python": sys.version.split()[0], "executable": sys.executable})
+
+    started = time.perf_counter()
+    blender = find_blender_executable()
+    needs_blender = any(run.execution_mode in {ExecutionMode.BLENDER_SMOKE, ExecutionMode.AGENT_MCP, ExecutionMode.REMOTE_AGENT} for run in config.runs)
+    add(
+        "blender_available",
+        "passed" if blender else ("warning" if needs_blender else "skipped"),
+        started,
+        {"path": str(blender) if blender else None, "required": needs_blender},
+    )
+
+    started = time.perf_counter()
+    try:
+        output_root.mkdir(parents=True, exist_ok=True)
+        probe = output_root / ".preflight_write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        add("report_output_directory_writable", "passed", started, {"output_root": str(output_root)})
+    except OSError as exc:
+        add("report_output_directory_writable", "failed", started, {"error": str(exc), "output_root": str(output_root)})
+
+    started = time.perf_counter()
+    profile_preflight = run_profile_preflight_for_experiment(config)
+    add("mcp_profiles", "passed" if profile_preflight.get("ok") else "failed", started, profile_preflight)
+
+    mcp_run = _first_mcp_run(config)
+    started = time.perf_counter()
+    if mcp_run is None or mcp_run.mcp_config_path is None:
+        add("mcp_socket", "skipped", started, {"required": False})
+    else:
+        try:
+            cfg = load_mcp_config(mcp_run.mcp_config_path)
+            if mcp_run.mcp_profile:
+                cfg = cfg.model_copy(update={"profile": mcp_run.mcp_profile})
+            proc = _find_blender_process(cfg.blender_host, cfg.blender_port)
+            add("mcp_socket", "passed" if proc else "warning", started, {"host": cfg.blender_host, "port": cfg.blender_port, "process": proc})
+        except Exception as exc:  # noqa: BLE001
+            add("mcp_socket", "warning", started, {"error": str(exc)})
+
+    started = time.perf_counter()
+    models = sorted({str(run.metadata.get("model_id")) for run in config.runs if run.metadata.get("model_id")})
+    needs_openrouter = any("openrouter" in str(run.agent_config_path or "") for run in config.runs)
+    api_available = bool(os.environ.get("OPENROUTER_API_KEY"))
+    add("openrouter_api", "passed" if (api_available or not needs_openrouter) else "warning", started, {"required": needs_openrouter, "env_var": "OPENROUTER_API_KEY", "available": api_available})
+
+    started = time.perf_counter()
+    add("model_config", "passed", started, {"models": models or ["default"]})
+
+    for name in ("reset_scene", "get_scene_snapshot", "smoke_tool_call"):
+        started = time.perf_counter()
+        if mcp_run is None:
+            add(name, "skipped", started, {"required": False})
+        else:
+            add(
+                name,
+                "delegated",
+                started,
+                {
+                    "required": True,
+                    "delegated_to_live_mcp_smoke": True,
+                    "reason": "live MCP smoke is handled by run_contract_smoke_for_experiment when enabled",
+                },
+            )
+
+    status = _overall_status(checks)
+    return {"status": status, "checks": checks}
+
+
+def _overall_status(checks: list[dict[str, Any]]) -> str:
+    statuses = {str(check.get("status")) for check in checks}
+    if "failed" in statuses:
+        return "failed"
+    if "warning" in statuses:
+        return "warning"
+    return "passed"
+
+
+def _preflight_markdown(report: dict[str, Any]) -> str:
+    lines = ["# Preflight Report", "", f"status: {report.get('status', 'unknown')}", "", "| Check | Status | Duration (s) |", "| --- | --- | --- |"]
+    for check in report.get("checks", []):
+        if isinstance(check, dict):
+            lines.append(f"| {check.get('name')} | {check.get('status')} | {check.get('duration_sec')} |")
+    return "\n".join(lines) + "\n"
+
+
+def prepare_output_root(output_root: Path, *, clean_output: bool, allow_existing: bool = False) -> dict[str, Any]:
     """Ensure output root freshness policy before readiness creates directories."""
     existed_before = output_root.exists()
     existing_entries = sorted(p.name for p in output_root.iterdir()) if existed_before else []
-    if existed_before and existing_entries and not clean_output:
+    if existed_before and existing_entries and not clean_output and not allow_existing:
         raise PreflightError(
             f"Output root already contains artifacts: {output_root}. "
             "Re-run with --clean-output to remove stale pilot artifacts first."
@@ -37,6 +147,7 @@ def prepare_output_root(output_root: Path, *, clean_output: bool) -> dict[str, A
         "clean_output": clean_output,
         "existed_before": existed_before,
         "removed_existing_output": existed_before and clean_output,
+        "allow_existing": allow_existing,
         "existing_entry_count": len(existing_entries),
         "created_at": _utc_now(),
     }
@@ -84,7 +195,7 @@ def run_contract_smoke_for_experiment(config: ExperimentConfig, output_root: Pat
                 "dimensions": [2.0, 2.0, 2.0],
             },
         )
-        if not create_result.get("ok"):
+        if create_result.get("ok") is False:
             _err = create_result.get("error") or {}
             _msg = _err.get("message") if isinstance(_err, dict) else str(_err)
             raise RuntimeError(f"bma_create_object probe failed: {_msg}")
@@ -98,13 +209,15 @@ def run_contract_smoke_for_experiment(config: ExperimentConfig, output_root: Pat
                 "metallic": 0.0,
             },
         )
-        if not material_result.get("ok"):
+        if material_result.get("ok") is False:
             _err = material_result.get("error") or {}
             _msg = _err.get("message") if isinstance(_err, dict) else str(_err)
             raise RuntimeError(f"bma_set_material probe failed: {_msg}")
         adapter.collect_scene_snapshot(snapshot_path)
         snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
         _assert_contract_snapshot(snapshot)
+    except AssertionError as exc:
+        raise PreflightError(f"Socket is reachable, but running server does not support expected BMA contract: {exc}") from exc
     except Exception as exc:  # noqa: BLE001
         metadata["finished_at"] = _utc_now()
         metadata["error"] = str(exc)

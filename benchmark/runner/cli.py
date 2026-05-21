@@ -80,6 +80,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Stop before running if any selected MCP profile fails preflight.",
     )
+    matrix_parser.add_argument("--resume", action="store_true", help="Resume an existing matrix output directory.")
+    matrix_parser.add_argument("--clean-output", action="store_true", help="Remove existing output before running.")
     matrix_parser.add_argument("--max-estimated-cost", type=float)
     matrix_parser.add_argument("--max-runtime-minutes", type=float)
 
@@ -182,6 +184,8 @@ def _matrix(args: argparse.Namespace) -> int:
             report_path = runner.run_and_report(
                 config_path,
                 fail_fast_profile_preflight=args.fail_fast_profile_preflight,
+                resume=args.resume,
+                clean_output=args.clean_output,
             )
             print(f"report: {report_path}")
             return 0
@@ -189,6 +193,8 @@ def _matrix(args: argparse.Namespace) -> int:
             analysis = runner.run_and_analyze(
                 config_path,
                 fail_fast_profile_preflight=args.fail_fast_profile_preflight,
+                resume=args.resume,
+                clean_output=args.clean_output,
             )
             print(
                 "\n".join(
@@ -205,6 +211,8 @@ def _matrix(args: argparse.Namespace) -> int:
         result = runner.run(
             config_path,
             fail_fast_profile_preflight=args.fail_fast_profile_preflight,
+            resume=args.resume,
+            clean_output=args.clean_output,
         )
     except (RuntimeError, OSError, ValueError, ValidationError) as error:
         print(f"ERROR: {error}")

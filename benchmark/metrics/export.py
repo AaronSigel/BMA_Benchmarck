@@ -43,6 +43,9 @@ SUMMARY_CSV_COLUMNS = [
     "agent_issues",
     "tool_issues",
     "export_issues",
+    "error_type",
+    "error_source",
+    "failure_stage",
     "error",
     "artifact_dir",
 ]
@@ -87,6 +90,7 @@ def write_metrics_csv(metrics: list[RunMetric], path: Path) -> None:
 def _run_summary_row(result: RunResult) -> dict[str, object]:
     validation = result.summary.get("validation", {}) if isinstance(result.summary, dict) else {}
     execution = result.summary.get("execution", {}) if isinstance(result.summary, dict) else {}
+    structured_error = result.summary.get("structured_error", {}) if isinstance(result.summary, dict) else {}
     agent_run = execution.get("agent_run", {}) if isinstance(execution, dict) else {}
     agent_summary = agent_run.get("summary", {}) if isinstance(agent_run, dict) else {}
     trace_metrics = agent_summary.get("metrics", {}) if isinstance(agent_summary, dict) else {}
@@ -134,6 +138,9 @@ def _run_summary_row(result: RunResult) -> dict[str, object]:
         "agent_issues": _format_issue_counts(_agent_issue_counts(result, trace_metrics)),
         "tool_issues": _format_issue_counts(_tool_issue_counts(trace_metrics)),
         "export_issues": _format_issue_counts(_export_issue_counts(validation)),
+        "error_type": structured_error.get("error_type") if isinstance(structured_error, dict) else None,
+        "error_source": structured_error.get("source") if isinstance(structured_error, dict) else None,
+        "failure_stage": structured_error.get("failure_stage") if isinstance(structured_error, dict) else None,
         "error": result.error or "",
         "artifact_dir": str(result.artifacts_dir),
     }

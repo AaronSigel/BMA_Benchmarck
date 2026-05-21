@@ -187,6 +187,17 @@ def _freshness_rows(metadata: dict[str, Any]) -> list[list[str]]:
     return rows
 
 
+def _preflight_rows(metadata: dict[str, Any]) -> list[list[str]]:
+    report = metadata.get("preflight_report")
+    if not isinstance(report, dict):
+        return []
+    rows = [["overall", _na(report.get("status"))]]
+    for check in report.get("checks", []):
+        if isinstance(check, dict):
+            rows.append([_na(check.get("name")), _na(check.get("status"))])
+    return rows
+
+
 def _join_list(value: Any) -> str | None:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value)
@@ -1418,6 +1429,9 @@ def _overall_rows(analysis: ExperimentAnalysisResult) -> list[list[str]]:
 def build_markdown_report(analysis: ExperimentAnalysisResult, config: ReportConfig) -> str:
     runs = analysis.runs
     lines = [f"# {config.title}", "", f"**Experiment:** `{analysis.experiment_id}`", ""]
+    preflight_rows = _preflight_rows(analysis.metadata)
+    if preflight_rows:
+        lines.extend(["## Preflight Summary", "", _md_table(["check", "status"], preflight_rows)])
     lines.extend(["## Key findings", ""])
     for idx, finding in enumerate(build_key_findings(analysis), start=1):
         lines.append(f"{idx}. {finding}")

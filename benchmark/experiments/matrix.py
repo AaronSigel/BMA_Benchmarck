@@ -192,6 +192,14 @@ def select_agents_by_strategy(
     agent_pool: dict[str, dict[str, Any]],
     strategies: list[str],
 ) -> list[dict[str, Any]]:
+    from benchmark.agent.strategies.registry import STRATEGY_REGISTRY
+
+    unknown = sorted(set(strategies) - set(STRATEGY_REGISTRY.names()))
+    if unknown:
+        raise ExperimentMatrixError(
+            f"Unknown agent strategy in matrix: {', '.join(unknown)}. "
+            f"Available: {', '.join(STRATEGY_REGISTRY.names())}"
+        )
     strategy_set = set(strategies)
     agents = [agent for agent in agent_pool.values() if agent.get("strategy") in strategy_set]
     return ensure_non_empty_selection(

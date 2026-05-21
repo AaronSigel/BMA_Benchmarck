@@ -211,7 +211,7 @@ class AgentTrace(BaseModel):
     steps: list[AgentStep] = Field(default_factory=list)
     final_message: str | None = None
     success: bool | None = None
-    error: str | None = None
+    error: str | dict[str, Any] | None = None
     started_at: datetime.datetime | None = None
     finished_at: datetime.datetime | None = None
     duration_sec: float | None = Field(default=None, ge=0.0)

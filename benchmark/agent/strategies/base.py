@@ -66,30 +66,6 @@ def create_agent_strategy(strategy_name: AgentStrategyName | str) -> AgentStrate
         strategy = strategy_name if isinstance(strategy_name, AgentStrategyName) else AgentStrategyName(strategy_name)
     except ValueError as error:
         raise UnsupportedAgentStrategyError(f"Unsupported agent strategy: {strategy_name}") from error
+    from benchmark.agent.strategies.registry import STRATEGY_REGISTRY
 
-    if strategy == AgentStrategyName.DIRECT_TOOL_CALLING:
-        from benchmark.agent.strategies.direct_tool_calling import DirectToolCallingStrategy
-
-        return DirectToolCallingStrategy()
-
-    if strategy == AgentStrategyName.REACT:
-        from benchmark.agent.strategies.react import ReactStrategy
-
-        return ReactStrategy()
-
-    if strategy == AgentStrategyName.PLAN_AND_EXECUTE:
-        from benchmark.agent.strategies.plan_and_execute import PlanAndExecuteStrategy
-
-        return PlanAndExecuteStrategy()
-
-    if strategy == AgentStrategyName.REMOTE_AGENT:
-        from benchmark.agent.strategies.remote_agent import RemoteAgentStrategy
-
-        return RemoteAgentStrategy()
-
-    if strategy == AgentStrategyName.PLAN_EXECUTE_REACT_REPAIR:
-        from benchmark.agent.strategies.plan_execute_react_repair import PlanExecuteReactRepairStrategy
-
-        return PlanExecuteReactRepairStrategy()
-
-    raise UnsupportedAgentStrategyError(f"Unsupported agent strategy: {strategy.value}")
+    return STRATEGY_REGISTRY.create(strategy)

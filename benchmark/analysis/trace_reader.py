@@ -20,6 +20,7 @@ _VALIDATION_RESULT_FILENAME = "validation_result.json"
 _SCENE_SNAPSHOT_FILENAME = "scene_snapshot.json"
 _METRICS_FILENAME = "metrics.json"
 _SUMMARY_FILENAME = "summary.json"
+_ARTIFACT_MANIFEST_FILENAME = "artifact_manifest.json"
 
 
 class TraceReadError(Exception):
@@ -41,6 +42,7 @@ class RunArtifactBundle(BaseModel):
     scene_snapshot: dict[str, Any] | None = None
     metrics: dict[str, Any] | None = None
     summary: dict[str, Any] | None = None
+    artifact_manifest: dict[str, Any] | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -112,6 +114,8 @@ def discover_run_artifacts(root: Path | str) -> list[Path]:
     for candidate in root_path.rglob(_AGENT_TRACE_FILENAME):
         found.add(candidate.parent)
     for candidate in root_path.rglob(_RUN_RESULT_FILENAME):
+        found.add(candidate.parent)
+    for candidate in root_path.rglob(_ARTIFACT_MANIFEST_FILENAME):
         found.add(candidate.parent)
 
     # Keep only dirs that are not nested inside another found dir.
@@ -205,6 +209,14 @@ def load_run_bundle(run_dir: Path | str) -> RunArtifactBundle:
         except TraceReadError as exc:
             logger.warning("Could not load summary from %s: %s", sum_path, exc)
 
+    artifact_manifest: dict[str, Any] | None = None
+    manifest_path = d / _ARTIFACT_MANIFEST_FILENAME
+    if manifest_path.exists():
+        try:
+            artifact_manifest = _read_json(manifest_path)
+        except TraceReadError as exc:
+            logger.warning("Could not load artifact_manifest from %s: %s", manifest_path, exc)
+
     return RunArtifactBundle(
         run_dir=d,
         agent_trace=agent_trace,
@@ -213,6 +225,7 @@ def load_run_bundle(run_dir: Path | str) -> RunArtifactBundle:
         scene_snapshot=snapshot,
         metrics=metrics,
         summary=summary,
+        artifact_manifest=artifact_manifest,
     )
 
 

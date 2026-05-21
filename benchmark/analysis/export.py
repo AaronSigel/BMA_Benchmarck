@@ -99,6 +99,9 @@ _RUN_METRICS_COLUMNS = [
     "agent_issues",
     "tool_issues",
     "export_issues",
+    "error_type",
+    "error_source",
+    "failure_stage",
     "all_issues",
     "export_status",
     "export_failure_type",
@@ -169,6 +172,9 @@ def _run_to_row(result: RunAnalysisResult) -> dict[str, Any]:
         "agent_issues": agent_issues,
         "tool_issues": tool_issues,
         "export_issues": export_issues,
+        "error_type": result.metrics.get("structured_error_type", ""),
+        "error_source": result.metrics.get("structured_error_source", ""),
+        "failure_stage": result.metrics.get("failure_stage", ""),
         "all_issues": all_issues,
         "export_status": export_status,
         "export_failure_type": export_failure_type,
@@ -270,6 +276,9 @@ def _format_issue_counts(result: RunAnalysisResult, kind: str) -> str:
             value = result.metrics.get(key)
             if isinstance(value, int) and value > 0:
                 counts[key] = value
+        structured = result.metrics.get("structured_error_type")
+        if isinstance(structured, str) and structured:
+            counts[structured] = counts.get(structured, 0) + 1
         if result.run_status == "error" or result.agent_status in {"runtime_error", "invalid_response", "max_steps_reached"}:
             counts[result.agent_status or "agent_error"] = 1
     elif kind == "tool":

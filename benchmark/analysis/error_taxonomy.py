@@ -117,6 +117,17 @@ def aggregate_errors(run_bundle: RunArtifactBundle) -> dict[str, int]:
 
     # Trace errors
     if run_bundle.agent_trace is not None:
+        if isinstance(run_bundle.agent_trace.error, dict):
+            error_type = run_bundle.agent_trace.error.get("error_type")
+            if isinstance(error_type, str) and error_type:
+                counts[error_type] += 1
+        elif isinstance(run_bundle.agent_trace.error, str) and run_bundle.agent_trace.error:
+            pseudo_step = AgentStep(
+                step_index=0,
+                step_type=AgentStepType.ERROR,
+                error=run_bundle.agent_trace.error,
+            )
+            counts[classify_trace_error(pseudo_step).value] += 1
         for record in extract_errors(run_bundle.agent_trace):
             counts[record.category.value] += 1
 

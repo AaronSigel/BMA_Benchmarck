@@ -24,6 +24,10 @@ from benchmark.tasks.registry import TaskRegistry
 from benchmark.validation.models import SceneValidationResult, ValidationStatus
 from benchmark.validation.scene_validator import SceneValidator
 from benchmark.agent.execution_backend import AgentExecutionBackend, RemoteAgentExecutionBackend
+from benchmark.agent.models import AgentStrategyName, AgentTrace
+from benchmark.agent.trace import write_agent_trace
+from benchmark.runner.artifact_manifest import write_run_artifact_manifest
+from benchmark.runner.controlled_errors import controlled_error_payload
 
 
 class ExperimentRunner:
@@ -135,6 +139,7 @@ class ExperimentRunner:
             },
         )
         _write_run_result(result, layout.run_result_json())
+        write_run_artifact_manifest(result, layout)
         return result
 
     def _load_task(self, config: RunConfig):
@@ -161,6 +166,7 @@ class ExperimentRunner:
         artifacts_dir: Path | None = None,
         summary: dict | None = None,
     ) -> RunResult:
+        structured_error = controlled_error_payload(error)
         validation_result_path: Path | None = None
         total_score: float | None = None
         overall_status: str | None = None
@@ -230,9 +236,18 @@ class ExperimentRunner:
             finished_at=_now_utc(),
             duration_sec=time.perf_counter() - started_perf,
             error=error,
-            summary={**_error_summary, **_run_metadata_summary(config, summary)},
+            summary={
+                **_error_summary,
+                **_run_metadata_summary(config, summary),
+                "structured_error": structured_error,
+            },
         )
+        if not layout.metrics_json().exists():
+            _write_metrics([], layout.metrics_json())
         _write_run_result(result, layout.run_result_json())
+        _write_not_available_markers(layout, structured_error, scene_snapshot_path, validation_result_path)
+        _write_stub_trace_if_needed(config, layout, structured_error, started_at, result.finished_at)
+        write_run_artifact_manifest(result, layout, structured_error=structured_error)
         return result
 
 
@@ -259,6 +274,70 @@ def _write_metrics(metrics: list, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = [metric.model_dump(mode="json") for metric in metrics]
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _write_not_available_markers(
+    layout: RunArtifactLayout,
+    structured_error: dict,
+    scene_snapshot_path: Path | None,
+    validation_result_path: Path | None,
+) -> None:
+    if scene_snapshot_path is None and not layout.scene_snapshot_json().exists():
+        _write_not_available_marker(layout.run_dir() / "scene_snapshot_not_available.json", structured_error)
+    if validation_result_path is None and not layout.validation_result_json().exists():
+        _write_not_available_marker(layout.run_dir() / "validation_result_not_available.json", structured_error)
+
+
+def _write_not_available_marker(path: Path, structured_error: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "available": False,
+        "reason": structured_error.get("error_type", "UnclassifiedError"),
+        "message": structured_error.get("message", ""),
+        "failure_stage": structured_error.get("failure_stage"),
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _write_stub_trace_if_needed(
+    config: RunConfig,
+    layout: RunArtifactLayout,
+    structured_error: dict,
+    started_at: str,
+    finished_at: str | None,
+) -> None:
+    if config.execution_mode not in {ExecutionMode.AGENT_MCP, ExecutionMode.REMOTE_AGENT}:
+        return
+    trace_path = layout.run_dir() / "agent_trace.json"
+    if trace_path.exists():
+        return
+    strategy = _strategy_name(config.metadata.get("agent_strategy"))
+    trace = AgentTrace(
+        run_id=config.run_id,
+        task_id=config.task_id,
+        agent_id=str(config.metadata.get("agent_id") or config.agent_config_path or "unknown"),
+        strategy=strategy,
+        model=_effective_model(config),
+        steps=[],
+        success=False,
+        error=structured_error,
+        final_message=None,
+        started_at=started_at,
+        finished_at=finished_at,
+        metadata={
+            "stub_trace": True,
+            "failure_stage": structured_error.get("failure_stage"),
+            "mcp_profile": config.mcp_profile,
+        },
+    )
+    write_agent_trace(trace, trace_path)
+
+
+def _strategy_name(value: object) -> AgentStrategyName:
+    try:
+        return AgentStrategyName(str(value or AgentStrategyName.DIRECT_TOOL_CALLING.value))
+    except ValueError:
+        return AgentStrategyName.DIRECT_TOOL_CALLING
 
 
 def _copy_snapshot_to_layout(source: Path, destination: Path) -> Path:

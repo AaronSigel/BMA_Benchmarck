@@ -17,6 +17,9 @@ dependencies = [
     "matplotlib"
 ]
 
+[project.scripts]
+bma-benchmark = "bma_benchmark.__main__:main"
+
 [project.optional-dependencies]
 test = [
     "pytest",

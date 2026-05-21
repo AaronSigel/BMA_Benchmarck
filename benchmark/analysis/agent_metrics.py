@@ -186,7 +186,7 @@ def compute_agent_summary(trace: AgentTrace) -> AgentMetricsSummary:
             step_durations.append(step.duration_sec)
 
     # Step-limit detection: trace error message or last-step error
-    trace_error = trace.error or ""
+    trace_error = trace.error.get("message", "") if isinstance(trace.error, dict) else (trace.error or "")
     if _STEP_LIMIT_PATTERN.search(trace_error):
         step_limit_reached = True
     elif steps:

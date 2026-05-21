@@ -67,7 +67,7 @@ class PromptBuilder:
             "When a camera must look at a target point, use target with bma_create_camera or bma_create_camera_look_at instead of manual Euler rotation.",
             "Return tool_calls when the API supports them, otherwise return a JSON action in content.",
             (
-                "Fallback JSON action format: "
+                "For non-ReAct strategies, fallback JSON action format: "
                 '{"tool_name": "<tool>", "arguments": {"key": "value"}}.'
             ),
             (

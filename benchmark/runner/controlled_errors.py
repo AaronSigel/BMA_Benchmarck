@@ -78,7 +78,7 @@ def normalize_error(
         error_type = ControlledErrorType.REACT_MAX_STEPS
         inferred_source = explicit_source or ControlledErrorSource.AGENT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
-    elif "no tool call or json action returned by llm" in text or "failed to parse" in text or "did not include action" in text or "no action found" in text or "llmresponseparseerror" in text:
+    elif "no tool call or json action returned by llm" in text or "failed to parse" in text or "did not include action" in text or "no action found" in text or "llmresponseparseerror" in text or "llmparseerror" in text or "reactnonstrictresponse" in text:
         error_type = ControlledErrorType.LLM_PARSE_ERROR
         inferred_source = explicit_source or ControlledErrorSource.AGENT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION

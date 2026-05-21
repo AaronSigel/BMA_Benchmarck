@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import datetime
+import json
 import logging
-import re
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -119,6 +119,7 @@ class ReactStrategy:
         final_message = None
         error_message = None
         success = False
+        react_iteration_count = 0
 
         # Guard state
         previous_action_signature: str | None = None
@@ -152,13 +153,33 @@ class ReactStrategy:
             from benchmark.agent.strategies.issue_action_mapper import build_task_checklist
             initial_step_context = {"task_checklist": build_task_checklist(task_obj)}
 
+        if self.scene_validator_fn is not None:
+            try:
+                initial_snap_path = output_dir / "initial_react_snapshot.json"
+                scene_ok, initial_score, initial_result = self.scene_validator_fn(initial_snap_path)
+            except Exception as exc:
+                log.debug("[react:%s] initial scene check failed: %s", trace.run_id[:8], exc)
+                scene_ok, initial_score, initial_result = False, None, None
+            if initial_result is not None:
+                last_validation_result = initial_result
+                previous_scene_score = initial_score
+                previous_issue_codes = {i.code for i in initial_result.issues}
+                initial_issue_count = len(previous_issue_codes)
+                initial_issue_codes = set(previous_issue_codes)
+            if scene_ok:
+                log.info("[react:%s] initial scene passed, stopping before LLM call", trace.run_id[:8])
+                success = True
+                final_message = "scene_passed_initial_stop"
+                trace = trace.add_step(AgentStepType.FINAL, observation=final_message)
+
         log.info(
             "[react:%s] starting task=%s max_steps=%d (effective=%d) profile=%s",
             trace.run_id[:8], task_id, agent_config.max_steps, effective_max_steps, agent_config.mcp_profile,
         )
 
-        while len(trace.steps) < effective_max_steps:
-            step_num = len(trace.steps) + 1
+        while final_message is None and error_message is None and react_iteration_count < effective_max_steps:
+            react_iteration_count += 1
+            step_num = react_iteration_count
 
             # Capture pre-step validation state for per-step trace fields (R-10).
             _score_before: float | None = previous_scene_score
@@ -199,6 +220,18 @@ class ReactStrategy:
                 duration_sec=(llm_finished_at - llm_started_at).total_seconds(),
                 metadata={"tool_schema_count": len(tool_schemas)},
             )
+
+            if action.parse_error is not None:
+                error_message = "LlmParseError"
+                trace = trace.add_step(
+                    AgentStepType.ERROR,
+                    error=f"LlmParseError: {action.parse_error}",
+                    metadata={
+                        "react_error_type": "LlmParseError",
+                        "react_non_strict_response": True,
+                    },
+                )
+                break
 
             if action.final_answer is not None:
                 # R-05: only allow finish if scene passed or validator unavailable.
@@ -241,16 +274,11 @@ class ReactStrategy:
                 break
 
             if action.tool_name is None:
-                error_message = "ReAct response did not include action or final_answer"
-                trace = trace.add_step(AgentStepType.ERROR, error=error_message)
-                break
-
-            if len(trace.steps) >= effective_max_steps:
-                error_message = "ReactMaxSteps"
+                error_message = "LlmParseError"
                 trace = trace.add_step(
                     AgentStepType.ERROR,
-                    error="ReactMaxSteps: max steps reached before executing next action",
-                    metadata={"react_error_type": "ReactMaxSteps"},
+                    error="LlmParseError: ReAct response did not include a strict JSON action or finish",
+                    metadata={"react_error_type": "LlmParseError"},
                 )
                 break
 
@@ -452,6 +480,9 @@ class ReactStrategy:
                     }
                 },
             )
+            if tool_result.error:
+                error_message = tool_result.error
+                break
 
             # --- Scene validation check ---
             _should_check_scene = (
@@ -550,11 +581,17 @@ class ReactStrategy:
             "ReactMaxSteps" if error_message == "ReactMaxSteps"
             else "ReactNoProgress" if error_message == "ReactNoProgress"
             else "ReactInvalidAction" if error_message == "ReactInvalidAction"
+            else "LlmParseError" if error_message == "LlmParseError"
             else None
         )
         _resolved_issues = (
             len(initial_issue_codes - previous_issue_codes)
             if initial_issue_codes else 0
+        )
+        scene_passed_but_agent_error = (
+            error_message is not None
+            and last_validation_result is not None
+            and bool(getattr(last_validation_result, "passed", False))
         )
         return trace.model_copy(
             update={
@@ -570,6 +607,8 @@ class ReactStrategy:
                     "wasted_step_count": wasted_step_count,
                     "no_progress_step_count": no_progress_step_count,
                     "effective_max_steps": effective_max_steps,
+                    "scene_passed_but_agent_error": scene_passed_but_agent_error,
+                    "react_iterations_total": react_iteration_count,
                     "inspection_before_mutation_rate": (
                         mutation_preceded_by_inspection / mutation_steps
                         if mutation_steps > 0 else "not_available"
@@ -654,6 +693,8 @@ def _build_step_context(
         }
     if suggested_repair is not None:
         ctx["suggested_repair"] = suggested_repair
+    if initial_context:
+        ctx.update(initial_context)
     return ctx
 
 
@@ -688,119 +729,63 @@ class _ReactAction:
         tool_name: str | None = None,
         arguments: dict[str, Any] | None = None,
         final_answer: str | None = None,
+        parse_error: str | None = None,
     ) -> None:
         self.thought = thought
         self.tool_name = tool_name
         self.arguments = arguments or {}
         self.final_answer = final_answer
+        self.parse_error = parse_error
 
 
 def _parse_react_action(response: LlmResponse) -> _ReactAction:
-    action = response.json_action()
-    if isinstance(action, dict):
-        # New schema: {"thought": "...", "action": {...}, "finish": bool}
-        if action.get("finish") is True:
-            return _ReactAction(
-                thought=_optional_str(action.get("thought")),
-                final_answer=action.get("thought") or "finish",
-            )
-        if "final_answer" in action:
-            return _ReactAction(
-                thought=_optional_str(action.get("thought")),
-                final_answer=str(action["final_answer"]),
-            )
-        nested_action = action.get("action")
-        if isinstance(nested_action, dict):
-            return _ReactAction(
-                thought=_optional_str(action.get("thought")),
-                tool_name=_optional_str(nested_action.get("tool") or nested_action.get("tool_name")),
-                arguments=nested_action.get("arguments") if isinstance(nested_action.get("arguments"), dict) else {},
-            )
-        if action.get("tool_name") or action.get("name"):
-            arguments = action.get("arguments")
-            return _ReactAction(
-                thought=_optional_str(action.get("thought")),
-                tool_name=_optional_str(action.get("tool_name") or action.get("name")),
-                arguments=arguments if isinstance(arguments, dict) else {},
-            )
-
     if response.tool_calls:
         first = response.tool_calls[0]
         return _ReactAction(tool_name=first.name, arguments=first.arguments)
 
-    if response.content:
-        if _is_pseudo_tool_call(response.content):
-            parsed = _parse_pseudo_tool_call(response.content)
-            if parsed is not None:
-                log.warning("ReAct: parsed pseudo tool call in plain text — tool=%s", parsed.tool_name)
-                return parsed
-            log.warning("ReAct: response looks like pseudo tool call in plain text — not accepting as final_answer")
-            return _ReactAction()
-        return _ReactAction(final_answer=response.content)
-    return _ReactAction()
+    if response.content is None or not response.content.strip():
+        return _ReactAction(parse_error="empty LLM response")
+    try:
+        action = json.loads(response.content)
+    except json.JSONDecodeError as exc:
+        return _ReactAction(parse_error=f"ReactNonStrictResponse: content is not strict JSON: {exc}")
+    if not isinstance(action, dict):
+        return _ReactAction(parse_error="ReactNonStrictResponse: JSON response must be an object")
+    extra_keys = set(action) - {"thought", "action", "finish"}
+    if extra_keys:
+        return _ReactAction(
+            parse_error=f"ReactNonStrictResponse: unsupported top-level keys: {sorted(extra_keys)}"
+        )
+
+    finish = action.get("finish")
+    thought = _optional_str(action.get("thought"))
+    nested_action = action.get("action")
+
+    if finish is True:
+        if nested_action is not None:
+            return _ReactAction(parse_error="ReactNonStrictResponse: finish=true requires action=null")
+        return _ReactAction(thought=thought, final_answer=thought or "finish")
+
+    if finish is not False:
+        return _ReactAction(parse_error="ReactNonStrictResponse: finish must be true or false")
+    if not isinstance(nested_action, dict):
+        return _ReactAction(parse_error="ReactNonStrictResponse: finish=false requires action object")
+    extra_action_keys = set(nested_action) - {"tool", "arguments"}
+    if extra_action_keys:
+        return _ReactAction(
+            parse_error=f"ReactNonStrictResponse: unsupported action keys: {sorted(extra_action_keys)}"
+        )
+
+    tool_name = _optional_str(nested_action.get("tool"))
+    if not tool_name:
+        return _ReactAction(parse_error="ReactNonStrictResponse: action.tool is required")
+    arguments = nested_action.get("arguments")
+    if arguments is None:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        return _ReactAction(parse_error="ReactNonStrictResponse: action.arguments must be an object")
+    return _ReactAction(thought=thought, tool_name=tool_name, arguments=arguments)
 
 
 def _optional_str(value: Any) -> str | None:
     return str(value) if value is not None else None
-
-
-# Detects model responses that look like pseudo tool calls written as plain text.
-_PSEUDO_TOOL_RE = re.compile(
-    r"^\s*(Tool|Action|Arguments?|Observation)\s*:",
-    re.MULTILINE | re.IGNORECASE,
-)
-
-_ACTION_NAME_RE = re.compile(r"^\s*Action\s*:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
-_ACTION_INPUT_RE = re.compile(r"^\s*Action\s+Input\s*:\s*(\{.*)", re.MULTILINE | re.IGNORECASE | re.DOTALL)
-_TOOL_NAME_RE = re.compile(r"^\s*Tool\s*:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
-_TOOL_ARGS_RE = re.compile(r"^\s*Arguments?\s*:\s*(\{.*)", re.MULTILINE | re.IGNORECASE | re.DOTALL)
-_THOUGHT_RE = re.compile(r"^\s*Thought\s*:\s*(.+?)(?=^\s*(?:Action|Tool)\s*:)", re.MULTILINE | re.IGNORECASE | re.DOTALL)
-
-
-def _is_pseudo_tool_call(content: str) -> bool:
-    return bool(_PSEUDO_TOOL_RE.search(content))
-
-
-def _extract_json_obj(text: str) -> dict[str, Any] | None:
-    import json as _json
-    depth = 0
-    start = text.find("{")
-    if start == -1:
-        return None
-    for i, ch in enumerate(text[start:], start):
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return _json.loads(text[start : i + 1])
-                except _json.JSONDecodeError:
-                    return None
-    return None
-
-
-def _parse_pseudo_tool_call(content: str) -> "_ReactAction | None":
-    name_match = _ACTION_NAME_RE.search(content)
-    if name_match:
-        tool_name = name_match.group(1).strip()
-        args: dict[str, Any] = {}
-        input_match = _ACTION_INPUT_RE.search(content)
-        if input_match:
-            args = _extract_json_obj(input_match.group(1)) or {}
-        thought_match = _THOUGHT_RE.search(content)
-        thought = thought_match.group(1).strip() if thought_match else None
-        return _ReactAction(thought=thought, tool_name=tool_name, arguments=args)
-
-    name_match2 = _TOOL_NAME_RE.search(content)
-    if name_match2:
-        tool_name = name_match2.group(1).strip()
-        args = {}
-        args_match = _TOOL_ARGS_RE.search(content)
-        if args_match:
-            args = _extract_json_obj(args_match.group(1)) or {}
-        thought_match = _THOUGHT_RE.search(content)
-        thought = thought_match.group(1).strip() if thought_match else None
-        return _ReactAction(thought=thought, tool_name=tool_name, arguments=args)
-
-    return None

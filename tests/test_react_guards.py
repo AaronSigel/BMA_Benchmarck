@@ -61,10 +61,10 @@ def test_export_blocked_until_scene_valid() -> None:
 
     # Step 1: inspect (triggers validation), Steps 2+: try to export (should be blocked)
     llm = MockLlmClient([
-        LlmResponse(content='{"thought":"inspect first","action":{"tool":"bma_get_scene_snapshot","arguments":{}}}'),
-        LlmResponse(content='{"thought":"export","action":{"tool":"bma_export_scene","arguments":{}}}'),
-        LlmResponse(content='{"thought":"export again","action":{"tool":"bma_export_scene","arguments":{}}}'),
-        LlmResponse(content='{"thought":"export again","action":{"tool":"bma_export_scene","arguments":{}}}'),
+        LlmResponse(content='{"thought":"inspect first","action":{"tool":"bma_get_scene_snapshot","arguments":{}},"finish":false}'),
+        LlmResponse(content='{"thought":"export","action":{"tool":"bma_export_scene","arguments":{}},"finish":false}'),
+        LlmResponse(content='{"thought":"export again","action":{"tool":"bma_export_scene","arguments":{}},"finish":false}'),
+        LlmResponse(content='{"thought":"export again","action":{"tool":"bma_export_scene","arguments":{}},"finish":false}'),
     ] * 3)
     executor = MockToolExecutor(results={
         "bma_get_scene_snapshot": {"objects": []},
@@ -105,9 +105,9 @@ def test_premature_finish_blocked_when_validation_fails() -> None:
 
     # LLM immediately tries to finish
     llm = MockLlmClient([
-        LlmResponse(content='{"thought":"done","finish":true}'),
-        LlmResponse(content='{"thought":"done","finish":true}'),
-        LlmResponse(content='{"thought":"still done","finish":true}'),
+        LlmResponse(content='{"thought":"done","action":null,"finish":true}'),
+        LlmResponse(content='{"thought":"done","action":null,"finish":true}'),
+        LlmResponse(content='{"thought":"still done","action":null,"finish":true}'),
     ] * 5)
     executor = MockToolExecutor()
     strategy = ReactStrategy()
@@ -140,7 +140,7 @@ def test_premature_finish_blocked_when_validation_fails() -> None:
 
 def test_repeated_action_hint_then_error() -> None:
     """Guard allows 1 repair hint on first repeat, then stops on second repeat."""
-    same_action = '{"thought":"again","action":{"tool":"bma_get_scene_snapshot","arguments":{}}}'
+    same_action = '{"thought":"again","action":{"tool":"bma_get_scene_snapshot","arguments":{}},"finish":false}'
     llm = MockLlmClient([LlmResponse(content=same_action)] * 10)
     executor = MockToolExecutor(results={"bma_get_scene_snapshot": {"objects": []}})
 
@@ -168,7 +168,7 @@ def test_repeated_action_hint_then_error() -> None:
 
 def test_duplicate_object_creation_blocked() -> None:
     """Creating the same named object twice triggers guard, not actual creation."""
-    create_action = '{"thought":"create","action":{"tool":"bma_create_object","arguments":{"name":"Cube","type":"MESH_CUBE"}}}'
+    create_action = '{"thought":"create","action":{"tool":"bma_create_object","arguments":{"name":"Cube","type":"MESH_CUBE"}},"finish":false}'
     llm = MockLlmClient([LlmResponse(content=create_action)] * 8)
     executor = MockToolExecutor(results={"bma_create_object": {"name": "Cube"}})
 

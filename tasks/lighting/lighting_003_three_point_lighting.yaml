@@ -10,6 +10,9 @@ prompt: >
   an AREA light named Fill_Light at location (4, -3, 3) with rotation
   (55, 0, 45) degrees and energy 250; a SPOT light named Back_Light at
   location (0, 4, 4) with rotation (55, 0, 180) degrees and energy 450.
+  Use one exact light creation/update action per light and include the light
+  name, type, location, rotation, and energy for each of Key_Light, Fill_Light,
+  and Back_Light.
 tags:
   - lighting
   - three-point
@@ -70,4 +73,3 @@ metadata:
   author: benchmark
   version: "1.0"
   description: Multi-light placement task for a three point lighting setup.
-

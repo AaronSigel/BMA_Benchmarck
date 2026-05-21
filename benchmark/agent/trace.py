@@ -85,7 +85,8 @@ def summarize_trace(trace: AgentTrace) -> dict[str, Any]:
             "repeated_action_count": int(trace.metadata.get("repeated_action_count", 0)),
             "wasted_step_count": int(trace.metadata.get("wasted_step_count", 0)),
             "no_progress_step_count": int(trace.metadata.get("no_progress_step_count", 0)),
+            "scene_passed_but_agent_error": bool(trace.metadata.get("scene_passed_but_agent_error", False)),
+            "react_iterations_total": trace.metadata.get("react_iterations_total"),
         },
     }
-
 

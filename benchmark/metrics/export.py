@@ -16,6 +16,7 @@ SUMMARY_CSV_COLUMNS = [
     "run_status",
     "agent_status",
     "scene_status",
+    "scene_passed_but_agent_error",
     "score",
     "status",
     "total_score",
@@ -107,6 +108,7 @@ def _run_summary_row(result: RunResult) -> dict[str, object]:
         "run_status": (result.run_status or result.status).value,
         "agent_status": result.agent_status.value if result.agent_status else None,
         "scene_status": result.scene_status.value if result.scene_status else None,
+        "scene_passed_but_agent_error": _scene_passed_but_agent_error(result),
         "score": result.total_score,
         "status": result.status.value,
         "total_score": result.total_score,
@@ -150,6 +152,13 @@ def _format_issue_counts(value: object) -> str:
     if not isinstance(value, dict) or not value:
         return "null"
     return "; ".join(f"{key}:{value[key]}" for key in sorted(value))
+
+
+def _scene_passed_but_agent_error(result: RunResult) -> bool:
+    scene_passed = result.scene_status is not None and result.scene_status.value == "passed"
+    if not scene_passed or result.agent_status is None:
+        return False
+    return result.agent_status.value not in {"completed", "completed_after_scene_passed"}
 
 
 def _pass_type(result: RunResult) -> str:

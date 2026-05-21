@@ -81,7 +81,7 @@ class AgentExecutionBackend(ExecutionBackend):
                     "pre_run_snapshot_path": str(pre_run_snapshot_path) if pre_run_snapshot_path else None,
                 },
             )
-        tool_executor = _wrap_export_paths(tool_executor, output_dir)
+        tool_executor = _wrap_export_paths(tool_executor, output_dir, task)
         log.info("[task:%s] strategy=%s profile=%s executor=%s", config.task_id, agent_config.strategy, agent_config.mcp_profile, type(tool_executor).__name__)
         try:
             result = AgentRuntime(
@@ -284,9 +284,10 @@ def _capture_snapshot_to_path(tool_executor: ToolExecutor, snapshot_path: Path) 
 class _ExportPathFixingExecutor:
     """Wraps a ToolExecutor and rewrites relative bma_export_scene filepaths."""
 
-    def __init__(self, wrapped: ToolExecutor, artifacts_dir: Path) -> None:
+    def __init__(self, wrapped: ToolExecutor, artifacts_dir: Path, task: dict | None = None) -> None:
         self._wrapped = wrapped
         self._artifacts_dir = artifacts_dir
+        self._expected_exports = _expected_export_paths(artifacts_dir, task)
 
     def call_tool(
         self,
@@ -295,7 +296,7 @@ class _ExportPathFixingExecutor:
     ):
         if tool_name == "bma_export_scene" and isinstance(arguments, dict):
             fp = arguments.get("filepath", "")
-            export_path = _run_export_path(self._artifacts_dir, fp) if fp else None
+            export_path = self._resolve_export_path(arguments, fp)
             if export_path is not None:
                 arguments = {**arguments, "filepath": str(export_path)}
                 log.info("[export_fix] rewritten filepath → %s", arguments["filepath"])
@@ -312,23 +313,59 @@ class _ExportPathFixingExecutor:
     def normalize_tool_result(self, result) -> dict:
         return self._wrapped.normalize_tool_result(result)
 
+    def _resolve_export_path(self, arguments: dict, filepath: object) -> Path | None:
+        export_format = str(arguments.get("format") or "").lower()
+        filename = arguments.get("filename")
+        if filename:
+            return _run_export_path(self._artifacts_dir, filename)
+        if filepath:
+            return _run_export_path(self._artifacts_dir, filepath)
+        if export_format and export_format in self._expected_exports:
+            return self._expected_exports[export_format]
+        return None
 
-def _wrap_export_paths(tool_executor: ToolExecutor, artifacts_dir: Path) -> ToolExecutor:
+
+def _wrap_export_paths(tool_executor: ToolExecutor, artifacts_dir: Path, task: dict | None = None) -> ToolExecutor:
     if not isinstance(tool_executor, McpToolExecutor):
         return tool_executor
-    return _ExportPathFixingExecutor(tool_executor, artifacts_dir)  # type: ignore[return-value]
+    return _ExportPathFixingExecutor(tool_executor, artifacts_dir, task)  # type: ignore[return-value]
 
 
 def _run_export_path(artifacts_dir: Path, requested: object) -> Path | None:
     requested_path = Path(str(requested))
-    suffix = requested_path.suffix.lower()
-    if suffix == ".glb":
-        return artifacts_dir / "exports" / "result.glb"
-    if suffix == ".blend":
-        return artifacts_dir / "exports" / "result.blend"
     if requested_path.is_absolute():
         return requested_path
+    requested_text = str(requested_path).replace("\\", "/")
+    if "/" in requested_text:
+        return artifacts_dir / requested_path
+    suffix = requested_path.suffix.lower()
+    if suffix == ".glb":
+        return artifacts_dir / "exports" / requested_path.name
+    if suffix == ".blend":
+        return artifacts_dir / requested_path.name
     return artifacts_dir / "exports" / requested_path.name
+
+
+def _expected_export_paths(artifacts_dir: Path, task: dict | None) -> dict[str, Path]:
+    expected: dict[str, Path] = {}
+    scene = task.get("expected_scene") if isinstance(task, dict) else None
+    exports = scene.get("exports") if isinstance(scene, dict) else None
+    if not isinstance(exports, list):
+        return expected
+    for export in exports:
+        if not isinstance(export, dict):
+            continue
+        export_format = str(export.get("format") or "").lower()
+        if not export_format:
+            continue
+        filename = export.get("filename")
+        if filename:
+            expected[export_format] = _run_export_path(artifacts_dir, filename) or artifacts_dir / str(filename)
+        elif export_format == "blend":
+            expected[export_format] = artifacts_dir / "result.blend"
+        elif export_format in {"glb", "gltf", "fbx"}:
+            expected[export_format] = artifacts_dir / "exports" / f"result.{export_format}"
+    return expected
 
 
 def _mcp_executor(tool_executor: ToolExecutor) -> McpToolExecutor | None:

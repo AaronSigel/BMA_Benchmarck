@@ -81,6 +81,7 @@ _RUN_METRICS_COLUMNS = [
     "run_status",
     "scene_status",
     "agent_status",
+    "scene_passed_but_agent_error",
     "score",
     "validation_coverage",
     "duration_sec",
@@ -154,6 +155,7 @@ def _run_to_row(result: RunAnalysisResult) -> dict[str, Any]:
         "run_status": result.run_status or "",
         "scene_status": result.scene_status or "",
         "agent_status": result.agent_status or "",
+        "scene_passed_but_agent_error": _scene_passed_but_agent_error(result),
         "score": result.total_score,
         "validation_coverage": result.metrics.get("validation_coverage", ""),
         "duration_sec": result.duration_sec,
@@ -205,6 +207,14 @@ def _task_category(result: RunAnalysisResult) -> str:
         if category in task_id:
             return category
     return "unknown"
+
+
+def _scene_passed_but_agent_error(result: RunAnalysisResult) -> bool:
+    return (
+        result.scene_status == "passed"
+        and bool(result.agent_status)
+        and result.agent_status not in {"completed", "completed_after_scene_passed"}
+    )
 
 
 def _effective_pass_type(result: RunAnalysisResult) -> str:

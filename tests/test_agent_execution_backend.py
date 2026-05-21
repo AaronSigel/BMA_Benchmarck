@@ -229,6 +229,49 @@ def test_export_wrapper_rewrites_relative_export_path_under_artifacts_dir(tmp_pa
     ]
 
 
+def test_export_wrapper_uses_task_blend_filename_at_artifact_root(tmp_path: Path) -> None:
+    adapter = FakeHarnessAdapter()
+    executor = McpToolExecutor(adapter, profile="no_python")
+    task = {
+        "expected_scene": {
+            "exports": [{"format": "blend", "filename": "result.blend", "must_exist": True}]
+        }
+    }
+    wrapped = _wrap_export_paths(executor, tmp_path, task)
+
+    result = wrapped.call_tool("bma_export_scene", {"format": "blend", "filename": "result.blend"})
+
+    assert result.error is None
+    assert adapter.calls == [
+        (
+            "bma_export_scene",
+            {
+                "format": "blend",
+                "filename": "result.blend",
+                "filepath": str(tmp_path / "result.blend"),
+            },
+        )
+    ]
+
+
+def test_export_wrapper_injects_expected_glb_path_when_filepath_omitted(tmp_path: Path) -> None:
+    adapter = FakeHarnessAdapter()
+    executor = McpToolExecutor(adapter, profile="no_python")
+    task = {
+        "expected_scene": {
+            "exports": [{"format": "glb", "filename": "exports/result.glb", "must_exist": True}]
+        }
+    }
+    wrapped = _wrap_export_paths(executor, tmp_path, task)
+
+    result = wrapped.call_tool("bma_export_scene", {"format": "glb"})
+
+    assert result.error is None
+    assert adapter.calls == [
+        ("bma_export_scene", {"format": "glb", "filepath": str(tmp_path / "exports/result.glb")})
+    ]
+
+
 def test_agent_run_metadata_includes_auto_captured_snapshot_path(
     tmp_path: Path,
     monkeypatch,

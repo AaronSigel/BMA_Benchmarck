@@ -48,7 +48,7 @@ def _issue(code: str = "object_missing") -> ValidationIssue:
 
 def test_max_steps_classified_as_react_max_steps() -> None:
     """When max_steps is reached, error should be ReactMaxSteps."""
-    action = '{"thought":"ok","action":{"tool":"bma_get_scene_snapshot","arguments":{}}}'
+    action = '{"thought":"ok","action":{"tool":"bma_get_scene_snapshot","arguments":{}},"finish":false}'
     llm = MockLlmClient([LlmResponse(content=action)] * 20)
     executor = MockToolExecutor(results={"bma_get_scene_snapshot": {"objects": []}})
 
@@ -65,6 +65,8 @@ def test_max_steps_classified_as_react_max_steps() -> None:
     assert trace.error == "ReactMaxSteps"
     assert trace.metadata.get("react_error_type") == "ReactMaxSteps"
     assert trace.metadata.get("react_max_steps_count") == 1
+    assert trace.metadata.get("react_iterations_total") == 3
+    assert len(trace.steps) > 3
 
 
 # --- No progress detection ---
@@ -73,7 +75,7 @@ def test_no_progress_stops_with_react_no_progress() -> None:
     """When progress stalls for no_progress_limit steps, error should be ReactNoProgress."""
     stall_result = _val_result(passed=False, score=0.5, issues=[_issue()])
 
-    action = '{"thought":"ok","action":{"tool":"bma_get_scene_snapshot","arguments":{}}}'
+    action = '{"thought":"ok","action":{"tool":"bma_get_scene_snapshot","arguments":{}},"finish":false}'
     llm = MockLlmClient([LlmResponse(content=action)] * 20)
     executor = MockToolExecutor(results={"bma_get_scene_snapshot": {"objects": []}})
     strategy = ReactStrategy()
@@ -107,7 +109,7 @@ def test_no_progress_stops_with_react_no_progress() -> None:
 
 def test_repeated_action_becomes_wasted_step() -> None:
     """Repeated same action is counted as a wasted step."""
-    action_str = '{"thought":"again","action":{"tool":"bma_get_scene_snapshot","arguments":{}}}'
+    action_str = '{"thought":"again","action":{"tool":"bma_get_scene_snapshot","arguments":{}},"finish":false}'
     llm = MockLlmClient([LlmResponse(content=action_str)] * 10)
     executor = MockToolExecutor(results={"bma_get_scene_snapshot": {}})
 
@@ -130,12 +132,18 @@ def test_early_stop_when_scene_passes() -> None:
     """When scene passes, ReactStrategy should stop and mark success."""
     pass_result = _val_result(passed=True, score=1.0, issues=[])
 
-    action = '{"thought":"ok","action":{"tool":"bma_get_scene_snapshot","arguments":{}}}'
+    action = '{"thought":"ok","action":{"tool":"bma_get_scene_snapshot","arguments":{}},"finish":false}'
     llm = MockLlmClient([LlmResponse(content=action)] * 20)
     executor = MockToolExecutor(results={"bma_get_scene_snapshot": {}})
     strategy = ReactStrategy()
 
+    calls = 0
+
     def validator_fn(path):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return False, 0.5, _val_result(passed=False, score=0.5, issues=[_issue()])
         return True, 1.0, pass_result
 
     strategy.scene_validator_fn = validator_fn
@@ -154,11 +162,36 @@ def test_early_stop_when_scene_passes() -> None:
     assert len(trace.steps) < 10
 
 
+def test_initial_validation_pass_stops_before_llm_call() -> None:
+    """If initial validation already passes, ReAct should stop before calling the model."""
+    pass_result = _val_result(passed=True, score=1.0, issues=[])
+    llm = MockLlmClient([LlmResponse(content='{"thought":"unused","action":null,"finish":true}')])
+    strategy = ReactStrategy()
+
+    def validator_fn(path):
+        return True, 1.0, pass_result
+
+    strategy.scene_validator_fn = validator_fn
+
+    trace = strategy.run(
+        {"id": "task-1", "prompt": "Do it", "category": "export"},
+        _config(max_steps=20, stop_after_scene_passed=True),
+        llm,
+        MockToolExecutor(),
+        AgentToolContext(run_id="run-1", task_id="task-1"),
+        Path("."),
+    )
+
+    assert trace.success is True
+    assert trace.final_message == "scene_passed_initial_stop"
+    assert [step.step_type for step in trace.steps] == [AgentStepType.FINAL]
+
+
 # --- Trace metadata completeness ---
 
 def test_trace_metadata_includes_react_aggregates() -> None:
     """Trace metadata must include all required ReAct aggregate fields."""
-    action = '{"thought":"ok","action":{"tool":"bma_get_scene_snapshot","arguments":{}}}'
+    action = '{"thought":"ok","action":{"tool":"bma_get_scene_snapshot","arguments":{}},"finish":false}'
     llm = MockLlmClient([LlmResponse(content=action)] * 20)
     executor = MockToolExecutor(results={"bma_get_scene_snapshot": {}})
 

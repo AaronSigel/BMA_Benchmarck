@@ -70,16 +70,22 @@ def test_react_repair_loop_resolves_object_missing_and_finishes() -> None:
     llm = MockLlmClient([
         # Step 1: LLM creates the object
         LlmResponse(
-            content='{"thought":"Need to create missing Cube.","action":{"tool":"bma_create_object","arguments":{"name":"Cube","type":"MESH_CUBE"}}}'
+            content='{"thought":"Need to create missing Cube.","action":{"tool":"bma_create_object","arguments":{"name":"Cube","type":"MESH_CUBE"}},"finish":false}'
         ),
         # Step 2 (if needed): LLM finishes
-        LlmResponse(content='{"thought":"Scene complete.","finish":true}'),
+        LlmResponse(content='{"thought":"Scene complete.","action":null,"finish":true}'),
     ])
     executor = MockToolExecutor(results={"bma_create_object": {"name": "Cube", "type": "MESH"}})
     strategy = ReactStrategy()
 
+    calls = 0
+
     def validator_fn(path: Path):
-        # After bma_create_object runs, the object exists — scene passes
+        # Initial scene is empty; after bma_create_object runs, the object exists.
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return False, 0.0, _object_missing_result()
         return True, 1.0, _passed_result()
 
     strategy.scene_validator_fn = validator_fn
@@ -130,14 +136,20 @@ def test_react_repair_loop_no_max_steps_on_clean_fix() -> None:
     """Repair that works on the first try must not trigger max_steps."""
     llm = MockLlmClient([
         LlmResponse(
-            content='{"thought":"Create Cube.","action":{"tool":"bma_create_object","arguments":{"name":"Cube","type":"MESH_CUBE"}}}'
+            content='{"thought":"Create Cube.","action":{"tool":"bma_create_object","arguments":{"name":"Cube","type":"MESH_CUBE"}},"finish":false}'
         ),
     ] * 10)
     executor = MockToolExecutor(results={"bma_create_object": {"name": "Cube"}})
     strategy = ReactStrategy()
 
+    calls = 0
+
     def validator_fn(path: Path):
-        # Object was created on first action — scene passes immediately
+        # Initial scene is empty; object is created on first action.
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return False, 0.0, _object_missing_result()
         return True, 1.0, _passed_result()
 
     strategy.scene_validator_fn = validator_fn

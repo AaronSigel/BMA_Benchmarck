@@ -196,10 +196,10 @@ def test_report_text_ru_contains_required_factual_sections(tmp_path: Path) -> No
     assert "placeholder" not in text.lower()
 
 
-def test_diagnostic_repeat_gemini_v5_generates_270_runs() -> None:
+def test_diagnostic_repeat_gemini_v5_generates_360_runs() -> None:
     matrix = load_matrix("configs/matrices/diagnostic_repeat_gemini_v5.yaml")
     config = generate_experiment_config(matrix)
-    assert matrix.metadata["expected_runs"] == 270
+    assert matrix.metadata["expected_runs"] == 360
     assert matrix.metadata["report_ready_mvp"] is True
     assert matrix.metadata["timestamp_output_root"] is True
-    assert len(config.runs) == 270
+    assert len(config.runs) == 360

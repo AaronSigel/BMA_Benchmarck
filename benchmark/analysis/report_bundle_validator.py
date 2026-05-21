@@ -145,6 +145,38 @@ def validate_report_bundle_result(bundle: Path | str, *, write_result: bool = Tr
         else:
             add("run_artifact_manifests_complete", "passed")
 
+    # Readiness gates: evaluate matrix-defined thresholds against actual run data.
+    # Structural validation (required files, row counts) is separate from benchmark readiness.
+    readiness_gates = None
+    if isinstance(manifest, dict):
+        meta = manifest.get("metadata")
+        if isinstance(meta, dict):
+            readiness_gates = meta.get("readiness_gates")
+    if readiness_gates is not None and rows:
+        gate_result = _evaluate_readiness_gates(readiness_gates, rows)
+        if gate_result["readiness_ok"]:
+            add("readiness_gates", "passed", readiness_ok=True, gates_checked=len(gate_result["gates_checked"]))
+        else:
+            for fg in gate_result["failed_gates"]:
+                add(
+                    f"readiness_gate:{fg['name']}",
+                    "failed",
+                    expected=fg["expected"],
+                    actual=fg["actual"],
+                    severity=fg.get("severity", "blocking"),
+                    message=(
+                        f"readiness gate '{fg['name']}' failed: "
+                        f"expected {fg['expected']}, actual {fg['actual']}"
+                    ),
+                )
+            add(
+                "readiness_gates",
+                "failed",
+                readiness_ok=False,
+                failed_gate_count=len(gate_result["failed_gates"]),
+                message=f"benchmark readiness failed: {len(gate_result['failed_gates'])} gate(s) violated",
+            )
+
     return _finish_result(root, checks, write_result)
 
 
@@ -199,6 +231,123 @@ def _check_total(label: str, value: Any, expected: int, add) -> None:
         add(f"{label}_total_runs", "passed", expected=expected, actual=value)
         return
     add(f"{label}_total_runs", "failed", expected=expected, actual=value, message=f"{label} total_runs {value} != summary.csv rows {expected}")
+
+
+def _evaluate_readiness_gates(
+    gates: dict[str, Any],
+    rows: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Evaluate matrix readiness gates against summary.csv rows.
+
+    Returns a dict with readiness_ok, failed_gates, and gates_checked.
+    Gates are blocking criteria — any failure sets readiness_ok=False.
+    """
+    failed_gates: list[dict[str, Any]] = []
+    gates_checked: list[str] = []
+
+    def _fail(name: str, expected: Any, actual: Any) -> None:
+        failed_gates.append({"name": name, "expected": expected, "actual": actual, "severity": "blocking"})
+
+    # --- invalid_tool_response_export_max ---
+    # Max allowed InvalidToolResponse / EmptySocketResponse / InvalidJsonResponse on export tasks.
+    gate_name = "invalid_tool_response_export_max"
+    if gate_name in gates:
+        gates_checked.append(gate_name)
+        threshold = int(gates[gate_name])
+        export_rows = [r for r in rows if _task_category(r) == "export"]
+        bad_types = {"InvalidToolResponse", "InvalidJsonResponse", "EmptySocketResponse", "ToolError"}
+        invalid_count = sum(
+            1 for r in export_rows
+            if str(r.get("error_type", "")).strip() in bad_types
+        )
+        if invalid_count > threshold:
+            _fail(gate_name, threshold, invalid_count)
+
+    # --- clean_pass_with_error_type_max ---
+    gate_name = "clean_pass_with_error_type_max"
+    if gate_name in gates:
+        gates_checked.append(gate_name)
+        threshold = int(gates[gate_name])
+        count = sum(
+            1 for r in rows
+            if str(r.get("pass_type", "")).strip() == "clean_pass"
+            and str(r.get("error_type", "")).strip() not in {"", "null", "None"}
+        )
+        if count > threshold:
+            _fail(gate_name, threshold, count)
+
+    # --- react_max_steps_rate_max ---
+    # Max fraction of ReAct runs that hit ReactMaxSteps.
+    gate_name = "react_max_steps_rate_max"
+    if gate_name in gates:
+        gates_checked.append(gate_name)
+        threshold = float(gates[gate_name])
+        react_rows = [r for r in rows if str(r.get("strategy", "")).strip() == "react"]
+        if react_rows:
+            max_steps_count = sum(
+                1 for r in react_rows
+                if "ReactMaxSteps" in str(r.get("error_type", ""))
+                or "ReactMaxSteps" in str(r.get("error", ""))
+            )
+            rate = max_steps_count / len(react_rows)
+            if rate > threshold:
+                _fail(gate_name, threshold, round(rate, 4))
+
+    # --- require_react_repair_steps_on_validation_issues ---
+    # At least some ReAct runs with validation issues must have repair steps > 0.
+    gate_name = "require_react_repair_steps_on_validation_issues"
+    if gates.get(gate_name) is True:
+        gates_checked.append(gate_name)
+        react_rows = [r for r in rows if str(r.get("strategy", "")).strip() == "react"]
+        validation_issue_rows = [
+            r for r in react_rows
+            if str(r.get("pass_type", "")).strip() in {"failed_validation", "runtime_error"}
+            and str(r.get("validation_issues", "")).strip() not in {"", "null", "None"}
+        ]
+        if validation_issue_rows:
+            # Check for any runs reporting repair activity (heuristic: agent_issues contains repair fields).
+            # Since summary.csv doesn't directly store react_repair_steps, we check agent_issues for clues.
+            # A gate violation is reported as a warning-level signal rather than a hard block here,
+            # because the repair step count is in the trace metadata, not summary.csv.
+            # We surface this as an informational failed gate when no evidence of repair is found.
+            has_repair_evidence = any(
+                "repair" in str(r.get("agent_issues", "")).lower()
+                for r in validation_issue_rows
+            )
+            if not has_repair_evidence:
+                failed_gates.append({
+                    "name": gate_name,
+                    "expected": "react_repair_steps > 0 on at least one run with validation issues",
+                    "actual": "no repair evidence found in agent_issues",
+                    "severity": "warning",
+                })
+
+    # --- export_smoke_required ---
+    # This gate is evaluated by preflight, not by post-run analysis.
+    # We record it as checked but cannot evaluate it from summary.csv alone.
+    if gates.get("export_smoke_required") is True:
+        gates_checked.append("export_smoke_required")
+        # Check if any export task had 0 successes (all runs failed).
+        export_rows = [r for r in rows if _task_category(r) == "export"]
+        if export_rows:
+            success_count = sum(
+                1 for r in export_rows
+                if str(r.get("pass_type", "")).strip() in {"clean_pass", "soft_pass"}
+            )
+            if success_count == 0:
+                _fail("export_smoke_required", "at_least_one_export_success", 0)
+
+    return {
+        "readiness_ok": len([fg for fg in failed_gates if fg.get("severity") != "warning"]) == 0,
+        "failed_gates": failed_gates,
+        "gates_checked": gates_checked,
+    }
+
+
+def _task_category(row: dict[str, str]) -> str:
+    task_id = str(row.get("task_id", "")).strip()
+    parts = task_id.split("_")
+    return parts[0] if parts else ""
 
 
 def _finish_result(root: Path, checks: list[dict[str, Any]], write_result: bool) -> dict[str, Any]:

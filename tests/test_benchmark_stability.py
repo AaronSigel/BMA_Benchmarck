@@ -522,19 +522,19 @@ class TestDiagnosticRepeatDescription:
         assert "two-repeat" not in matrix.description.lower()
         assert "540" not in matrix.description
 
-    def test_description_mentions_270_runs(self):
+    def test_description_mentions_360_runs(self):
         from benchmark.experiments.matrix import load_matrix
         matrix = load_matrix("configs/matrices/diagnostic_repeat_gemini_v5.yaml")
-        assert "270" in matrix.description
+        assert "360" in matrix.description
 
-    def test_expected_runs_is_270(self):
+    def test_expected_runs_is_360(self):
         from benchmark.experiments.matrix import load_matrix
         matrix = load_matrix("configs/matrices/diagnostic_repeat_gemini_v5.yaml")
-        assert matrix.metadata["expected_runs"] == 270
+        assert matrix.metadata["expected_runs"] == 360
 
-    def test_generates_270_runs(self):
+    def test_generates_360_runs(self):
         from benchmark.experiments.generator import generate_experiment_config
         from benchmark.experiments.matrix import load_matrix
         matrix = load_matrix("configs/matrices/diagnostic_repeat_gemini_v5.yaml")
         config = generate_experiment_config(matrix)
-        assert len(config.runs) == 270
+        assert len(config.runs) == 360

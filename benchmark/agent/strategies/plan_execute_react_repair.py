@@ -62,16 +62,36 @@ class PlanExecuteReactRepairStrategy:
 
         # --- Phase 2: validate post-plan scene ---
         log.info("[hybrid:%s] phase 2 — post-plan validation", run_id[:8])
-        val_result = _validate_via_tool(tool_executor, task, output_dir / "hybrid_post_plan_snapshot.json")
+        val_result, val_unavailable_reason = _validate_via_tool_with_reason(
+            tool_executor, task, output_dir / "hybrid_post_plan_snapshot.json"
+        )
 
         if val_result is None:
-            log.info("[hybrid:%s] validation unavailable, returning plan trace", run_id[:8])
-            return _stamp_trace(plan_trace, agent_config, started_at, hybrid_repair_used=False, repair_unavailable=True)
+            log.info("[hybrid:%s] validation unavailable (%s), returning plan trace", run_id[:8], val_unavailable_reason)
+            return _stamp_trace(
+                plan_trace, agent_config, started_at,
+                hybrid_repair_used=False,
+                repair_unavailable=True,
+                repair_unavailable_reason=val_unavailable_reason or "validation_unavailable",
+                plan_scene_status=None,
+                plan_score=None,
+                plan_issue_count=None,
+            )
 
         from benchmark.validation.models import ValidationStatus
+        _plan_status = str(val_result.overall_status.value if hasattr(val_result.overall_status, "value") else val_result.overall_status)
+        _plan_score = val_result.total_score
+        _plan_issue_count = len(val_result.issues)
+
         if val_result.overall_status in {ValidationStatus.PASSED, ValidationStatus.WARNING}:
             log.info("[hybrid:%s] scene passed after plan, no repair needed (score=%.3f)", run_id[:8], val_result.total_score)
-            return _stamp_trace(plan_trace, agent_config, started_at, hybrid_repair_used=False)
+            return _stamp_trace(
+                plan_trace, agent_config, started_at,
+                hybrid_repair_used=False,
+                plan_scene_status=_plan_status,
+                plan_score=_plan_score,
+                plan_issue_count=_plan_issue_count,
+            )
 
         log.info(
             "[hybrid:%s] scene needs repair (status=%s, score=%.3f, issues=%d) — starting react repair",
@@ -101,7 +121,20 @@ class PlanExecuteReactRepairStrategy:
 
         # --- Merge traces ---
         merged = _merge_traces(plan_trace, react_trace, agent_config, run_id, task_id, started_at)
-        return _stamp_trace(merged, agent_config, started_at, hybrid_repair_used=True)
+        _repair_status = str(
+            react_trace.metadata.get("effective_max_steps") and (
+                "passed" if react_trace.success else "failed"
+            ) or ("passed" if react_trace.success else "failed")
+        )
+        return _stamp_trace(
+            merged, agent_config, started_at,
+            hybrid_repair_used=True,
+            plan_scene_status=_plan_status,
+            plan_score=_plan_score,
+            plan_issue_count=_plan_issue_count,
+            repair_result_status=_repair_status,
+            repair_result_score=react_trace.metadata.get("react_issue_resolution_rate"),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -114,21 +147,43 @@ def _validate_via_tool(
     snap_path: Path,
 ) -> Any:
     """Call bma_get_scene_snapshot and run SceneValidator. Returns SceneValidationResult or None."""
+    result, _ = _validate_via_tool_with_reason(tool_executor, task, snap_path)
+    return result
+
+
+def _validate_via_tool_with_reason(
+    tool_executor: ToolExecutor,
+    task: dict[str, Any],
+    snap_path: Path,
+) -> tuple[Any, str | None]:
+    """Like _validate_via_tool but also returns the reason validation was unavailable."""
     try:
         result = tool_executor.call_tool("bma_get_scene_snapshot", {})
-        if result.error or not isinstance(result.result, dict):
-            return None
+        if result.error:
+            return None, "snapshot_tool_failed"
+        if not isinstance(result.result, dict):
+            return None, "snapshot_invalid_schema"
         snap_path.parent.mkdir(parents=True, exist_ok=True)
         snap_path.write_text(json.dumps(result.result))
-        from benchmark.blender.models import SceneSnapshot
-        from benchmark.tasks.models import BenchmarkTask
-        from benchmark.validation.scene_validator import SceneValidator
-        snapshot = SceneSnapshot.model_validate(result.result)
-        task_obj = BenchmarkTask.model_validate(task)
-        return SceneValidator().validate(task_obj, snapshot)
+        try:
+            from benchmark.blender.models import SceneSnapshot
+            from benchmark.tasks.models import BenchmarkTask
+            from benchmark.validation.scene_validator import SceneValidator
+            snapshot = SceneSnapshot.model_validate(result.result)
+        except Exception:
+            return None, "snapshot_invalid_schema"
+        try:
+            task_obj = BenchmarkTask.model_validate(task)
+        except Exception:
+            return None, "task_parse_failed"
+        try:
+            val_result = SceneValidator().validate(task_obj, snapshot)
+            return val_result, None
+        except Exception:
+            return None, "validation_exception"
     except Exception as exc:
         log.debug("hybrid: validation via tool failed: %s", exc)
-        return None
+        return None, "tool_disabled"
 
 
 def _make_tool_validator(tool_executor: ToolExecutor, task: dict[str, Any]):
@@ -203,8 +258,33 @@ def _stamp_trace(
     *,
     hybrid_repair_used: bool,
     repair_unavailable: bool = False,
+    repair_unavailable_reason: str | None = None,
+    plan_scene_status: str | None = None,
+    plan_score: float | None = None,
+    plan_issue_count: int | None = None,
+    repair_result_status: str | None = None,
+    repair_result_score: Any = None,
 ) -> AgentTrace:
     finished_at = trace.finished_at or datetime.datetime.now(datetime.timezone.utc)
+    hybrid_meta: dict[str, Any] = {
+        "hybrid_repair_used": hybrid_repair_used,
+        "repair_unavailable": repair_unavailable,
+    }
+    if repair_unavailable and repair_unavailable_reason is not None:
+        hybrid_meta["repair_unavailable_reason"] = repair_unavailable_reason
+    if plan_scene_status is not None:
+        hybrid_meta["plan_scene_status"] = plan_scene_status
+    if plan_score is not None:
+        hybrid_meta["plan_score"] = plan_score
+    if plan_issue_count is not None:
+        hybrid_meta["plan_issue_count"] = plan_issue_count
+    if hybrid_repair_used:
+        hybrid_meta["repair_started"] = True
+        hybrid_meta["repair_start_reason"] = "plan_failed_validation"
+    if repair_result_status is not None:
+        hybrid_meta["repair_result_status"] = repair_result_status
+    if repair_result_score is not None:
+        hybrid_meta["repair_result_score"] = repair_result_score
     return trace.model_copy(
         update={
             "strategy": AgentStrategyName.PLAN_EXECUTE_REACT_REPAIR,
@@ -212,8 +292,7 @@ def _stamp_trace(
             "duration_sec": (finished_at - started_at).total_seconds(),
             "metadata": {
                 **trace.metadata,
-                "hybrid_repair_used": hybrid_repair_used,
-                "repair_unavailable": repair_unavailable,
+                **hybrid_meta,
             },
         }
     )

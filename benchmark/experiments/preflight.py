@@ -213,10 +213,10 @@ def run_contract_smoke_for_experiment(config: ExperimentConfig, output_root: Pat
             _err = material_result.get("error") or {}
             _msg = _err.get("message") if isinstance(_err, dict) else str(_err)
             raise RuntimeError(f"bma_set_material probe failed: {_msg}")
-        export_results = _run_export_smoke(adapter, output_root)
         adapter.collect_scene_snapshot(snapshot_path)
         snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
         _assert_contract_snapshot(snapshot)
+        export_results = _run_export_smoke(adapter, output_root)
     except AssertionError as exc:
         raise PreflightError(f"Socket is reachable, but running server does not support expected BMA contract: {exc}") from exc
     except Exception as exc:  # noqa: BLE001

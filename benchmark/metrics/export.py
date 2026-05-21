@@ -168,6 +168,19 @@ def _pass_type(result: RunResult) -> str:
     if run_status.value == "passed" and result.scene_status.value == "passed":
         validation = result.summary.get("validation", {}) if isinstance(result.summary, dict) else {}
         issue_counts = validation.get("issue_counts") if isinstance(validation, dict) else None
+
+        # clean_pass is forbidden when the agent had an error or error_type is set.
+        # Rule: scene passed + agent error → soft_pass (not clean_pass).
+        if _scene_passed_but_agent_error(result):
+            return "soft_pass"
+
+        structured_error = result.summary.get("structured_error", {}) if isinstance(result.summary, dict) else {}
+        has_error_type = bool(
+            structured_error.get("error_type") if isinstance(structured_error, dict) else False
+        )
+        if has_error_type:
+            return "soft_pass"
+
         return "soft_pass" if isinstance(issue_counts, dict) and bool(issue_counts) else "clean_pass"
     if result.scene_status.value == "failed":
         return "failed_validation"

@@ -21,8 +21,10 @@ agents:
   config_root: configs/agents
 mcp_profiles:
   - minimal
+  - no_python
   - inspection_enabled
   - python_enabled
+  - full
 models:
   ids:
     - google/gemini-2.5-flash-lite
@@ -40,3 +42,29 @@ metadata:
     enabled: true
     mode: diagnostic
     fail_fast: false
+  strategy_limits:
+    react:
+      max_steps: 20
+      stop_after_scene_passed: true
+      detect_repeated_actions: true
+      detect_duplicate_objects: true
+      detect_no_progress: true
+      no_progress_limit: 3
+      repair_activation_diagnostics: true
+    plan_execute_react_repair:
+      max_steps: 25
+      stop_after_scene_passed: true
+      detect_repeated_actions: true
+      detect_duplicate_objects: true
+      detect_no_progress: true
+      no_progress_limit: 3
+      repair_activation_diagnostics: true
+  readiness_gates:
+    export_smoke_required: true
+    invalid_tool_response_export_max: 0
+    clean_pass_with_error_type_max: 0
+    react_max_steps_rate_max: 0.2
+    require_react_repair_steps_on_validation_issues: true
+  cost:
+    source: openrouter
+    disable_internal_estimate: true

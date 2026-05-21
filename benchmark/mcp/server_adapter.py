@@ -20,6 +20,14 @@ from benchmark.mcp.tool_registry import McpToolRegistry
 
 _RECV_BUFFER = 8192
 
+# Error types that indicate a transient socket failure safe to retry.
+_TRANSIENT_ERROR_TYPES = {"EmptySocketResponse", "SocketTimeout", "SocketError"}
+
+# Tools whose calls are idempotent and can be safely retried once on transient errors.
+# bma_set_transform / bma_set_material are always idempotent (overwrite existing state).
+# bma_create_object is idempotent only when if_exists=update (handled in _call_create_object_with_if_exists).
+_IDEMPOTENT_TOOLS = {"bma_set_transform", "bma_set_material", "bma_assign_material"}
+
 
 def _connect_host(host: str) -> str:
     return "127.0.0.1" if host == "localhost" else host
@@ -132,7 +140,12 @@ class ExternalBlenderMcpServerAdapter:
     # ------------------------------------------------------------------
 
     def call_tool(self, tool_name: str, params: dict[str, Any] | None = None) -> Any:
-        """Call a tool on the Blender MCP socket and return the parsed response."""
+        """Call a tool on the Blender MCP socket and return the parsed response.
+
+        Idempotent tools (set_transform, set_material, assign_material) and
+        bma_create_object with if_exists=update are retried once on transient
+        socket failures (EmptySocketResponse, SocketTimeout, SocketError).
+        """
         try:
             profile = McpProfile(self._config.profile)
         except ValueError:
@@ -147,6 +160,22 @@ class ExternalBlenderMcpServerAdapter:
         if tool_name == "bma_create_object" and isinstance(params, dict) and "if_exists" in params:
             return self._call_create_object_with_if_exists(params, profile)
 
+        result = self._socket_call_once(tool_name, params)
+
+        # Retry once for idempotent tools on transient failures.
+        if (
+            isinstance(result, dict)
+            and not result.get("ok")
+            and isinstance(result.get("error"), dict)
+            and result["error"].get("type") in _TRANSIENT_ERROR_TYPES
+            and tool_name in _IDEMPOTENT_TOOLS
+        ):
+            result = self._socket_call_once(tool_name, params)
+
+        return result
+
+    def _socket_call_once(self, tool_name: str, params: dict[str, Any] | None) -> Any:
+        """Execute a single socket round-trip and return a parsed _tool_envelope dict."""
         socket_cmd = _TOOL_TO_SOCKET_CMD.get(tool_name, tool_name)
         payload = json.dumps({"type": socket_cmd, "params": params or {}}).encode()
 
@@ -165,7 +194,7 @@ class ExternalBlenderMcpServerAdapter:
             sock.settimeout(self._config.request_timeout_sec)
             sock.sendall(payload)
             raw = _recv_all(sock)
-        except TimeoutError as exc:
+        except TimeoutError:
             return _tool_envelope(
                 tool_name,
                 ok=False,
@@ -184,14 +213,24 @@ class ExternalBlenderMcpServerAdapter:
         finally:
             sock.close()
 
-        try:
-            response = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raw_preview = raw.decode("utf-8", errors="replace")[:200] if isinstance(raw, (bytes, bytearray)) else str(raw)[:200]
+        if not raw:
             return _tool_envelope(
                 tool_name,
                 ok=False,
-                result={"raw_len": len(raw), "raw_preview": raw_preview},
+                result={"raw_len": 0, "raw_preview": "", "failure_stage": "tool_response_parse"},
+                error_type="EmptySocketResponse",
+                error_message=f"Empty response from Blender socket for tool '{tool_name}'",
+            )
+
+        try:
+            response = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raw_bytes = raw if isinstance(raw, (bytes, bytearray)) else raw.encode("utf-8", errors="replace")
+            raw_preview = raw_bytes.decode("utf-8", errors="replace")[:200]
+            return _tool_envelope(
+                tool_name,
+                ok=False,
+                result={"raw_len": len(raw_bytes), "raw_preview": raw_preview, "failure_stage": "tool_response_parse"},
                 error_type="InvalidJsonResponse",
                 error_message=f"Invalid JSON from '{tool_name}': {exc}",
             )
@@ -209,6 +248,21 @@ class ExternalBlenderMcpServerAdapter:
             )
 
         result = response.get("result", response) if isinstance(response, dict) else response
+
+        # If the addon returned an ok=False dict inside a status=success wrapper
+        # (e.g. export_scene catches its own exceptions), surface it as an error envelope.
+        if isinstance(result, dict) and result.get("ok") is False and "error" in result:
+            _err = result.get("error") or {}
+            _msg = _err.get("message") if isinstance(_err, dict) else str(_err)
+            _etype = _err.get("type") if isinstance(_err, dict) else "ToolError"
+            return _tool_envelope(
+                tool_name,
+                ok=False,
+                result=_err if isinstance(_err, dict) else None,
+                error_type=str(_etype or "ToolError"),
+                error_message=str(_msg or "Tool failed"),
+            )
+
         return _tool_envelope(tool_name, ok=True, result=result)
 
     def _call_create_object_with_if_exists(
@@ -268,7 +322,18 @@ class ExternalBlenderMcpServerAdapter:
                 )
             # if_exists == "update": fall through to normal create (Blender will auto-update or rename)
 
-        raw_result = self.call_tool("bma_create_object", create_params)
+        raw_result = self._socket_call_once("bma_create_object", create_params)
+
+        # Retry once on transient failures when if_exists=update (idempotent).
+        if (
+            if_exists == "update"
+            and isinstance(raw_result, dict)
+            and not raw_result.get("ok")
+            and isinstance(raw_result.get("error"), dict)
+            and raw_result["error"].get("type") in _TRANSIENT_ERROR_TYPES
+        ):
+            raw_result = self._socket_call_once("bma_create_object", create_params)
+
         if isinstance(raw_result, dict) and raw_result.get("ok"):
             inner = raw_result.get("result") or {}
             if isinstance(inner, dict):

@@ -14,7 +14,7 @@ _EXTERNAL_ASSET_TOOLS = frozenset(
 )
 _AGENT_HIDDEN_TOOLS = frozenset({"get_bma_profile_info", "get_scene_info", "get_object_info"})
 
-_REACT_RULES = """\
+_REACT_JSON_RULES = """\
 ReAct loop rules — follow exactly:
 1. Fix exactly one validation issue per step.
 2. Do not create an object that already exists in the scene; update its transform or material instead.
@@ -29,6 +29,17 @@ Required response schema (done):
 {"thought": "<why scene is complete>", "action": null, "finish": true}
 
 When a suggested repair is provided in the current scene state, use it unless you have a specific reason to deviate.\
+"""
+
+_REACT_NATIVE_RULES = """\
+ReAct native tool-calling rules — follow exactly:
+1. Fix exactly one validation issue per step.
+2. Use one native tool call for the next scene mutation or inspection.
+3. Do not create an object that already exists in the scene; update its transform or material instead.
+4. Do not export the scene before all required objects and materials exist.
+5. If the scene has already passed validation, return a short final answer with no tool calls.
+
+When a suggested repair is provided in the current scene state, call that tool unless you have a specific reason to deviate.\
 """
 
 
@@ -65,6 +76,8 @@ class PromptBuilder:
             "When a task specifies object dimensions, use the dimensions parameter; do not approximate dimensions with scale.",
             "When assigning materials, prefer bma_assign_material; include material_name, base_color, roughness, and metallic when specified.",
             "When a camera must look at a target point, use target with bma_create_camera or bma_create_camera_look_at instead of manual Euler rotation.",
+            "For export tasks, create all required scene objects, materials, and lights before bma_export_scene.",
+            "For .blend export tasks call bma_export_scene with format='blend' and filename='result.blend'; for GLB export tasks use format='glb' and the task filename such as 'exports/result.glb'.",
             "Return tool_calls when the API supports them, otherwise return a JSON action in content.",
             (
                 "For non-ReAct strategies, fallback JSON action format: "
@@ -102,10 +115,12 @@ class PromptBuilder:
         task: dict[str, Any],
         observations: list[str | dict[str, Any]],
         step_context: dict[str, Any] | None = None,
+        *,
+        native_tool_calls: bool = False,
     ) -> str:
         lines = [
             self.build_task_prompt(task),
-            _REACT_RULES,
+            _REACT_NATIVE_RULES if native_tool_calls else _REACT_JSON_RULES,
         ]
         if step_context:
             lines.append(f"Current scene state:\n{_format_value(step_context)}")
@@ -154,8 +169,15 @@ def build_react_prompt_context(
     task: dict[str, Any],
     observations: list[str | dict[str, Any]],
     step_context: dict[str, Any] | None = None,
+    *,
+    native_tool_calls: bool = False,
 ) -> str:
-    return PromptBuilder().build_react_prompt_context(task, observations, step_context)
+    return PromptBuilder().build_react_prompt_context(
+        task,
+        observations,
+        step_context,
+        native_tool_calls=native_tool_calls,
+    )
 
 
 def build_plan_prompt(task: dict[str, Any]) -> str:

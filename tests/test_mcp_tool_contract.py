@@ -101,6 +101,15 @@ def test_bma_light_and_camera_contract_support_checked_fields() -> None:
     assert {"name", "location", "target", "focal_length", "make_active"}.issubset(look_at_params)
 
 
+def test_bma_export_contract_supports_blend_and_runner_injected_path() -> None:
+    contract = TOOL_CONTRACT_MAP["bma_export_scene"]
+    params = {p.name: p for p in contract.parameters}
+
+    assert "BLEND" in contract.description
+    assert params["filepath"].required is False
+    assert "filename" in params
+
+
 def test_tool_categories_populated():
     categories = {tc.category for tc in TOOL_CONTRACTS}
     assert ToolCategory.INSPECTION in categories

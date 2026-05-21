@@ -38,6 +38,7 @@ expected_scene:
       type: SUN
       location: { x: 0.0, y: 0.0, z: 5.0 }
       rotation: { x: 45.0, y: 0.0, z: 35.0 }
+      direction_tolerance_deg: 15.0
       energy: 3.0
       tolerance: 0.1
   cameras: []
@@ -62,4 +63,3 @@ metadata:
   author: benchmark
   version: "1.0"
   description: Directional lighting task using a sun light rotation.
-

@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from benchmark.agent.llm import LlmResponse, MockLlmClient
-from benchmark.agent.models import AgentConfig, AgentStepType, AgentStrategyName, LlmConfig
+from benchmark.agent.llm import LlmResponse, LlmToolCall, MockLlmClient
+from benchmark.agent.models import AgentConfig, AgentStepType, AgentStrategyName, LlmConfig, ReactActionProtocol
 from benchmark.agent.runtime import AgentRuntime
 from benchmark.agent.strategies import ReactStrategy, create_agent_strategy
 from benchmark.agent.tool_context import AgentToolContext
@@ -16,6 +16,49 @@ def make_config(max_steps: int = 10) -> AgentConfig:
         mcp_profile="minimal",
         max_steps=max_steps,
     )
+
+
+def test_react_json_protocol_does_not_pass_native_tool_schemas() -> None:
+    llm = MockLlmClient([LlmResponse(content='{"thought":"Done.","action":null,"finish":true}')])
+
+    ReactStrategy().run(
+        {"id": "task-1", "prompt": "Inspect scene"},
+        make_config(),
+        llm,
+        MockToolExecutor(),
+        AgentToolContext(run_id="run-1", task_id="task-1"),
+        Path("."),
+    )
+
+    assert llm.calls[0].tools is None
+
+
+def test_react_native_protocol_accepts_tool_calls() -> None:
+    llm = MockLlmClient(
+        [
+            LlmResponse(
+                tool_calls=[LlmToolCall(name="get_scene_info", arguments={})],
+                finish_reason="tool_calls",
+            ),
+            LlmResponse(content="Done."),
+        ]
+    )
+    config = make_config().model_copy(
+        update={"react_action_protocol": ReactActionProtocol.NATIVE_TOOL_CALLS}
+    )
+
+    trace = ReactStrategy().run(
+        {"id": "task-1", "prompt": "Inspect scene"},
+        config,
+        llm,
+        MockToolExecutor(results={"get_scene_info": {"objects": []}}),
+        AgentToolContext(run_id="run-1", task_id="task-1"),
+        Path("."),
+    )
+
+    assert llm.calls[0].tools
+    assert trace.success is True
+    assert any(step.tool_name == "get_scene_info" for step in trace.steps)
 
 
 def test_react_strategy_runs_multi_step_mock_scenario() -> None:
@@ -131,7 +174,7 @@ def test_react_strategy_rejects_plain_text_pseudo_tool_call() -> None:
             LlmResponse(
                 content='Tool: bma_create_object\nArguments: {"name": "Cube", "type": "cube"}'
             ),
-            LlmResponse(content='{"thought":"Done.","action":null,"finish":true}'),
+            LlmResponse(content='Still not JSON. {"thought":"Create","action":{"tool":"bma_create_object","arguments":{}},"finish":false}'),
         ]
     )
 
@@ -150,6 +193,31 @@ def test_react_strategy_rejects_plain_text_pseudo_tool_call() -> None:
     assert len(tool_steps) == 0
 
 
+def test_react_json_protocol_retries_once_on_parse_error() -> None:
+    llm = MockLlmClient(
+        [
+            LlmResponse(content="I should create it."),
+            LlmResponse(
+                content='{"thought":"Create Cube.","action":{"tool":"bma_create_object","arguments":{"name":"Cube","type":"MESH_CUBE"}},"finish":false}'
+            ),
+            LlmResponse(content='{"thought":"Done.","action":null,"finish":true}'),
+        ]
+    )
+
+    trace = ReactStrategy().run(
+        {"id": "task-1", "prompt": "Create a cube"},
+        make_config(),
+        llm,
+        MockToolExecutor(results={"bma_create_object": {"name": "Cube"}}),
+        AgentToolContext(run_id="run-1", task_id="task-1"),
+        Path("."),
+    )
+
+    assert trace.success is True
+    assert len(llm.calls) == 3
+    assert trace.steps[1].metadata["react_parse_retry"] == 1
+
+
 def test_react_strategy_rejects_fenced_and_mixed_json() -> None:
     responses = [
         '```json\n{"thought":"Create","action":{"tool":"bma_create_object","arguments":{}},"finish":false}\n```',
@@ -160,7 +228,7 @@ def test_react_strategy_rejects_fenced_and_mixed_json() -> None:
         trace = ReactStrategy().run(
             {"id": "task-1", "prompt": "Create a cube"},
             make_config(),
-            MockLlmClient([LlmResponse(content=content)]),
+            MockLlmClient([LlmResponse(content=content), LlmResponse(content=content)]),
             MockToolExecutor(),
             AgentToolContext(run_id="run-1", task_id="task-1"),
             Path("."),

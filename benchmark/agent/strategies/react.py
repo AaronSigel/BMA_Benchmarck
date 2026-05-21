@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from benchmark.agent.errors import AgentRuntimeError
 from benchmark.agent.llm.base import LlmClient, LlmMessage, LlmResponse
-from benchmark.agent.models import AgentConfig, AgentStepType, AgentTrace, ToolCallStatus
+from benchmark.agent.models import AgentConfig, AgentStepType, AgentTrace, ReactActionProtocol, ToolCallStatus
 from benchmark.agent.prompts import PromptBuilder, _AGENT_HIDDEN_TOOLS
 from benchmark.agent.tool_context import AgentToolContext, ToolSchemaProvider
 from benchmark.agent.tool_executor import ToolExecutor
@@ -99,6 +99,7 @@ class ReactStrategy:
             self.tool_schema_provider.to_openai_tool_schema(contract)
             for contract in tool_contracts
         ]
+        use_native_tool_calls = agent_config.react_action_protocol == ReactActionProtocol.NATIVE_TOOL_CALLS
 
         # Resolve effective max_steps from task category (P0.6).
         effective_max_steps = _resolve_max_steps(task, agent_config)
@@ -147,6 +148,10 @@ class ReactStrategy:
         mutation_preceded_by_inspection = 0
         last_tool_was_inspection = False
 
+        # Queued follow-up repairs: populated when mapper returns a repair with follow_up_step.
+        # Executed deterministically at the start of the next iteration, before calling LLM.
+        pending_repair_actions: list[_ReactAction] = []
+
         # Build first-step checklist (P2.2) — injected before any validation is available.
         initial_step_context: dict[str, Any] | None = None
         if task_obj is not None:
@@ -187,51 +192,117 @@ class ReactStrategy:
             _top_issue_dict: dict[str, Any] | None = None
             _suggested_repair_dict: dict[str, Any] | None = None
 
-            # Build validator-driven step context (P0.2).
-            step_context = _build_step_context(
-                last_validation_result, task_obj, initial_step_context if step_num == 1 else None
-            )
-            if step_context:
-                _top_issue_dict = step_context.get("top_issue")
-                _suggested_repair_dict = step_context.get("suggested_repair")
+            # --- Select action: queued follow-up → deterministic repair → LLM fallback ---
+            repair_action: Any = None  # RepairAction | None — used for parse-error fallback
 
-            log.info("[react:%s] step %d/%d — calling LLM", trace.run_id[:8], step_num, effective_max_steps)
-            messages = [
-                system_message,
-                LlmMessage(
-                    role="user",
-                    content=self.prompt_builder.build_react_prompt_context(task, observations, step_context),
-                ),
-            ]
-            llm_started_at = datetime.datetime.now(datetime.timezone.utc)
-            response = llm_client.complete(
-                messages,
-                tools=tool_schemas,
-                timeout_sec=agent_config.step_timeout_sec,
-            )
-            llm_finished_at = datetime.datetime.now(datetime.timezone.utc)
-            action = _parse_react_action(response)
-            trace = trace.add_step(
-                AgentStepType.LLM_CALL,
-                thought=action.thought,
-                raw_llm_response=response.model_dump(mode="json", exclude_none=True),
-                started_at=llm_started_at,
-                finished_at=llm_finished_at,
-                duration_sec=(llm_finished_at - llm_started_at).total_seconds(),
-                metadata={"tool_schema_count": len(tool_schemas)},
-            )
-
-            if action.parse_error is not None:
-                error_message = "LlmParseError"
-                trace = trace.add_step(
-                    AgentStepType.ERROR,
-                    error=f"LlmParseError: {action.parse_error}",
-                    metadata={
-                        "react_error_type": "LlmParseError",
-                        "react_non_strict_response": True,
-                    },
+            if pending_repair_actions:
+                # Priority 1: execute queued follow-up from the previous step's repair plan.
+                action = pending_repair_actions.pop(0)
+                _is_deterministic = True
+                log.info(
+                    "[react:%s] step %d/%d — queued follow-up repair: %s",
+                    trace.run_id[:8], step_num, effective_max_steps, action.tool_name,
                 )
-                break
+                trace = trace.add_step(
+                    AgentStepType.OBSERVATION,
+                    observation={"queued_follow_up_repair": True, "tool": action.tool_name, "arguments": action.arguments},
+                    metadata={"react": {"step_index": step_num, "queued_follow_up": True}},
+                )
+            else:
+                # Build validator-driven step context (prompt injection + repair detection).
+                step_context, repair_action = _build_step_context(
+                    last_validation_result, task_obj, initial_step_context if step_num == 1 else None
+                )
+                if step_context:
+                    _top_issue_dict = step_context.get("top_issue")
+                    _suggested_repair_dict = step_context.get("suggested_repair")
+
+                # Priority 2: deterministic repair when mapper supplies complete arguments.
+                action = _react_action_from_repair(repair_action, tool_contracts)
+                if action is not None:
+                    _is_deterministic = True
+                    # Queue follow-up repair so it runs in the very next iteration.
+                    if repair_action is not None and repair_action.follow_up_step is not None:
+                        follow_up = _react_action_from_repair(repair_action.follow_up_step, tool_contracts)
+                        if follow_up is not None:
+                            pending_repair_actions.append(follow_up)
+                    log.info(
+                        "[react:%s] step %d/%d — deterministic repair: %s",
+                        trace.run_id[:8], step_num, effective_max_steps, action.tool_name,
+                    )
+                    trace = trace.add_step(
+                        AgentStepType.OBSERVATION,
+                        observation={"deterministic_repair": True, "tool": action.tool_name, "arguments": action.arguments},
+                        metadata={
+                            "react": {
+                                "step_index": step_num,
+                                "top_issue": _top_issue_dict,
+                                "suggested_repair": _suggested_repair_dict,
+                                "deterministic_repair": True,
+                            }
+                        },
+                    )
+                else:
+                    # Priority 3: LLM fallback — mapper could not build a complete action.
+                    _is_deterministic = False
+                    log.info(
+                        "[react:%s] step %d/%d — calling LLM",
+                        trace.run_id[:8], step_num, effective_max_steps,
+                    )
+                    messages = [
+                        system_message,
+                        LlmMessage(
+                            role="user",
+                            content=self.prompt_builder.build_react_prompt_context(
+                                task,
+                                observations,
+                                step_context,
+                                native_tool_calls=use_native_tool_calls,
+                            ),
+                        ),
+                    ]
+                    response, action, trace = _complete_and_parse_action(
+                        llm_client,
+                        messages,
+                        trace,
+                        tool_schemas if use_native_tool_calls else None,
+                        agent_config.step_timeout_sec,
+                        use_native_tool_calls=use_native_tool_calls,
+                        max_parse_retries=0 if use_native_tool_calls else min(agent_config.max_retries, 1),
+                    )
+
+                    if action.parse_error is not None:
+                        # Before hard-failing, attempt a lenient deterministic fallback: use the
+                        # mapper's repair args even if some required fields are absent (best effort).
+                        fallback: _ReactAction | None = None
+                        if repair_action is not None:
+                            fallback = _ReactAction(
+                                thought=f"LLM parse failed; attempting repair: {repair_action.description}",
+                                tool_name=repair_action.tool_name,
+                                arguments=repair_action.arguments_template or {},
+                            )
+                        if fallback is not None:
+                            action = fallback
+                            trace = trace.add_step(
+                                AgentStepType.OBSERVATION,
+                                observation="LLM parse failed; falling back to deterministic repair action",
+                                metadata={"llm_parse_fallback_used": True, "repair_source": "issue_action_mapper"},
+                            )
+                            log.info(
+                                "[react:%s] step %d — LLM parse error; deterministic fallback: %s",
+                                trace.run_id[:8], step_num, repair_action.tool_name,
+                            )
+                        else:
+                            error_message = "LlmParseError"
+                            trace = trace.add_step(
+                                AgentStepType.ERROR,
+                                error=f"LlmParseError: {action.parse_error}",
+                                metadata={
+                                    "react_error_type": "LlmParseError",
+                                    "react_non_strict_response": True,
+                                },
+                            )
+                            break
 
             if action.final_answer is not None:
                 # R-05: only allow finish if scene passed or validator unavailable.
@@ -441,8 +512,8 @@ class ReactStrategy:
             else:
                 log.info("[react:%s] step %d — tool %s ok (%.2fs)", trace.run_id[:8], step_num, action.tool_name, tool_result.duration_sec or 0)
 
-            # Count repair-driven steps (top_issue was present when action was chosen).
-            _is_repair_step = _top_issue_dict is not None
+            # Count repair-driven steps (deterministic repairs or LLM step with a top_issue).
+            _is_repair_step = _is_deterministic or _top_issue_dict is not None
             if _is_repair_step:
                 repair_step_count += 1
 
@@ -657,27 +728,33 @@ def _build_step_context(
     val_result: Any,
     task_obj: Any,
     initial_context: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Build the current-scene-state dict injected into each step's prompt."""
+) -> tuple[dict[str, Any] | None, Any]:
+    """Build the current-scene-state dict injected into each step's prompt.
+
+    Returns (context_dict, repair_action_or_None). The RepairAction object is
+    passed back to the caller so the loop can execute it deterministically
+    without re-running the mapper.
+    """
     if val_result is None:
-        return initial_context  # First step: task checklist
+        return initial_context, None  # First step: task checklist only
 
     from benchmark.agent.strategies.issue_action_mapper import select_top_issue, map_issue_to_repair
 
     issues = val_result.issues
     top_issue = select_top_issue(issues) if issues else None
+    repair_action = None
     suggested_repair = None
     if top_issue is not None and task_obj is not None:
-        action = map_issue_to_repair(top_issue, task_obj)
-        if action is not None:
+        repair_action = map_issue_to_repair(top_issue, task_obj)
+        if repair_action is not None:
             suggested_repair = {
-                "tool": action.tool_name,
-                "arguments": action.arguments_template,
-                "description": action.description,
+                "tool": repair_action.tool_name,
+                "arguments": repair_action.arguments_template,
+                "description": repair_action.description,
             }
-            if action.requires_prior_step:
+            if repair_action.follow_up_step:
                 suggested_repair["note"] = (
-                    f"After this step, also run: {action.requires_prior_step.tool_name}"
+                    f"Also run next: {repair_action.follow_up_step.tool_name}"
                 )
 
     ctx: dict[str, Any] = {
@@ -695,7 +772,7 @@ def _build_step_context(
         ctx["suggested_repair"] = suggested_repair
     if initial_context:
         ctx.update(initial_context)
-    return ctx
+    return ctx, repair_action
 
 
 def _build_no_progress_hint(val_result: Any, task_obj: Any) -> str:
@@ -715,6 +792,128 @@ def _build_no_progress_hint(val_result: Any, task_obj: Any) -> str:
         if repair is not None:
             hint += f" Suggested repair: use {repair.tool_name} with {repair.arguments_template}."
     return hint
+
+
+def _react_action_from_repair(
+    repair: Any,  # RepairAction | None
+    tool_contracts: list[Any],
+) -> _ReactAction | None:
+    """Convert a RepairAction into a _ReactAction if all required args are present."""
+    if repair is None:
+        return None
+    tool_name = repair.tool_name
+    arguments = repair.arguments_template or {}
+    if not _has_required_repair_arguments(tool_name, arguments, tool_contracts):
+        return None
+    return _ReactAction(
+        thought=f"Repair: {repair.description}",
+        tool_name=tool_name,
+        arguments=arguments,
+    )
+
+
+def _action_from_suggested_repair(
+    suggested_repair: dict[str, Any] | None,
+    tool_contracts: list[Any],
+) -> _ReactAction | None:
+    """Return a deterministic action when the mapper supplied complete args."""
+    if not isinstance(suggested_repair, dict):
+        return None
+    tool_name = suggested_repair.get("tool")
+    arguments = suggested_repair.get("arguments")
+    if not isinstance(tool_name, str) or not tool_name:
+        return None
+    if arguments is None:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        return None
+    if not _has_required_repair_arguments(tool_name, arguments, tool_contracts):
+        return None
+    return _ReactAction(
+        thought=f"Apply validator suggested repair for {suggested_repair.get('description') or tool_name}.",
+        tool_name=tool_name,
+        arguments=arguments,
+    )
+
+
+def _has_required_repair_arguments(
+    tool_name: str,
+    arguments: dict[str, Any],
+    tool_contracts: list[Any],
+) -> bool:
+    # Export paths are injected by _ExportPathFixingExecutor from format/filename.
+    if tool_name == "bma_export_scene":
+        return bool(arguments.get("format") or arguments.get("filename") or arguments.get("filepath"))
+    contract = next((c for c in tool_contracts if getattr(c, "name", None) == tool_name), None)
+    if contract is None:
+        return False
+    for param in getattr(contract, "required_params", []):
+        if param.name not in arguments:
+            return False
+        value = arguments[param.name]
+        if value is None or value == "":
+            return False
+    return True
+
+
+def _complete_and_parse_action(
+    llm_client: LlmClient,
+    messages: list[LlmMessage],
+    trace: AgentTrace,
+    tools: list[dict[str, Any]] | None,
+    timeout_sec: int | float,
+    *,
+    use_native_tool_calls: bool,
+    max_parse_retries: int,
+) -> tuple[LlmResponse, _ReactAction, AgentTrace]:
+    attempts = max_parse_retries + 1
+    response: LlmResponse | None = None
+    action: _ReactAction | None = None
+    current_messages = list(messages)
+
+    for attempt in range(attempts):
+        llm_started_at = datetime.datetime.now(datetime.timezone.utc)
+        response = llm_client.complete(
+            current_messages,
+            tools=tools,
+            timeout_sec=timeout_sec,
+        )
+        llm_finished_at = datetime.datetime.now(datetime.timezone.utc)
+        action = (
+            _parse_native_react_action(response)
+            if use_native_tool_calls
+            else _parse_react_action(response)
+        )
+        trace = trace.add_step(
+            AgentStepType.LLM_CALL,
+            thought=action.thought,
+            raw_llm_response=response.model_dump(mode="json", exclude_none=True),
+            started_at=llm_started_at,
+            finished_at=llm_finished_at,
+            duration_sec=(llm_finished_at - llm_started_at).total_seconds(),
+            metadata={
+                "tool_schema_count": len(tools or []),
+                "react_parse_retry": attempt,
+                "react_action_protocol": "native_tool_calls" if use_native_tool_calls else "json_content",
+            },
+        )
+        if action.parse_error is None or attempt >= max_parse_retries:
+            return response, action, trace
+        current_messages = [
+            *messages,
+            LlmMessage(
+                role="user",
+                content=(
+                    "Your previous ReAct response was not valid strict JSON. "
+                    "Return ONLY one JSON object matching exactly this schema, with no markdown or text before/after: "
+                    '{"thought":"<one sentence>","action":{"tool":"<bma_tool_name>","arguments":{}},"finish":false} '
+                    'or {"thought":"<done reason>","action":null,"finish":true}.'
+                ),
+            ),
+        ]
+
+    assert response is not None and action is not None
+    return response, action, trace
 
 
 # ---------------------------------------------------------------------------
@@ -785,6 +984,19 @@ def _parse_react_action(response: LlmResponse) -> _ReactAction:
     if not isinstance(arguments, dict):
         return _ReactAction(parse_error="ReactNonStrictResponse: action.arguments must be an object")
     return _ReactAction(thought=thought, tool_name=tool_name, arguments=arguments)
+
+
+def _parse_native_react_action(response: LlmResponse) -> _ReactAction:
+    if response.tool_calls:
+        first = response.tool_calls[0]
+        return _ReactAction(tool_name=first.name, arguments=first.arguments)
+    if response.content is not None and response.content.strip():
+        content = response.content.strip()
+        action = _parse_react_action(response)
+        if action.parse_error is None:
+            return action
+        return _ReactAction(thought=content, final_answer=content)
+    return _ReactAction(parse_error="empty native ReAct response")
 
 
 def _optional_str(value: Any) -> str | None:

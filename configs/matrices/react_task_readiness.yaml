@@ -2,7 +2,7 @@ matrix_id: react_task_readiness
 title: ReAct Task Readiness Gate
 description: >
   Fast readiness matrix for ReAct and task stability before the full benchmark.
-  Runs 5 representative tasks against 3 strategies, 3 MCP profiles, and 1 model.
+  Runs 7 representative tasks against 4 strategies, 3 MCP profiles, and 1 model.
   Use this to verify the stand is working before launching diagnostic_repeat_gemini_v5.
 
 tasks:
@@ -10,7 +10,9 @@ tasks:
     - geometry_001_basic_primitives
     - materials_001_basic_colors
     - lighting_001_area_light
-    - camera_001_front_view
+    - lighting_003_three_point_lighting
+    - camera_003_composition_view
+    - export_001_blend_file
     - export_002_glb_file
 
 agents:
@@ -18,6 +20,7 @@ agents:
     - direct_openrouter
     - plan_execute_openrouter
     - react_openrouter
+    - react_native_openrouter
   config_root: configs/agents
 
 mcp_profiles:
@@ -39,7 +42,7 @@ report_config_path: configs/reports/default_report.yaml
 
 metadata:
   purpose: readiness_gate
-  expected_runs: 45
+  expected_runs: 84
   report_ready_mvp: true
   timestamp_output_root: true
   preflight:

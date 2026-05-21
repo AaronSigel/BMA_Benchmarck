@@ -123,7 +123,8 @@ class AgentRuntime:
 
         if trace.error and isinstance(trace.error, str) and trace.structured_error is None:
             from benchmark.runner.controlled_errors import controlled_error_payload
-            structured = controlled_error_payload(trace.error)
+            normalized_error = trace.metadata.get("react_error_type") or trace.error
+            structured = controlled_error_payload(str(normalized_error))
             trace = trace.model_copy(update={"structured_error": structured})
 
         run_artifacts_dir = artifacts_dir
@@ -150,7 +151,10 @@ class AgentRuntime:
             started_at=started_at,
             finished_at=finished_at,
             duration_sec=trace.duration_sec,
-            summary=summarize_trace(trace),
+            summary={
+                **summarize_trace(trace),
+                **({"structured_error": trace.structured_error} if trace.structured_error else {}),
+            },
             metadata={"strategy": self.config.strategy.value, "model": self.config.llm.model if self.config.llm else None},
         )
 

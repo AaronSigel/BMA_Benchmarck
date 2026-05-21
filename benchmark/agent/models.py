@@ -16,6 +16,11 @@ class AgentStrategyName(str, Enum):
     PLAN_EXECUTE_REACT_REPAIR = "plan_execute_react_repair"
 
 
+class ReactActionProtocol(str, Enum):
+    JSON_CONTENT = "json_content"
+    NATIVE_TOOL_CALLS = "native_tool_calls"
+
+
 class LlmProvider(str, Enum):
     OPENROUTER = "openrouter"
     OPENAI_COMPATIBLE = "openai_compatible"
@@ -123,6 +128,7 @@ class AgentConfig(BaseModel):
     detect_no_progress: bool = True
     no_progress_limit: int = Field(default=2, ge=1)
     repeated_action_mode: str = "debug"
+    react_action_protocol: ReactActionProtocol = ReactActionProtocol.JSON_CONTENT
     allow_python_tools: bool = False
     allow_inspection_tools: bool = True
     system_prompt_template: str | None = None

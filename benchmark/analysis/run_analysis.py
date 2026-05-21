@@ -206,6 +206,19 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
             "successful_correction_count": int(trace.metadata.get("successful_correction_count", 0)),
             "wasted_step_count": int(trace.metadata.get("wasted_step_count", 0)),
         })
+        for react_key in (
+            "react_steps_total",
+            "react_repair_steps",
+            "react_wasted_steps",
+            "react_no_progress_count",
+            "react_blocked_export_count",
+            "react_max_steps_count",
+            "react_error_type",
+            "react_issue_resolution_rate",
+        ):
+            value = trace.metadata.get(react_key)
+            if isinstance(value, (float, str, int, bool)):
+                metrics[react_key] = value
         for key, val in [
             ("average_step_duration_sec", agent_summary.average_step_duration_sec),
             ("max_step_duration_sec", agent_summary.max_step_duration_sec),
@@ -300,7 +313,18 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
             failure_stage = structured_error.get("failure_stage")
             if isinstance(failure_stage, str) and failure_stage:
                 metrics["failure_stage"] = failure_stage
-    if trace is not None and isinstance(trace.error, dict):
+    if trace is not None and trace.structured_error is not None:
+        error_type = trace.structured_error.get("error_type")
+        source = trace.structured_error.get("source")
+        failure_stage = trace.structured_error.get("failure_stage")
+        if isinstance(error_type, str) and error_type and "structured_error_type" not in metrics:
+            metrics.setdefault("structured_error_type", error_type)
+            metrics[f"error.{error_type}"] = int(metrics.get(f"error.{error_type}", 0) or 0) + 1
+        if isinstance(source, str) and source:
+            metrics.setdefault("structured_error_source", source)
+        if isinstance(failure_stage, str) and failure_stage:
+            metrics.setdefault("failure_stage", failure_stage)
+    elif trace is not None and isinstance(trace.error, dict):
         error_type = trace.error.get("error_type")
         source = trace.error.get("source")
         failure_stage = trace.error.get("failure_stage")

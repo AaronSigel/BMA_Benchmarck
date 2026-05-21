@@ -85,6 +85,10 @@ def _angle_between_deg(
     return math.degrees(math.acos(dot))
 
 
+def _prefer_direction_for_rotation(expected: ExpectedLight) -> bool:
+    return expected.type.upper() in {"SUN", "AREA"}
+
+
 class LightValidator:
     name = "light_validator"
 
@@ -174,14 +178,17 @@ class LightValidator:
         if expected.target is not None:
             # Direction-based check: compare actual light direction to expected target direction
             actual_dir = _euler_to_direction(actual.rotation_euler)
-            if expected.location is not None:
-                expected_dir = _direction_to_target(actual.location, expected.target)
-            else:
-                expected_dir = _direction_to_target(actual.location, expected.target)
+            expected_dir = _direction_to_target(actual.location, expected.target)
             angle_deg = _angle_between_deg(actual_dir, expected_dir)
             tol = expected.direction_tolerance_deg
             dir_score = max(0.0, 1.0 - angle_deg / max(tol, 1.0))
             scores.append(dir_score)
+        elif expected.rotation is not None and _prefer_direction_for_rotation(expected):
+            actual_dir = _euler_to_direction(actual.rotation_euler)
+            expected_dir = _euler_to_direction(_deg_to_rad_v3(expected.rotation))
+            angle_deg = _angle_between_deg(actual_dir, expected_dir)
+            tol = expected.direction_tolerance_deg
+            scores.append(max(0.0, 1.0 - angle_deg / max(tol, 1.0)))
         elif expected.rotation is not None:
             scores.append(
                 vector_tolerance_score(
@@ -229,6 +236,24 @@ class LightValidator:
                     expected_path=f"{expected_path}.target",
                     actual_path=f"{actual_path}.rotation_euler",
                     expected_value={"target": expected.target.model_dump(mode="json"), "tolerance_deg": tol},
+                    actual_value={"direction": list(actual_dir), "angle_deg": round(angle_deg, 2)},
+                ))
+        elif expected.rotation is not None and _prefer_direction_for_rotation(expected):
+            actual_dir = _euler_to_direction(actual.rotation_euler)
+            expected_dir = _euler_to_direction(_deg_to_rad_v3(expected.rotation))
+            angle_deg = _angle_between_deg(actual_dir, expected_dir)
+            tol = expected.direction_tolerance_deg
+            if angle_deg > tol:
+                issues.append(ValidationIssue(
+                    code="light_direction_mismatch",
+                    message=(
+                        f"Light direction deviates {angle_deg:.1f}° from expected rotation direction "
+                        f"(tolerance {tol}°)."
+                    ),
+                    severity=ValidationSeverity.ERROR,
+                    expected_path=f"{expected_path}.rotation",
+                    actual_path=f"{actual_path}.rotation_euler",
+                    expected_value={"direction": list(expected_dir), "tolerance_deg": tol},
                     actual_value={"direction": list(actual_dir), "angle_deg": round(angle_deg, 2)},
                 ))
         elif expected.rotation is not None:

@@ -130,6 +130,7 @@ def test_react_repair_loop_resolves_object_missing_and_finishes() -> None:
     # Aggregate metrics should be present
     assert "react_steps_total" in trace.metadata
     assert trace.metadata.get("react_max_steps_count") == 0
+    assert trace.metadata.get("react_repair_steps", 0) > 0
 
 
 def test_react_repair_loop_no_max_steps_on_clean_fix() -> None:

@@ -8,6 +8,10 @@ from pydantic import BaseModel, ConfigDict
 
 class ControlledErrorType(str, Enum):
     REACT_MAX_STEPS = "ReactMaxSteps"
+    REACT_NO_PROGRESS = "ReactNoProgress"
+    REACT_INVALID_ACTION = "ReactInvalidAction"
+    REACT_NON_STRICT_RESPONSE = "ReactNonStrictResponse"
+    REACT_BLOCKED_EXPORT = "ReactBlockedExport"
     LLM_PARSE_ERROR = "LlmParseError"
     INVALID_TOOL_CALL = "InvalidToolCall"
     BLENDER_SOCKET_UNAVAILABLE = "BlenderSocketUnavailable"
@@ -74,7 +78,23 @@ def normalize_error(
     inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
     recoverable = True
 
-    if "react strategy reached max_steps" in text or "reached max_steps" in text or "max_steps" in text or "step limit" in text or "agentsteplimit" in text:
+    if "reactblockedexport" in text or "export_blocked" in text:
+        error_type = ControlledErrorType.REACT_BLOCKED_EXPORT
+        inferred_source = explicit_source or ControlledErrorSource.AGENT
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
+    elif "reactinvalidaction" in text or "invalid react action" in text:
+        error_type = ControlledErrorType.REACT_INVALID_ACTION
+        inferred_source = explicit_source or ControlledErrorSource.AGENT
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
+    elif "reactnoprogress" in text or "no_progress_detected" in text or "no progress detected" in text:
+        error_type = ControlledErrorType.REACT_NO_PROGRESS
+        inferred_source = explicit_source or ControlledErrorSource.AGENT
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
+    elif "reactnonstrictresponse" in text:
+        error_type = ControlledErrorType.REACT_NON_STRICT_RESPONSE
+        inferred_source = explicit_source or ControlledErrorSource.AGENT
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
+    elif "react strategy reached max_steps" in text or "reactmaxsteps" in text or "reached max_steps" in text or "max_steps" in text or "step limit" in text or "agentsteplimit" in text:
         error_type = ControlledErrorType.REACT_MAX_STEPS
         inferred_source = explicit_source or ControlledErrorSource.AGENT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
@@ -82,8 +102,8 @@ def normalize_error(
         error_type = ControlledErrorType.LLM_PARSE_ERROR
         inferred_source = explicit_source or ControlledErrorSource.AGENT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
-    elif "repeated the same action" in text or "no_progress_detected" in text or "no progress detected" in text or "repeated action" in text:
-        error_type = ControlledErrorType.REACT_MAX_STEPS
+    elif "repeated the same action" in text or "repeated action" in text:
+        error_type = ControlledErrorType.REACT_INVALID_ACTION
         inferred_source = explicit_source or ControlledErrorSource.AGENT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
     elif "duplicate object" in text:

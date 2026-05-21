@@ -38,6 +38,7 @@ _ISSUE_PRIORITY: dict[str, int] = {
     "material_metallic_mismatch": 6,
     "light_location_mismatch": 7,
     "light_rotation_mismatch": 7,
+    "light_direction_mismatch": 7,
     "light_energy_mismatch": 7,
     "light_type_mismatch": 7,
     "camera_location_mismatch": 8,
@@ -76,7 +77,7 @@ class RepairAction:
     description: str
     priority: int = 99
     blocking: bool = False
-    requires_prior_step: RepairAction | None = None
+    follow_up_step: RepairAction | None = None
     expected_value: Any | None = None
     actual_value: Any | None = None
     confidence: float = 1.0
@@ -126,7 +127,7 @@ def map_issue_to_repair(
         return _repair_material_mismatch(issue, task)
     if code == "light_missing":
         return _repair_light_missing(issue, task)
-    if code in {"light_rotation_mismatch", "light_energy_mismatch", "light_type_mismatch", "light_location_mismatch"}:
+    if code in {"light_rotation_mismatch", "light_direction_mismatch", "light_energy_mismatch", "light_type_mismatch", "light_location_mismatch"}:
         return _repair_light_mismatch(issue, task)
     if code == "camera_missing":
         return _repair_camera_missing(issue, task)
@@ -231,7 +232,7 @@ def _repair_object_missing_for_transform(issue: ValidationIssue, task: Benchmark
         description=create.description,
         priority=_ISSUE_PRIORITY.get(issue.code, 99),
         blocking=issue.code in EXPORT_BLOCKING_CODES,
-        requires_prior_step=set_transform,
+        follow_up_step=set_transform,
     )
 
 
@@ -321,7 +322,7 @@ def _repair_object_missing_for_material(issue: ValidationIssue, task: BenchmarkT
         description=create.description,
         priority=_ISSUE_PRIORITY.get(issue.code, 99),
         blocking=issue.code in EXPORT_BLOCKING_CODES,
-        requires_prior_step=assign,
+        follow_up_step=assign,
     )
 
 

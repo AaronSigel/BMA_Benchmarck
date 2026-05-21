@@ -178,8 +178,53 @@ def test_light_validator_checks_rotation_with_tolerance() -> None:
     result = LightValidator().validate(task, snapshot)
 
     assert result.status is ValidationStatus.FAILED
-    assert metric_score(result, "light_transform_score") == pytest.approx(0.5)
-    assert result.issues[0].code == "light_rotation_mismatch"
+    assert metric_score(result, "light_transform_score") == pytest.approx(0.0)
+    assert result.issues[0].code == "light_direction_mismatch"
+
+
+def test_light_validator_accepts_direction_equivalent_area_rotation() -> None:
+    task = task_with_lights(
+        [
+            ExpectedLight(
+                name="Key",
+                type="AREA",
+                rotation=vector(math.degrees(1.0), 0.0, 0.0),
+                tolerance=0.01,
+                direction_tolerance_deg=1.0,
+            )
+        ]
+    )
+    snapshot = scene_snapshot(
+        [light_snapshot("Key", "AREA", rotation_euler=snapshot_vector(1.0, 0.0, math.tau))]
+    )
+
+    result = LightValidator().validate(task, snapshot)
+
+    assert result.status is ValidationStatus.PASSED
+    assert metric_score(result, "light_transform_score") == 1.0
+    assert not any(issue.code == "light_rotation_mismatch" for issue in result.issues)
+
+
+def test_light_validator_reports_target_direction_mismatch() -> None:
+    task = task_with_lights(
+        [
+            ExpectedLight(
+                name="Sun",
+                type="SUN",
+                location=vector(0.0, 0.0, 5.0),
+                target=vector(0.0, 0.0, 0.0),
+                direction_tolerance_deg=5.0,
+            )
+        ]
+    )
+    snapshot = scene_snapshot(
+        [light_snapshot("Sun", "SUN", location=snapshot_vector(0.0, 0.0, 5.0), rotation_euler=snapshot_vector(math.pi, 0.0, 0.0))]
+    )
+
+    result = LightValidator().validate(task, snapshot)
+
+    assert result.status is ValidationStatus.FAILED
+    assert any(issue.code == "light_direction_mismatch" for issue in result.issues)
 
 
 def test_light_validator_reports_missing_light() -> None:

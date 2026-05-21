@@ -194,8 +194,8 @@ class TestUnclassifiedErrorNotUsedForKnownFailures:
         ("pre-run scene snapshot could not be collected", ControlledErrorType.SNAPSHOT_UNAVAILABLE),
         ("scene reset failed: could not reset scene", ControlledErrorType.RESET_SCENE_FAILED),
         ("No response from Blender socket", ControlledErrorType.BLENDER_SOCKET_UNAVAILABLE),
-        ("repeated the same action three times", ControlledErrorType.REACT_MAX_STEPS),
-        ("no_progress_detected after 3 steps", ControlledErrorType.REACT_MAX_STEPS),
+        ("repeated the same action three times", ControlledErrorType.REACT_INVALID_ACTION),
+        ("no_progress_detected after 3 steps", ControlledErrorType.REACT_NO_PROGRESS),
     ])
     def test_known_errors_not_unclassified(self, message: str, expected: ControlledErrorType):
         result = normalize_error(message)

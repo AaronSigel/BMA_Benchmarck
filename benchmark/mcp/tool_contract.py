@@ -203,11 +203,12 @@ TOOL_CONTRACTS: list[ToolContract] = [
     ),
     ToolContract(
         name="bma_export_scene",
-        description="Export the current scene. format: GLB|GLTF|OBJ|FBX|USD.",
+        description="Export the current scene. format: BLEND|GLB|GLTF|FBX. Use format=blend with filename=result.blend for .blend tasks.",
         category=ToolCategory.EXPORT,
         parameters=[
-            _p("filepath", "str", "Output file path"),
-            _p("format", "str", "Export format: GLB|GLTF|OBJ|FBX|USD", required=False, default="GLB"),
+            _p("filepath", "str", "Output file path; optional because the benchmark runner injects it from format/filename", required=False, default=None),
+            _p("format", "str", "Export format: BLEND|GLB|GLTF|FBX", required=False, default="GLB"),
+            _p("filename", "str", "Expected benchmark filename, e.g. result.blend or exports/result.glb", required=False, default=None),
         ],
         profiles=["minimal", "inspection_enabled", "no_python", "python_enabled", "full"],
         benchmark_safe=True,

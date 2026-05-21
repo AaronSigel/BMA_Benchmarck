@@ -29,6 +29,7 @@ expected_scene:
       type: AREA
       location: { x: 0.0, y: -3.0, z: 5.0 }
       rotation: { x: 60.0, y: 0.0, z: 0.0 }
+      direction_tolerance_deg: 15.0
       energy: 500.0
       tolerance: 0.1
   cameras: []
@@ -53,4 +54,3 @@ metadata:
   author: benchmark
   version: "1.0"
   description: Baseline lighting task for one area light.
-

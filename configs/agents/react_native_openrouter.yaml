@@ -1,6 +1,6 @@
-agent_id: react_openrouter
+agent_id: react_native_openrouter
 strategy: react
-react_action_protocol: json_content
+react_action_protocol: native_tool_calls
 mcp_profile: minimal
 llm:
   provider: openrouter
@@ -17,4 +17,4 @@ step_timeout_sec: 120
 allow_python_tools: false
 allow_inspection_tools: true
 metadata:
-  description: ReAct agent using OpenRouter.
+  description: Native tool-calling ReAct diagnostic agent using OpenRouter.

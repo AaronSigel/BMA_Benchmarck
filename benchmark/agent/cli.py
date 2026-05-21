@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from benchmark.env import load_project_dotenv
 from benchmark.agent.config_loader import load_agent_config
 from benchmark.agent.errors import AgentError
-from benchmark.agent.llm import LlmResponse, MockLlmClient
+from benchmark.agent.llm import LlmResponse, LlmToolCall, MockLlmClient
 from benchmark.agent.models import (
     AgentConfig,
     AgentStrategyName,
@@ -147,6 +147,16 @@ def _default_mock_llm_client(config: AgentConfig) -> MockLlmClient | None:
                             ]
                         }
                     )
+                )
+            ]
+        )
+    if config.strategy == AgentStrategyName.DIRECT_TOOL_CALLING:
+        return MockLlmClient(
+            [
+                LlmResponse(
+                    tool_calls=[
+                        LlmToolCall(name="get_scene_info", arguments={}),
+                    ]
                 )
             ]
         )

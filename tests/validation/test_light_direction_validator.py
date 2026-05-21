@@ -9,7 +9,7 @@ import math
 
 import pytest
 
-from benchmark.blender.models import LightSnapshot, SceneSnapshot, Vector3 as BVec3
+from benchmark.blender.models import LightSnapshot, ObjectSnapshot, SceneSnapshot, Vector3 as BVec3
 from benchmark.tasks.models import BenchmarkTask, ExpectedLight, ExpectedScene, Vector3
 from benchmark.validation.validators.light_validator import LightValidator
 
@@ -99,6 +99,24 @@ def _task_with_light(
 # AREA light direction tests
 # ---------------------------------------------------------------------------
 
+def test_area_light_direction_passes_when_euler_differs() -> None:
+    """Correct direction passes even when raw Euler differs from expected rotation."""
+    snapshot = _snapshot("AREA", (0.0, -3.0, 5.0), (math.radians(45.0), 0.0, 0.0), name="Key_Area_Light", energy=500.0)
+    task = _task_with_light(
+        "AREA",
+        location=(0.0, -3.0, 5.0),
+        target=(0.0, 0.0, 0.0),
+        rotation=(60.0, 0.0, 0.0),
+        direction_tolerance_deg=15.0,
+        energy=500.0,
+        name="Key_Area_Light",
+    )
+    result = LightValidator().validate(task, snapshot)
+    fatal = [i for i in result.issues if i.severity.value == "error"]
+    assert not any(i.code == "light_direction_mismatch" for i in fatal)
+    assert result.status.value == "passed"
+
+
 def test_area_light_direction_passes_with_different_euler() -> None:
     """AREA light with correct direction to target passes even if Euler differs slightly.
 
@@ -143,6 +161,11 @@ def test_area_light_wrong_direction_fails() -> None:
 # SUN light direction tests
 # ---------------------------------------------------------------------------
 
+def test_sun_direction_mismatch_fails() -> None:
+    """Alias for SUN wrong-direction failure."""
+    test_sun_wrong_direction_fails()
+
+
 def test_sun_wrong_direction_fails() -> None:
     """SUN light pointing in wrong direction must produce direction_mismatch issue.
 
@@ -180,3 +203,137 @@ def test_sun_correct_direction_passes() -> None:
     result = validator.validate(task, snapshot)
     direction_issues = [i for i in result.issues if "direction" in i.code]
     assert not direction_issues, f"Direction should pass: {[i.message for i in direction_issues]}"
+
+
+def test_three_point_lighting_matches_named_lights() -> None:
+    """Named Key/Fill/Back lights are matched individually; direction/energy checked."""
+    import yaml
+    from pathlib import Path
+
+    task = BenchmarkTask.model_validate(
+        yaml.safe_load(Path("tasks/lighting/lighting_003_three_point_lighting.yaml").read_text(encoding="utf-8"))
+    )
+    snapshot = _make_scene_snapshot(
+        objects=[
+            ObjectSnapshot(
+                name="Center_Object",
+                type="MESH",
+                primitive_hint="sphere",
+                location=BVec3(x=0, y=0, z=1),
+                rotation_euler=BVec3(x=0, y=0, z=0),
+                scale=BVec3(x=1, y=1, z=1),
+                dimensions=BVec3(x=1.5, y=1.5, z=1.5),
+                material_slots=[],
+                parent=None,
+                collection_names=["Collection"],
+                vertex_count=100,
+                polygon_count=50,
+            )
+        ],
+        lights=[
+            LightSnapshot(
+                name="Key_Light",
+                type="AREA",
+                location=BVec3(x=-3, y=-4, z=5),
+                rotation_euler=BVec3(x=math.radians(60), y=0, z=math.radians(-35)),
+                energy=700.0,
+                color=None,
+            ),
+            LightSnapshot(
+                name="Fill_Light",
+                type="AREA",
+                location=BVec3(x=4, y=-3, z=3),
+                rotation_euler=BVec3(x=math.radians(55), y=0, z=math.radians(45)),
+                energy=250.0,
+                color=None,
+            ),
+            LightSnapshot(
+                name="Back_Light",
+                type="SPOT",
+                location=BVec3(x=0, y=4, z=4),
+                rotation_euler=BVec3(x=math.radians(55), y=0, z=math.radians(180)),
+                energy=450.0,
+                color=None,
+            ),
+        ],
+    )
+    result = LightValidator().validate(task, snapshot)
+    missing = [i for i in result.issues if i.code == "light_missing"]
+    assert not missing, f"Unexpected missing lights: {missing}"
+    assert result.status.value == "passed"
+
+
+def test_three_point_lighting_fallback_matches_by_location_type() -> None:
+    """When names differ, lights are matched by type + nearest location."""
+    snapshot = _make_scene_snapshot(
+        lights=[
+            LightSnapshot(
+                name="RenamedKey",
+                type="AREA",
+                location=BVec3(x=-3, y=-4, z=5),
+                rotation_euler=BVec3(x=math.radians(60), y=0, z=math.radians(-35)),
+                energy=700.0,
+                color=None,
+            ),
+            LightSnapshot(
+                name="RenamedFill",
+                type="AREA",
+                location=BVec3(x=4, y=-3, z=3),
+                rotation_euler=BVec3(x=math.radians(55), y=0, z=math.radians(45)),
+                energy=250.0,
+                color=None,
+            ),
+            LightSnapshot(
+                name="RenamedBack",
+                type="SPOT",
+                location=BVec3(x=0, y=4, z=4),
+                rotation_euler=BVec3(x=math.radians(55), y=0, z=math.radians(180)),
+                energy=450.0,
+                color=None,
+            ),
+        ]
+    )
+    task = BenchmarkTask(
+        id="lighting_003",
+        title="Three point",
+        category="lighting",
+        difficulty="medium",
+        prompt="three point lighting",
+        tags=["lighting"],
+        allowed_tools=["bma_create_light"],
+        expected_scene=ExpectedScene(
+            lights=[
+                ExpectedLight(
+                    name="Key_Light",
+                    type="AREA",
+                    location=Vector3(x=-3, y=-4, z=5),
+                    rotation=Vector3(x=60, y=0, z=-35),
+                    energy=700.0,
+                    tolerance=0.2,
+                    direction_tolerance_deg=15.0,
+                ),
+                ExpectedLight(
+                    name="Fill_Light",
+                    type="AREA",
+                    location=Vector3(x=4, y=-3, z=3),
+                    rotation=Vector3(x=55, y=0, z=45),
+                    energy=250.0,
+                    tolerance=0.2,
+                    direction_tolerance_deg=15.0,
+                ),
+                ExpectedLight(
+                    name="Back_Light",
+                    type="SPOT",
+                    location=Vector3(x=0, y=4, z=4),
+                    rotation=Vector3(x=55, y=0, z=180),
+                    energy=450.0,
+                    tolerance=0.2,
+                    direction_tolerance_deg=15.0,
+                ),
+            ]
+        ),
+        success_criteria=[],
+    )
+    result = LightValidator().validate(task, snapshot)
+    assert not [i for i in result.issues if i.code == "light_missing"]
+    assert result.status.value == "passed"

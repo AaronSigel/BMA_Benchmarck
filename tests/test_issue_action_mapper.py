@@ -235,7 +235,89 @@ def test_map_light_location_mismatch() -> None:
     )
     action = map_issue_to_repair(issue, task)
     assert action is not None
+    assert action.tool_name == "bma_set_transform"
+    assert action.arguments_template.get("object_name") == "Key"
+    assert action.arguments_template.get("location") == [0.0, -3.0, 4.0]
+
+
+def test_light_direction_mismatch_uses_set_transform() -> None:
+    task = _task(
+        lights=[
+            ExpectedLight(
+                name="Key_Light",
+                type="AREA",
+                location=Vector3(x=-3.0, y=-4.0, z=5.0),
+                rotation=Vector3(x=60.0, y=0.0, z=-35.0),
+                target="Center_Object",
+            )
+        ]
+    )
+    issue = ValidationIssue(
+        code="light_direction_mismatch",
+        message="Direction off",
+        severity=ValidationSeverity.ERROR,
+        expected_path="expected_scene.lights[0]",
+        actual_path=None,
+        expected_value=None,
+        actual_value=None,
+    )
+    action = map_issue_to_repair(issue, task)
+    assert action is not None
+    assert action.tool_name == "bma_set_transform"
+    assert action.arguments_template.get("object_name") == "Key_Light"
+    assert action.arguments_template.get("rotation") is not None
+    assert action.arguments_template["rotation"][0] > 1.0
+
+
+def test_light_missing_with_string_target_includes_rotation_radians() -> None:
+    import math
+
+    task = _task(
+        lights=[
+            ExpectedLight(
+                name="Fill_Light",
+                type="AREA",
+                location=Vector3(x=4.0, y=-3.0, z=3.0),
+                rotation=Vector3(x=55.0, y=0.0, z=45.0),
+                target="Center_Object",
+                energy=250.0,
+            )
+        ]
+    )
+    issue = ValidationIssue(
+        code="light_missing",
+        message="Missing light",
+        severity=ValidationSeverity.ERROR,
+        expected_path="expected_scene.lights[0]",
+        actual_path=None,
+        expected_value=None,
+        actual_value=None,
+    )
+    action = map_issue_to_repair(issue, task)
+    assert action is not None
     assert action.tool_name == "bma_create_light"
+    rotation = action.arguments_template.get("rotation")
+    assert rotation is not None
+    assert rotation[0] == math.radians(55.0)
+    assert "target" not in action.arguments_template
+
+
+def test_light_direction_mismatch_does_not_use_create_light() -> None:
+    task = _task(
+        lights=[ExpectedLight(name="Back_Light", type="SPOT", rotation=Vector3(x=55.0, y=0.0, z=180.0))]
+    )
+    issue = ValidationIssue(
+        code="light_direction_mismatch",
+        message="Direction off",
+        severity=ValidationSeverity.ERROR,
+        expected_path="expected_scene.lights[0]",
+        actual_path=None,
+        expected_value=None,
+        actual_value=None,
+    )
+    action = map_issue_to_repair(issue, task)
+    assert action is not None
+    assert action.tool_name != "bma_create_light"
 
 
 def test_map_camera_target_to_look_at() -> None:

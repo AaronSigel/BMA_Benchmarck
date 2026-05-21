@@ -70,15 +70,18 @@ def test_hybrid_runs_repair_when_plan_failed_validation() -> None:
     stamped = _stamp_trace(
         plan_trace, _config(),
         datetime.datetime.now(datetime.timezone.utc),
+        plan_status="completed",
         hybrid_repair_used=True,
         plan_scene_status="failed",
         plan_score=0.3,
         plan_issue_count=2,
+        repair_started=True,
+        repair_start_reason="failed_validation",
         repair_result_status="passed",
     )
     assert stamped.metadata["hybrid_repair_used"] is True
     assert stamped.metadata.get("repair_started") is True
-    assert stamped.metadata.get("repair_start_reason") == "plan_failed_validation"
+    assert stamped.metadata.get("repair_start_reason") == "failed_validation"
     assert stamped.metadata.get("plan_scene_status") == "failed"
     assert stamped.metadata.get("plan_score") == 0.3
     assert stamped.metadata.get("plan_issue_count") == 2

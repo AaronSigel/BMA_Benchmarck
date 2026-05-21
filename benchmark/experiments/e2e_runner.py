@@ -85,6 +85,7 @@ class E2EBenchmarkRunner:
             "artifact_freshness": freshness,
             "planned_runs": len(config.runs),
             "expected_runs": matrix.metadata.get("expected_runs"),
+            "readiness_gates": matrix.metadata.get("readiness_gates"),
         }
         preflight_report = write_preflight_report(config, matrix.output_root)
         preflight["preflight_report"] = preflight_report
@@ -257,10 +258,43 @@ _build_reports = build_reports
 
 def _append_bundle_validation_section(path: Path, validation: dict[str, Any]) -> None:
     status = validation.get("status", "unknown")
+    structural_validity = validation.get("structural_validity", "unknown")
+    readiness_ok = validation.get("readiness_ok", "unknown")
+    failed_gates = validation.get("failed_gates", [])
+    warning_gates = validation.get("warning_gates", [])
     failed = sum(1 for check in validation.get("checks", []) if isinstance(check, dict) and check.get("status") == "failed")
+    failed_gate_lines = ""
+    if isinstance(failed_gates, list) and failed_gates:
+        failed_gate_lines = "\n".join(
+            f"| {gate.get('name')} | {gate.get('expected')} | {gate.get('actual')} | {gate.get('severity', 'blocking')} |"
+            for gate in failed_gates
+            if isinstance(gate, dict)
+        )
+        failed_gate_lines = (
+            "\n\n### Failed readiness gates\n\n"
+            "| Gate | Expected | Actual | Severity |\n| --- | --- | --- | --- |\n"
+            + failed_gate_lines
+        )
+    warning_gate_lines = ""
+    if isinstance(warning_gates, list) and warning_gates:
+        warning_gate_lines = "\n".join(
+            f"| {gate.get('name')} | {gate.get('expected')} | {gate.get('actual')} | {gate.get('severity', 'warning')} |"
+            for gate in warning_gates
+            if isinstance(gate, dict)
+        )
+        warning_gate_lines = (
+            "\n\n### Warning readiness gates\n\n"
+            "| Gate | Expected | Actual | Severity |\n| --- | --- | --- | --- |\n"
+            + warning_gate_lines
+        )
     section = (
         "\n## Bundle Validation\n\n"
-        f"| Metric | Value |\n| --- | --- |\n| status | {status} |\n| failed_checks | {failed} |\n"
+        "| Metric | Value |\n| --- | --- |\n"
+        f"| status | {status} |\n"
+        f"| structural_validity | {structural_validity} |\n"
+        f"| readiness_ok | {readiness_ok} |\n"
+        f"| failed_checks | {failed} |\n"
+        f"{failed_gate_lines}{warning_gate_lines}\n"
     )
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     if "## Bundle Validation" in text:

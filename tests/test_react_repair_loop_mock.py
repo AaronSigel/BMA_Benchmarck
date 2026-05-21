@@ -84,7 +84,7 @@ def test_react_repair_loop_resolves_object_missing_and_finishes() -> None:
         # Initial scene is empty; after bma_create_object runs, the object exists.
         nonlocal calls
         calls += 1
-        if calls == 1:
+        if calls <= 2:
             return False, 0.0, _object_missing_result()
         return True, 1.0, _passed_result()
 
@@ -149,7 +149,7 @@ def test_react_repair_loop_no_max_steps_on_clean_fix() -> None:
         # Initial scene is empty; object is created on first action.
         nonlocal calls
         calls += 1
-        if calls == 1:
+        if calls <= 2:
             return False, 0.0, _object_missing_result()
         return True, 1.0, _passed_result()
 

@@ -197,3 +197,42 @@ def test_run_and_report_orders_batch_analysis_and_report(tmp_path: Path, monkeyp
 
     assert calls == ["batch", "analysis", "report"]
     assert report_path == tmp_path / "out" / "report.md"
+
+
+def test_summarize_lighting_failures_from_experiment_analysis(tmp_path: Path) -> None:
+    from benchmark.analysis.run_analysis import summarize_lighting_failures
+
+    experiment_dir = tmp_path / "experiment"
+    experiment_dir.mkdir()
+    (experiment_dir / "experiment_analysis.json").write_text(
+        """
+        {
+          "runs": [
+            {
+              "run_id": "run_l001",
+              "task_id": "lighting_001_area_light",
+              "pass_type": "clean_pass",
+              "issues": []
+            },
+            {
+              "run_id": "run_l003",
+              "task_id": "lighting_003_three_point_lighting",
+              "pass_type": "failed_validation",
+              "agent_id": "react_openrouter",
+              "issues": [{"code": "light_direction_mismatch"}],
+              "metrics": {"react_error_type": "ReactInvalidAction"}
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    report = summarize_lighting_failures(experiment_dir, sample_limit=1)
+
+    assert report["total_runs"] == 2
+    assert report["passed_runs"] == 1
+    assert report["lighting_success_rate"] == 0.5
+    assert report["issue_code_counts"]["light_direction_mismatch"] == 1
+    assert report["agent_error_counts"]["ReactInvalidAction"] == 1
+    assert len(report["sample_failed_runs"]) == 1

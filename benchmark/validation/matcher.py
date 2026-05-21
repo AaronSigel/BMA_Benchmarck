@@ -68,10 +68,24 @@ class SceneMatcher:
                 return named_match
 
         expected_type = expected.type.upper()
-        for light in lights:
-            if light.type.upper() == expected_type:
-                return light
-        return None
+        type_matches = [light for light in lights if light.type.upper() == expected_type]
+        if not type_matches:
+            return None
+        if len(type_matches) == 1:
+            return type_matches[0]
+        if expected.location is not None:
+            return min(
+                type_matches,
+                key=lambda light: self._location_distance(expected.location, light.location),
+            )
+        return type_matches[0]
+
+    @staticmethod
+    def _location_distance(expected_location, actual_location) -> float:
+        dx = expected_location.x - actual_location.x
+        dy = expected_location.y - actual_location.y
+        dz = expected_location.z - actual_location.z
+        return dx * dx + dy * dy + dz * dz
 
     def match_expected_camera(
         self,

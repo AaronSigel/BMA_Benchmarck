@@ -5,6 +5,7 @@ needs to confirm or fill in any remaining gaps — it does not decide from scrat
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -127,8 +128,12 @@ def map_issue_to_repair(
         return _repair_material_mismatch(issue, task)
     if code == "light_missing":
         return _repair_light_missing(issue, task)
-    if code in {"light_rotation_mismatch", "light_direction_mismatch", "light_energy_mismatch", "light_type_mismatch", "light_location_mismatch"}:
-        return _repair_light_mismatch(issue, task)
+    if code in {"light_direction_mismatch", "light_rotation_mismatch"}:
+        return _repair_light_orientation(issue, task)
+    if code == "light_location_mismatch":
+        return _repair_light_location(issue, task)
+    if code in {"light_energy_mismatch", "light_type_mismatch"}:
+        return _repair_light_recreate(issue, task)
     if code == "camera_missing":
         return _repair_camera_missing(issue, task, snapshot)
     if code in {
@@ -369,25 +374,42 @@ def _repair_material_mismatch(issue: ValidationIssue, task: BenchmarkTask) -> Re
     )
 
 
-def _repair_light_missing(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
+def _rotation_radians_list(rotation: Any) -> list[float] | None:
+    vec = _vec3_list(rotation)
+    if vec is None:
+        return None
+    return [math.radians(vec[0]), math.radians(vec[1]), math.radians(vec[2])]
+
+
+def _expected_light(issue: ValidationIssue, task: BenchmarkTask):
     idx = _extract_index(issue.expected_path)
     lights = task.expected_scene.lights
-    light = lights[idx] if idx is not None and idx < len(lights) else None
+    if idx is not None and idx < len(lights):
+        return lights[idx]
+    return None
 
+
+def _light_create_args(light: Any) -> dict[str, Any]:
     args: dict[str, Any] = {"type": "AREA"}
-    if light:
-        args["type"] = light.type
-        if light.name:
-            args["name"] = light.name
-        loc = _vec3_list(light.location)
-        if loc:
-            args["location"] = loc
-        if light.target:
-            args["target"] = _vec3_list(light.target)
-        elif light.rotation:
-            args["rotation"] = _vec3_list(light.rotation)
-        if light.energy is not None:
-            args["energy"] = light.energy
+    if light is None:
+        return args
+    args["type"] = light.type
+    if light.name:
+        args["name"] = light.name
+    loc = _vec3_list(light.location)
+    if loc:
+        args["location"] = loc
+    rot = _rotation_radians_list(light.rotation)
+    if rot:
+        args["rotation"] = rot
+    if light.energy is not None:
+        args["energy"] = light.energy
+    return args
+
+
+def _repair_light_missing(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
+    light = _expected_light(issue, task)
+    args = _light_create_args(light)
 
     return RepairAction(
         issue_code=issue.code,
@@ -401,26 +423,51 @@ def _repair_light_missing(issue: ValidationIssue, task: BenchmarkTask) -> Repair
     )
 
 
-def _repair_light_mismatch(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
-    # Recreate the light with corrected parameters
-    idx = _extract_index(issue.expected_path)
-    lights = task.expected_scene.lights
-    light = lights[idx] if idx is not None and idx < len(lights) else None
+def _repair_light_orientation(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
+    light = _expected_light(issue, task)
+    args: dict[str, Any] = {}
+    if light and light.name:
+        args["object_name"] = light.name
+    rot = _rotation_radians_list(light.rotation) if light else None
+    if rot:
+        args["rotation"] = rot
 
-    args: dict[str, Any] = {"type": "AREA"}
-    if light:
-        args["type"] = light.type
-        if light.name:
-            args["name"] = light.name
-        loc = _vec3_list(light.location)
-        if loc:
-            args["location"] = loc
-        if light.target:
-            args["target"] = _vec3_list(light.target)
-        elif light.rotation:
-            args["rotation"] = _vec3_list(light.rotation)
-        if light.energy is not None:
-            args["energy"] = light.energy
+    return RepairAction(
+        issue_code=issue.code,
+        tool_name="bma_set_transform",
+        arguments_template=args,
+        description=f"Fix light orientation on '{args.get('object_name', 'light')}'",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=False,
+        expected_value=issue.expected_value,
+        actual_value=issue.actual_value,
+    )
+
+
+def _repair_light_location(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
+    light = _expected_light(issue, task)
+    args: dict[str, Any] = {}
+    if light and light.name:
+        args["object_name"] = light.name
+    loc = _vec3_list(light.location) if light else None
+    if loc:
+        args["location"] = loc
+
+    return RepairAction(
+        issue_code=issue.code,
+        tool_name="bma_set_transform",
+        arguments_template=args,
+        description=f"Fix light location on '{args.get('object_name', 'light')}'",
+        priority=_ISSUE_PRIORITY.get(issue.code, 99),
+        blocking=False,
+        expected_value=issue.expected_value,
+        actual_value=issue.actual_value,
+    )
+
+
+def _repair_light_recreate(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
+    light = _expected_light(issue, task)
+    args = _light_create_args(light)
 
     return RepairAction(
         issue_code=issue.code,
@@ -432,6 +479,11 @@ def _repair_light_mismatch(issue: ValidationIssue, task: BenchmarkTask) -> Repai
         expected_value=issue.expected_value,
         actual_value=issue.actual_value,
     )
+
+
+def _repair_light_mismatch(issue: ValidationIssue, task: BenchmarkTask) -> RepairAction:
+    """Legacy alias kept for compatibility with older call sites/tests."""
+    return _repair_light_recreate(issue, task)
 
 
 def _repair_camera_missing(

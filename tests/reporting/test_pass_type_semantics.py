@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from benchmark.analysis.run_analysis import _classify_pass_type
 from benchmark.metrics.export import _pass_type, _scene_passed_but_agent_error
 from benchmark.analysis.report_bundle_validator import _evaluate_readiness_gates
 
@@ -165,3 +166,22 @@ def test_clean_pass_with_error_type_gate() -> None:
     result = _evaluate_readiness_gates(gates, rows)
     assert result["readiness_ok"] is False
     assert any(fg["name"] == "clean_pass_with_error_type_max" for fg in result["failed_gates"])
+
+
+def test_run_analysis_classify_forbids_clean_pass_with_error_type() -> None:
+    pt = _classify_pass_type("passed", "passed", "completed", [], error_type="ReactInvalidAction")
+    assert pt == "soft_pass"
+
+
+def test_readiness_gate_fails_on_zero_react_repair_steps() -> None:
+    gates = {"require_react_repair_steps_on_validation_issues": True}
+    rows = [
+        {
+            **_csv_row("geometry_001", "failed_validation", strategy="react"),
+            "validation_issues": "object_missing:1",
+            "react_repair_steps": "0",
+        }
+    ]
+    result = _evaluate_readiness_gates(gates, rows)
+    assert result["readiness_ok"] is False
+    assert any(fg["name"] == "require_react_repair_steps_on_validation_issues" for fg in result["failed_gates"])

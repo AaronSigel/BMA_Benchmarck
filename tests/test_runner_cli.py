@@ -35,8 +35,8 @@ def run_config(output_dir: Path, run_id: str = "geometry_001_external") -> dict:
         "task_id": "geometry_001_basic_primitives",
         "execution_mode": "external_snapshot",
         "task_path": "tasks/geometry/geometry_001_basic_primitives.yaml",
-        "snapshot_path": "artifacts/blender_smoke/scene_snapshot.json",
-        "artifacts_dir": "artifacts/blender_smoke",
+        "snapshot_path": "tests/fixtures/validation/valid_geometry_snapshot.json",
+        "artifacts_dir": "tests/fixtures/validation",
         "output_dir": str(output_dir),
     }
 

@@ -403,6 +403,8 @@ def _agent_status_from_execution(
                 return AgentStatus.REPEATED_ACTION_DETECTED
             if int(metadata.get("duplicate_object_count", 0) or 0) > 0:
                 return AgentStatus.DUPLICATE_OBJECT_DETECTED
+        if "DirectNoAction" in run_error or run_error == "DirectNoAction":
+            return AgentStatus.INVALID_RESPONSE
         if "no_progress_detected" in run_error:
             return AgentStatus.NO_PROGRESS_DETECTED
         if "max_steps" in run_error or "reached max_steps" in run_error:
@@ -416,6 +418,8 @@ def _agent_status_from_execution(
         if "Tool" in run_error or "tool" in run_error or "Unknown" in run_error:
             return AgentStatus.TOOL_ERROR
     text = error or ""
+    if "DirectNoAction" in text:
+        return AgentStatus.INVALID_RESPONSE
     if "no_progress_detected" in text:
         return AgentStatus.NO_PROGRESS_DETECTED
     if "max_steps" in text:

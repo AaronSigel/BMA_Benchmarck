@@ -103,7 +103,7 @@ def test_repair_activation_tool_not_available_in_profile() -> None:
     )
     assert activation["repair_mapped"] is True
     assert activation["repair_tool"] == "bma_some_unavailable_tool"
-    assert activation["fallback_reason"] == "tool_not_available_in_profile"
+    assert activation["fallback_reason"] == "tool_not_allowed_in_profile"
     assert activation["deterministic_repair_executed"] is False
 
 

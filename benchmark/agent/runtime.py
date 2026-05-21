@@ -279,29 +279,7 @@ def _inject_scene_validator(
     from benchmark.agent.strategies.react import ReactStrategy
     if not isinstance(strategy, ReactStrategy):
         return
-    adapter = getattr(tool_executor, "adapter", None)
-    if adapter is None or not hasattr(adapter, "collect_scene_snapshot"):
-        return
 
-    import logging as _log_mod
-    _log = _log_mod.getLogger(__name__)
+    from benchmark.validation.snapshot_normalization import build_scene_validator_fn
 
-    def _scene_validator_fn(snap_path: Path) -> tuple[bool, float | None, Any]:
-        try:
-            adapter.collect_scene_snapshot(snap_path)
-            if not snap_path.exists():
-                return False, None, None
-            from benchmark.blender.models import SceneSnapshot
-            from benchmark.tasks.models import BenchmarkTask
-            from benchmark.validation.scene_validator import SceneValidator
-            from benchmark.validation.models import ValidationStatus
-            snapshot = SceneSnapshot.model_validate_json(snap_path.read_text())
-            task_obj = BenchmarkTask.model_validate(task_data)
-            result = SceneValidator().validate(task_obj, snapshot)
-            scene_ok = result.overall_status in {ValidationStatus.PASSED, ValidationStatus.WARNING}
-            return scene_ok, result.total_score, result
-        except Exception as exc:
-            _log.debug("scene_validator_fn: scene check error: %s", exc)
-            return False, None, None
-
-    strategy.scene_validator_fn = _scene_validator_fn
+    strategy.scene_validator_fn = build_scene_validator_fn(tool_executor, task_data)

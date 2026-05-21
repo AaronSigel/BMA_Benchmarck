@@ -23,10 +23,14 @@ _RECV_BUFFER = 8192
 # Error types that indicate a transient socket failure safe to retry.
 _TRANSIENT_ERROR_TYPES = {"EmptySocketResponse", "SocketTimeout", "SocketError"}
 
+# Empty or unparseable socket responses — harness may recover via execute_code fallback.
+_CAMERA_LOOK_AT_FALLBACK_ERROR_TYPES = {"EmptySocketResponse", "InvalidJsonResponse", "SocketTimeout", "SocketError"}
+
 # Tools whose calls are idempotent and can be safely retried once on transient errors.
 # bma_set_transform / bma_set_material are always idempotent (overwrite existing state).
 # bma_create_object is idempotent only when if_exists=update (handled in _call_create_object_with_if_exists).
-_IDEMPOTENT_TOOLS = {"bma_set_transform", "bma_set_material", "bma_assign_material"}
+# bma_create_camera_look_at is retried on transient empty socket responses.
+_IDEMPOTENT_TOOLS = {"bma_set_transform", "bma_set_material", "bma_assign_material", "bma_create_camera_look_at"}
 
 
 def _connect_host(host: str) -> str:
@@ -160,6 +164,12 @@ class ExternalBlenderMcpServerAdapter:
         if tool_name == "bma_create_object" and isinstance(params, dict) and "if_exists" in params:
             return self._call_create_object_with_if_exists(params, profile)
 
+        if tool_name == "bma_get_scene_snapshot":
+            return self._call_get_scene_snapshot()
+
+        if tool_name == "bma_create_camera_look_at":
+            return self._call_create_camera_look_at(params or {})
+
         result = self._socket_call_once(tool_name, params)
 
         # Retry once for idempotent tools on transient failures.
@@ -173,6 +183,118 @@ class ExternalBlenderMcpServerAdapter:
             result = self._socket_call_once(tool_name, params)
 
         return result
+
+    def _call_create_camera_look_at(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Create camera look-at via socket, with execute_code fallback when addon handler is missing."""
+        result = self._normalize_camera_look_at_response(
+            self._socket_call_once("bma_create_camera_look_at", params),
+            params,
+        )
+        if result.get("ok"):
+            return result
+
+        error = result.get("error") if isinstance(result.get("error"), dict) else {}
+        if error.get("type") in _TRANSIENT_ERROR_TYPES:
+            retry = self._normalize_camera_look_at_response(
+                self._socket_call_once("bma_create_camera_look_at", params),
+                params,
+            )
+            if retry.get("ok"):
+                return retry
+            result = retry
+            error = result.get("error") if isinstance(result.get("error"), dict) else {}
+
+        if error.get("type") in _CAMERA_LOOK_AT_FALLBACK_ERROR_TYPES:
+            fallback = self._create_camera_look_at_via_code(params)
+            return self._normalize_camera_look_at_response(fallback, params)
+
+        return result
+
+    def _create_camera_look_at_via_code(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Harness fallback when addon socket command create_camera_look_at is unavailable."""
+        raw = self.execute_code_unrestricted(_create_camera_look_at_code(params))
+        if isinstance(raw, dict) and raw.get("warning"):
+            return _tool_envelope(
+                "bma_create_camera_look_at",
+                ok=False,
+                result={
+                    "camera_name": params.get("name"),
+                    "target": params.get("target") or params.get("target_object_name"),
+                    "failure_stage": "execute_code_fallback",
+                },
+                error_type="CameraLookAtFailed",
+                error_message=str(raw.get("warning")),
+            )
+
+        payload = _parse_execute_code_payload(raw)
+        if payload is None:
+            return _tool_envelope(
+                "bma_create_camera_look_at",
+                ok=False,
+                result={"failure_stage": "execute_code_fallback", "camera_name": params.get("name")},
+                error_type="CameraLookAtFailed",
+                error_message="execute_code fallback returned no JSON payload",
+            )
+        if payload.get("ok") is False:
+            err = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+            return _tool_envelope(
+                "bma_create_camera_look_at",
+                ok=False,
+                result={
+                    "camera_name": params.get("name"),
+                    "target": params.get("target") or params.get("target_object_name"),
+                    "failure_stage": "execute_code_fallback",
+                },
+                error_type=str(err.get("type") or "CameraLookAtFailed"),
+                error_message=str(err.get("message") or "Camera look-at failed in execute_code fallback"),
+            )
+        inner = payload.get("result") if isinstance(payload.get("result"), dict) else payload
+        return _tool_envelope("bma_create_camera_look_at", ok=True, result=inner)
+
+    def _normalize_camera_look_at_response(
+        self, envelope: dict[str, Any], params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Ensure create_camera_look_at always returns a structured success/error envelope."""
+        if not isinstance(envelope, dict):
+            return envelope
+        if not envelope.get("ok"):
+            error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
+            inner = envelope.get("result") if isinstance(envelope.get("result"), dict) else {}
+            if not inner:
+                inner = {
+                    key: error[key]
+                    for key in ("raw_len", "raw_preview", "failure_stage")
+                    if key in error
+                }
+            error_type = str(error.get("type") or "CameraLookAtFailed")
+            if error_type == "EmptySocketResponse":
+                error_type = "EmptySocketResponse"
+            return {
+                "ok": False,
+                "tool": "bma_create_camera_look_at",
+                "result": {
+                    "camera_name": params.get("name"),
+                    "target": params.get("target") or params.get("target_object_name"),
+                    **inner,
+                },
+                "error": {
+                    "type": error_type,
+                    "message": str(error.get("message") or envelope.get("error") or "Camera look-at failed"),
+                },
+            }
+        inner = envelope.get("result") or {}
+        if isinstance(inner, dict):
+            normalized = {
+                "ok": True,
+                "tool": "bma_create_camera_look_at",
+                "camera_name": inner.get("camera_name") or inner.get("name") or params.get("name"),
+                "location": inner.get("location") or params.get("location"),
+                "target": inner.get("target") or params.get("target") or params.get("target_object_name"),
+                "set_active": inner.get("set_active", inner.get("is_active", params.get("make_active", True))),
+                **{k: v for k, v in inner.items() if k not in {"ok", "tool"}},
+            }
+            return _tool_envelope("bma_create_camera_look_at", ok=True, result=normalized)
+        return envelope
 
     def _socket_call_once(self, tool_name: str, params: dict[str, Any] | None) -> Any:
         """Execute a single socket round-trip and return a parsed _tool_envelope dict."""
@@ -198,8 +320,13 @@ class ExternalBlenderMcpServerAdapter:
             return _tool_envelope(
                 tool_name,
                 ok=False,
-                result=None,
-                error_type="SocketTimeout",
+                result={
+                    "tool_name": tool_name,
+                    "timeout_sec": self._config.request_timeout_sec,
+                    "failure_stage": "tool_call",
+                    "raw_preview": "",
+                },
+                error_type="ToolTimeout",
                 error_message=f"Tool call timed out after {self._config.request_timeout_sec} seconds",
             )
         except OSError as exc:
@@ -352,6 +479,45 @@ class ExternalBlenderMcpServerAdapter:
         code = _collect_snapshot_code(Path(output_path))
         return self.execute_code_unrestricted(code)
 
+    def _call_get_scene_snapshot(self) -> dict[str, Any]:
+        """Return full SceneSnapshot via collect_snapshot (not lightweight get_scene_info)."""
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+            snap_path = Path(tmp.name)
+        try:
+            raw = self.collect_scene_snapshot(snap_path)
+            if isinstance(raw, dict) and raw.get("warning"):
+                return _tool_envelope(
+                    "bma_get_scene_snapshot",
+                    ok=False,
+                    result=None,
+                    error_type="SnapshotCollectionFailed",
+                    error_message=str(raw.get("warning")),
+                )
+            if snap_path.exists():
+                try:
+                    snapshot = json.loads(snap_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    return _tool_envelope(
+                        "bma_get_scene_snapshot",
+                        ok=False,
+                        result={"failure_stage": "snapshot_read"},
+                        error_type="SnapshotSchemaError",
+                        error_message=f"Failed to read collected snapshot: {exc}",
+                    )
+                if isinstance(snapshot, dict):
+                    return _tool_envelope("bma_get_scene_snapshot", ok=True, result=snapshot)
+            return _tool_envelope(
+                "bma_get_scene_snapshot",
+                ok=False,
+                result={"failure_stage": "snapshot_collection"},
+                error_type="SnapshotSchemaError",
+                error_message="collect_scene_snapshot did not produce a snapshot file",
+            )
+        finally:
+            snap_path.unlink(missing_ok=True)
+
     def execute_code_unrestricted(self, code: str) -> dict:
         """Run Blender Python for harness-only operations, not model-visible tool use."""
         payload = json.dumps({"type": "execute_code", "params": {"code": code}}).encode()
@@ -418,6 +584,137 @@ for attr in ("meshes", "materials", "lights", "cameras"):
                 col.remove(block)
 print("reset_scene:ok")
 """
+
+
+def _create_camera_look_at_code(params: dict[str, Any]) -> str:
+    name = params.get("name", "Camera")
+    location = params.get("location", [0.0, 0.0, 0.0])
+    target = params.get("target")
+    target_object_name = params.get("target_object_name")
+    focal_length = float(params.get("focal_length", 35.0))
+    make_active = bool(params.get("make_active", True))
+    sensor_width = params.get("sensor_width")
+    clip_start = params.get("clip_start")
+    clip_end = params.get("clip_end")
+
+    lines = [
+        "import bpy",
+        "import json",
+        "from mathutils import Vector",
+        "",
+        "def _fail(error_type, message, **extra):",
+        '    payload = {"ok": False, "error": {"type": error_type, "message": message, **extra}}',
+        "    print(json.dumps(payload))",
+        "    raise SystemExit(0)",
+        "",
+        f"camera_name = {name!r}",
+        f"location = {list(location)!r}",
+        f"target_coords = {target!r}",
+        f"target_object_name = {target_object_name!r}",
+        f"focal_length = {focal_length!r}",
+        f"make_active = {make_active!r}",
+        "",
+        "target_point = None",
+        "target_label = None",
+        "if target_coords is not None:",
+        "    target_point = tuple(float(v) for v in target_coords[:3])",
+        "    target_label = list(target_point)",
+        "elif target_object_name:",
+        "    obj = bpy.data.objects.get(target_object_name)",
+        "    if obj is None:",
+        '        _fail("ObjectNotFound", f"Target object \'{target_object_name}\' not found", camera_name=camera_name, target=target_object_name)',
+        "    target_point = tuple(obj.matrix_world.translation)",
+        "    target_label = target_object_name",
+        "else:",
+        '    _fail("CameraLookAtFailed", "Either target or target_object_name is required", camera_name=camera_name)',
+        "",
+        "existing = bpy.data.objects.get(camera_name)",
+        "if existing is not None and existing.type == 'CAMERA':",
+        "    cam_obj = existing",
+        "    cam_data = existing.data",
+        "elif existing is not None:",
+        "    bpy.data.objects.remove(existing, do_unlink=True)",
+        "    cam_data = bpy.data.cameras.new(name=camera_name)",
+        "    cam_obj = bpy.data.objects.new(camera_name, cam_data)",
+        "    bpy.context.collection.objects.link(cam_obj)",
+        "else:",
+        "    cam_data = bpy.data.cameras.new(name=camera_name)",
+        "    cam_obj = bpy.data.objects.new(camera_name, cam_data)",
+        "    bpy.context.collection.objects.link(cam_obj)",
+        "",
+        "cam_obj.location = Vector(location)",
+        "direction = Vector(target_point) - cam_obj.location",
+        "if direction.length > 0:",
+        '    cam_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()',
+        "cam_data.lens = focal_length",
+    ]
+    if sensor_width is not None:
+        lines.append(f"cam_data.sensor_width = {float(sensor_width)!r}")
+    if clip_start is not None:
+        lines.append(f"cam_data.clip_start = {float(clip_start)!r}")
+    if clip_end is not None:
+        lines.append(f"cam_data.clip_end = {float(clip_end)!r}")
+    lines.extend(
+        [
+            "if make_active:",
+            "    bpy.context.scene.camera = cam_obj",
+            "result = {",
+            '    "ok": True,',
+            '    "tool": "bma_create_camera_look_at",',
+            '    "result": {',
+            '        "camera_name": cam_obj.name,',
+            '        "location": list(cam_obj.location),',
+            '        "target": target_label,',
+            '        "set_active": make_active and bpy.context.scene.camera == cam_obj,',
+            "    },",
+            "}",
+            "print(json.dumps(result))",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _extract_json_from_text(text: Any) -> dict[str, Any] | None:
+    if not isinstance(text, str) or not text.strip():
+        return None
+    stripped = text.strip()
+    try:
+        obj = json.loads(stripped)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    for line in reversed(text.splitlines()):
+        candidate = line.strip()
+        if not candidate.startswith("{"):
+            continue
+        try:
+            obj = json.loads(candidate)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _parse_execute_code_payload(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict) or raw.get("warning"):
+        return None
+    if raw.get("ok") is not None and ("result" in raw or "error" in raw):
+        return raw
+    inner = raw.get("result")
+    if isinstance(inner, dict) and inner.get("ok") is not None:
+        return inner
+    for key in ("stdout", "output", "message", "text"):
+        for container in (raw, inner if isinstance(inner, dict) else None):
+            if not isinstance(container, dict):
+                continue
+            parsed = _extract_json_from_text(container.get(key))
+            if parsed is not None:
+                return parsed
+    if isinstance(inner, str):
+        return _extract_json_from_text(inner)
+    return None
 
 
 def _collect_snapshot_code(output_path: Path) -> str:

@@ -42,6 +42,7 @@ class ValidatorResult(BaseModel):
     max_score: float = Field(default=1.0, ge=0.0, le=1.0)
     issues: list[ValidationIssue] = Field(default_factory=list)
     metrics: list[MetricScore] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class SceneValidationResult(BaseModel):

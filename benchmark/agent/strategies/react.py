@@ -65,6 +65,8 @@ class ReactStrategy:
         # Injected by AgentRuntime when stop_after_scene_passed or detect_no_progress is True.
         # Returns (scene_ok, score_or_None, SceneValidationResult_or_None).
         self.scene_validator_fn: Callable[[Path], tuple[bool, float | None, Any]] | None = None
+        # Seeded by hybrid strategy to skip redundant post-plan re-validation.
+        self.initial_validation_result: Any = None
 
     def run(
         self,
@@ -152,6 +154,10 @@ class ReactStrategy:
         # Queued follow-up repairs: populated when mapper returns a repair with follow_up_step.
         # Executed deterministically at the start of the next iteration, before calling LLM.
         pending_repair_actions: list[_ReactAction] = []
+        early_stop_reason: str | None = None
+        validation_score_at_stop: float | None = None
+        issue_count_at_stop: int | None = None
+        skipped_llm_after_passed = False
 
         # Build first-step checklist (P2.2) — injected before any validation is available.
         initial_step_context: dict[str, Any] | None = None
@@ -159,7 +165,25 @@ class ReactStrategy:
             from benchmark.agent.strategies.issue_action_mapper import build_task_checklist
             initial_step_context = {"task_checklist": build_task_checklist(task_obj)}
 
-        if self.scene_validator_fn is not None:
+        if self.initial_validation_result is not None:
+            initial_result = self.initial_validation_result
+            initial_score = initial_result.total_score
+            scene_ok = _validation_passed_or_warning(initial_result)
+            last_validation_result = initial_result
+            previous_scene_score = initial_score
+            previous_issue_codes = {i.code for i in initial_result.issues}
+            initial_issue_count = len(previous_issue_codes)
+            initial_issue_codes = set(previous_issue_codes)
+            if scene_ok:
+                log.info("[react:%s] seeded validation passed, stopping before LLM call", trace.run_id[:8])
+                success = True
+                final_message = "scene_passed_initial_stop"
+                early_stop_reason = "scene_passed_after_validation"
+                validation_score_at_stop = initial_score
+                issue_count_at_stop = len(previous_issue_codes)
+                skipped_llm_after_passed = True
+                trace = trace.add_step(AgentStepType.FINAL, observation=final_message)
+        elif self.scene_validator_fn is not None:
             try:
                 initial_snap_path = output_dir / "initial_react_snapshot.json"
                 scene_ok, initial_score, initial_result = self.scene_validator_fn(initial_snap_path)
@@ -176,6 +200,10 @@ class ReactStrategy:
                 log.info("[react:%s] initial scene passed, stopping before LLM call", trace.run_id[:8])
                 success = True
                 final_message = "scene_passed_initial_stop"
+                early_stop_reason = "scene_passed_after_validation"
+                validation_score_at_stop = initial_score
+                issue_count_at_stop = len(previous_issue_codes)
+                skipped_llm_after_passed = True
                 trace = trace.add_step(AgentStepType.FINAL, observation=final_message)
 
         log.info(
@@ -186,6 +214,42 @@ class ReactStrategy:
         while final_message is None and error_message is None and react_iteration_count < effective_max_steps:
             react_iteration_count += 1
             step_num = react_iteration_count
+
+            current_snapshot: Any = None
+            if self.scene_validator_fn is not None:
+                pre_snap_path = output_dir / f"pre_step_{step_num}_snapshot.json"
+                try:
+                    _, pre_score, pre_val = self.scene_validator_fn(pre_snap_path)
+                    if pre_val is not None:
+                        last_validation_result = pre_val
+                        if pre_score is not None:
+                            previous_scene_score = pre_score
+                        previous_issue_codes = {i.code for i in pre_val.issues}
+                        if initial_issue_count is None:
+                            initial_issue_count = len(previous_issue_codes)
+                            initial_issue_codes = set(previous_issue_codes)
+                    if pre_snap_path.exists():
+                        from benchmark.validation.snapshot_normalization import normalize_scene_snapshot
+                        import json as _json
+                        current_snapshot = normalize_scene_snapshot(
+                            _json.loads(pre_snap_path.read_text(encoding="utf-8"))
+                        )
+                    if (
+                        agent_config.stop_after_scene_passed
+                        and pre_val is not None
+                        and _validation_passed_or_warning(pre_val)
+                    ):
+                        log.info("[react:%s] step %d — scene already passed, stopping before LLM", trace.run_id[:8], step_num)
+                        success = True
+                        final_message = "scene_passed_early_stop"
+                        early_stop_reason = "scene_passed_after_validation"
+                        validation_score_at_stop = pre_score
+                        issue_count_at_stop = len(previous_issue_codes)
+                        skipped_llm_after_passed = True
+                        trace = trace.add_step(AgentStepType.FINAL, observation=final_message)
+                        break
+                except Exception as exc:
+                    log.debug("[react:%s] pre-step validation failed: %s", trace.run_id[:8], exc)
 
             # Capture pre-step validation state for per-step trace fields (R-10).
             _score_before: float | None = previous_scene_score
@@ -221,7 +285,11 @@ class ReactStrategy:
             else:
                 # Build validator-driven step context (prompt injection + repair detection).
                 step_context, repair_action, _repair_activation = _build_step_context(
-                    last_validation_result, task_obj, initial_step_context if step_num == 1 else None, tool_contracts
+                    last_validation_result,
+                    task_obj,
+                    initial_step_context if step_num == 1 else None,
+                    tool_contracts,
+                    current_snapshot,
                 )
                 if step_context:
                     _top_issue_dict = step_context.get("top_issue")
@@ -597,17 +665,22 @@ class ReactStrategy:
                 if val_result is not None:
                     last_validation_result = val_result
 
+                current_issue_codes = {i.code for i in (val_result.issues if val_result else [])}
+
                 if agent_config.stop_after_scene_passed and (scene_ok or _validation_passed_or_warning(val_result)):
                     log.info("[react:%s] step %d — scene passed, stopping early", trace.run_id[:8], step_num)
                     success = True
                     final_message = "scene_passed_early_stop"
+                    early_stop_reason = "scene_passed_after_validation"
+                    validation_score_at_stop = current_score
+                    issue_count_at_stop = len(current_issue_codes)
+                    skipped_llm_after_passed = False
                     trace = trace.add_step(AgentStepType.FINAL, observation="scene_passed_early_stop")
                     break
 
                 if agent_config.detect_no_progress and current_score is not None:
                     # Issue-level progress check (P0.5): progress if score improved OR
                     # a priority issue disappeared OR issue count decreased.
-                    current_issue_codes = {i.code for i in (val_result.issues if val_result else [])}
                     if initial_issue_count is None:
                         initial_issue_count = len(current_issue_codes)
                         initial_issue_codes = set(current_issue_codes)
@@ -690,6 +763,18 @@ class ReactStrategy:
             and last_validation_result is not None
             and _validation_passed_or_warning(last_validation_result)
         )
+        if scene_passed_but_agent_error:
+            success = True
+            if final_message is None:
+                final_message = "scene_passed_early_stop"
+            if early_stop_reason is None:
+                early_stop_reason = "scene_passed_after_validation"
+            if validation_score_at_stop is None and last_validation_result is not None:
+                validation_score_at_stop = last_validation_result.total_score
+            if issue_count_at_stop is None and last_validation_result is not None:
+                issue_count_at_stop = len(last_validation_result.issues)
+            error_message = None
+            _react_error_type = None
         return trace.model_copy(
             update={
                 "success": success,
@@ -705,6 +790,10 @@ class ReactStrategy:
                     "no_progress_step_count": no_progress_step_count,
                     "effective_max_steps": effective_max_steps,
                     "scene_passed_but_agent_error": scene_passed_but_agent_error,
+                    "early_stop_reason": early_stop_reason,
+                    "validation_score_at_stop": validation_score_at_stop,
+                    "issue_count_at_stop": issue_count_at_stop,
+                    "skipped_llm_after_passed": skipped_llm_after_passed,
                     "react_iterations_total": react_iteration_count,
                     "inspection_before_mutation_rate": (
                         mutation_preceded_by_inspection / mutation_steps
@@ -758,6 +847,7 @@ def _build_step_context(
     task_obj: Any,
     initial_context: dict[str, Any] | None,
     tool_contracts: list[Any],
+    snapshot: Any = None,
 ) -> tuple[dict[str, Any] | None, Any, dict[str, Any]]:
     """Build the current-scene-state dict injected into each step's prompt.
 
@@ -767,7 +857,15 @@ def _build_step_context(
     """
     if val_result is None:
         return initial_context, None, _repair_activation_metadata(
-            val_result, task_obj, None, None, tool_contracts, deterministic_executed=False, fallback_reason="no_validation_result"
+            val_result,
+            task_obj,
+            None,
+            None,
+            tool_contracts,
+            deterministic_executed=False,
+            fallback_reason="no_validation_result",
+            snapshot_available=snapshot is not None,
+            snapshot_schema_valid=False,
         )  # First step: task checklist only
 
     from benchmark.agent.strategies.issue_action_mapper import select_top_issue, map_issue_to_repair
@@ -779,7 +877,7 @@ def _build_step_context(
     mapper_exception: Exception | None = None
     if top_issue is not None and task_obj is not None:
         try:
-            repair_action = map_issue_to_repair(top_issue, task_obj)
+            repair_action = map_issue_to_repair(top_issue, task_obj, snapshot)
         except Exception as exc:  # noqa: BLE001
             mapper_exception = exc
             repair_action = None
@@ -819,6 +917,8 @@ def _build_step_context(
         deterministic_executed=False,
         fallback_reason=fallback_reason,
         mapper_exception=mapper_exception,
+        snapshot_available=snapshot is not None,
+        snapshot_schema_valid=snapshot is not None,
     )
     return ctx, repair_action, activation
 
@@ -843,7 +943,10 @@ def _build_no_progress_hint(val_result: Any, task_obj: Any) -> str:
 
 
 def _validation_passed_or_warning(val_result: Any) -> bool:
-    status = str(getattr(val_result, "overall_status", "") or "").lower()
+    status = getattr(val_result, "overall_status", "")
+    if hasattr(status, "value"):
+        status = status.value
+    status = str(status or "").lower()
     return status in {"passed", "warning"}
 
 
@@ -880,6 +983,8 @@ def _repair_activation_metadata(
     deterministic_executed: bool,
     fallback_reason: str | None,
     mapper_exception: Exception | None = None,
+    snapshot_available: bool | None = None,
+    snapshot_schema_valid: bool | None = None,
 ) -> dict[str, Any]:
     issues = getattr(val_result, "issues", None) or []
     tool_name = getattr(repair_action, "tool_name", None) if repair_action is not None else None
@@ -894,10 +999,12 @@ def _repair_activation_metadata(
     )
     resolved_fallback = fallback_reason
     if repair_action is not None and not tool_available:
-        resolved_fallback = "tool_not_available_in_profile"
+        resolved_fallback = "tool_not_allowed_in_profile"
     elif repair_action is not None and not args_complete:
         resolved_fallback = "required_arguments_missing"
     return {
+        "snapshot_available": snapshot_available if snapshot_available is not None else val_result is not None,
+        "snapshot_schema_valid": snapshot_schema_valid if snapshot_schema_valid is not None else val_result is not None,
         "validation_result_available": val_result is not None,
         "issue_count": len(issues),
         "top_issue_code": getattr(top_issue, "code", None) if top_issue is not None else None,
@@ -905,6 +1012,7 @@ def _repair_activation_metadata(
         "repair_mapped": repair_action is not None,
         "repair_tool": tool_name,
         "repair_arguments_complete": args_complete,
+        "tool_allowed": tool_available,
         "deterministic_repair_executed": deterministic_executed,
         "fallback_reason": resolved_fallback,
         "mapper_exception": str(mapper_exception) if mapper_exception is not None else None,

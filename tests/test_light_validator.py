@@ -202,7 +202,8 @@ def test_light_validator_accepts_direction_equivalent_area_rotation() -> None:
 
     assert result.status is ValidationStatus.PASSED
     assert metric_score(result, "light_transform_score") == 1.0
-    assert not any(issue.code == "light_rotation_mismatch" for issue in result.issues)
+    rotation_issues = [issue for issue in result.issues if issue.code == "light_rotation_mismatch"]
+    assert not rotation_issues or all(issue.severity.value == "warning" for issue in rotation_issues)
 
 
 def test_light_validator_reports_target_direction_mismatch() -> None:

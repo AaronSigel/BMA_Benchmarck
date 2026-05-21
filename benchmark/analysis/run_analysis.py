@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -209,12 +210,23 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
         for react_key in (
             "react_steps_total",
             "react_repair_steps",
+            "deterministic_repair_steps",
             "react_wasted_steps",
             "react_no_progress_count",
             "react_blocked_export_count",
             "react_max_steps_count",
             "react_error_type",
             "react_issue_resolution_rate",
+            "hybrid_repair_used",
+            "repair_unavailable_reason",
+            "repair_improved_score",
+            "repair_reduced_issue_count",
+            "repair_error_type",
+            "early_stop_reason",
+            "validation_score_at_stop",
+            "issue_count_at_stop",
+            "skipped_llm_after_passed",
+            "scene_passed_but_agent_error",
         ):
             value = trace.metadata.get(react_key)
             if isinstance(value, (float, str, int, bool)):
@@ -273,6 +285,11 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
         v = getattr(val_summary, field)
         if v is not None:
             metrics[field] = v
+    if validation is not None:
+        for validator in validation.validators:
+            if validator.name == "glb_import_back_validator" and validator.details:
+                for key, value in validator.details.items():
+                    metrics[f"import_back.{key}"] = _import_back_metric_value(value)
     metrics["tool_selection_accuracy"] = _tool_selection_accuracy(metrics)
     metrics["parameter_correctness"] = _parameter_correctness(validation)
 
@@ -314,16 +331,19 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
             if isinstance(failure_stage, str) and failure_stage:
                 metrics["failure_stage"] = failure_stage
     if trace is not None and trace.structured_error is not None:
-        error_type = trace.structured_error.get("error_type")
-        source = trace.structured_error.get("source")
-        failure_stage = trace.structured_error.get("failure_stage")
-        if isinstance(error_type, str) and error_type and "structured_error_type" not in metrics:
-            metrics.setdefault("structured_error_type", error_type)
-            metrics[f"error.{error_type}"] = int(metrics.get(f"error.{error_type}", 0) or 0) + 1
-        if isinstance(source, str) and source:
-            metrics.setdefault("structured_error_source", source)
-        if isinstance(failure_stage, str) and failure_stage:
-            metrics.setdefault("failure_stage", failure_stage)
+        if trace.metadata.get("scene_passed_but_agent_error") or trace.metadata.get("early_stop_reason"):
+            pass
+        else:
+            error_type = trace.structured_error.get("error_type")
+            source = trace.structured_error.get("source")
+            failure_stage = trace.structured_error.get("failure_stage")
+            if isinstance(error_type, str) and error_type and "structured_error_type" not in metrics:
+                metrics.setdefault("structured_error_type", error_type)
+                metrics[f"error.{error_type}"] = int(metrics.get(f"error.{error_type}", 0) or 0) + 1
+            if isinstance(source, str) and source:
+                metrics.setdefault("structured_error_source", source)
+            if isinstance(failure_stage, str) and failure_stage:
+                metrics.setdefault("failure_stage", failure_stage)
     elif trace is not None and isinstance(trace.error, dict):
         error_type = trace.error.get("error_type")
         source = trace.error.get("source")
@@ -365,7 +385,13 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
         else run_result.overall_status if run_result is not None and run_result.overall_status
         else val_summary.scene_overall_status
     )
-    pass_type = _classify_pass_type(_run_status_str, _scene_status_str, _agent_status_str, issues)
+    pass_type = _classify_pass_type(
+        _run_status_str,
+        _scene_status_str,
+        _agent_status_str,
+        issues,
+        error_type=str(metrics.get("structured_error_type") or "") or None,
+    )
 
     return RunAnalysisResult(
         run_id=run_id,
@@ -399,6 +425,8 @@ def _classify_pass_type(
     scene_status: str | None,
     agent_status: str | None,
     issues: list[dict[str, Any]],
+    *,
+    error_type: str | None = None,
 ) -> str:
     """Classify a run as clean_pass, soft_pass, failed_validation, or runtime_error."""
     agent_ok = agent_status in (
@@ -406,8 +434,9 @@ def _classify_pass_type(
         "completed_after_scene_passed",
         None,
     )
+    has_error_type = bool(error_type and str(error_type).strip() not in {"", "null", "None"})
     if scene_status == "passed":
-        if run_status == "passed" and agent_ok and not issues:
+        if run_status == "passed" and agent_ok and not issues and not has_error_type:
             return "clean_pass"
         return "soft_pass"
     if scene_status == "warning":
@@ -420,6 +449,19 @@ def _classify_pass_type(
     return "runtime_error"
 
 
+def _import_back_metric_value(value: Any) -> float | str | int | bool:
+    """Сериализует diagnostics import-back в скалярные метрики RunAnalysisResult."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float, str)):
+        return value
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
 def _tool_selection_accuracy(metrics: dict[str, Any]) -> float | str:
     tool_calls = metrics.get("tool_call_count")
     invalid = metrics.get("invalid_tool_call_count", 0)
@@ -428,6 +470,166 @@ def _tool_selection_accuracy(metrics: dict[str, Any]) -> float | str:
         return "not_available"
     bad = (invalid if isinstance(invalid, int) else 0) + (disabled if isinstance(disabled, int) else 0)
     return max(0.0, min(1.0, 1.0 - (bad / tool_calls)))
+
+
+_PASS_TYPES = frozenset({"clean_pass", "soft_pass"})
+_RUNTIME_ERROR_MARKERS = (
+    "reactinvalidaction",
+    "reactnoaction",
+    "reactmaxsteps",
+    "tooltimeout",
+    "blender socket",
+    "empty response",
+    "snapshotunavailable",
+    "resetscenefailed",
+)
+
+
+def summarize_lighting_failures(
+    experiment_dir: Path,
+    *,
+    task_ids: list[str] | None = None,
+    sample_limit: int = 5,
+) -> dict[str, Any]:
+    """Сводка runtime vs validation для lighting-задач из experiment_analysis.json."""
+    analysis_path = experiment_dir / "experiment_analysis.json"
+    if not analysis_path.is_file():
+        raise FileNotFoundError(f"experiment_analysis.json not found: {analysis_path}")
+
+    payload = json.loads(analysis_path.read_text(encoding="utf-8"))
+    rows = payload.get("runs", [])
+    if not isinstance(rows, list):
+        raise ValueError("experiment_analysis.json runs must be a list")
+
+    default_tasks = ("lighting_001_area_light", "lighting_003_three_point_lighting")
+    selected_tasks = tuple(task_ids or default_tasks)
+    lighting_rows = [row for row in rows if row.get("task_id") in selected_tasks]
+
+    pass_type_counts: dict[str, int] = {}
+    issue_code_counts: dict[str, int] = {}
+    agent_error_counts: dict[str, int] = {}
+    per_task: dict[str, dict[str, Any]] = {}
+
+    for row in lighting_rows:
+        task_id = str(row.get("task_id") or "")
+        pass_type = str(row.get("pass_type") or "unknown")
+        pass_type_counts[pass_type] = pass_type_counts.get(pass_type, 0) + 1
+
+        task_bucket = per_task.setdefault(
+            task_id,
+            {"total": 0, "passed": 0, "pass_type_counts": {}, "issue_codes": {}},
+        )
+        task_bucket["total"] += 1
+        task_bucket["pass_type_counts"][pass_type] = task_bucket["pass_type_counts"].get(pass_type, 0) + 1
+        if pass_type in _PASS_TYPES:
+            task_bucket["passed"] += 1
+
+        for issue in row.get("issues") or []:
+            if not isinstance(issue, dict):
+                continue
+            code = str(issue.get("code") or "unknown")
+            issue_code_counts[code] = issue_code_counts.get(code, 0) + 1
+            task_bucket["issue_codes"][code] = task_bucket["issue_codes"].get(code, 0) + 1
+
+        metrics = row.get("metrics") or {}
+        error_type = str(
+            metrics.get("structured_error_type")
+            or metrics.get("react_error_type")
+            or row.get("error_type")
+            or ""
+        ).strip()
+        if error_type:
+            agent_error_counts[error_type] = agent_error_counts.get(error_type, 0) + 1
+
+        error_message = str(row.get("error_message") or metrics.get("error_message") or "").lower()
+        for marker in _RUNTIME_ERROR_MARKERS:
+            if marker in error_message and marker not in agent_error_counts:
+                agent_error_counts[marker] = agent_error_counts.get(marker, 0) + 1
+
+    failed_rows = [
+        row for row in lighting_rows
+        if str(row.get("pass_type") or "") not in _PASS_TYPES
+    ]
+    samples: list[dict[str, Any]] = []
+    for row in failed_rows[:sample_limit]:
+        run_id = str(row.get("run_id") or "")
+        run_dir = experiment_dir / run_id if run_id else None
+        samples.append(
+            {
+                "run_id": run_id,
+                "task_id": row.get("task_id"),
+                "pass_type": row.get("pass_type"),
+                "agent_id": row.get("agent_id"),
+                "mcp_profile": row.get("mcp_profile"),
+                "issue_codes": sorted(
+                    {
+                        str(issue.get("code"))
+                        for issue in (row.get("issues") or [])
+                        if isinstance(issue, dict) and issue.get("code")
+                    }
+                ),
+                "trace_spot_check": _spot_check_lighting_trace(run_dir),
+            }
+        )
+
+    total = len(lighting_rows)
+    passed = sum(1 for row in lighting_rows if str(row.get("pass_type") or "") in _PASS_TYPES)
+    return {
+        "experiment_dir": str(experiment_dir),
+        "task_ids": list(selected_tasks),
+        "total_runs": total,
+        "passed_runs": passed,
+        "lighting_success_rate": (passed / total) if total else 0.0,
+        "pass_type_counts": dict(sorted(pass_type_counts.items())),
+        "issue_code_counts": dict(sorted(issue_code_counts.items(), key=lambda item: (-item[1], item[0]))),
+        "agent_error_counts": dict(sorted(agent_error_counts.items(), key=lambda item: (-item[1], item[0]))),
+        "per_task": per_task,
+        "sample_failed_runs": samples,
+    }
+
+
+def _spot_check_lighting_trace(run_dir: Path | None) -> dict[str, Any] | None:
+    """Краткая проверка agent trace: созданы ли named lights и есть ли rotation."""
+    if run_dir is None or not run_dir.is_dir():
+        return None
+
+    trace_paths = list(run_dir.glob("agent_runs/*/agent_trace.json"))
+    if not trace_paths:
+        trace_paths = list(run_dir.glob("**/agent_trace.json"))
+    if not trace_paths:
+        return {"status": "trace_missing"}
+
+    try:
+        trace = json.loads(trace_paths[0].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return {"status": "trace_unreadable", "error": str(error)}
+
+    light_calls: list[dict[str, Any]] = []
+    for step in trace.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        tool_name = str(step.get("tool_name") or "")
+        if "create_light" not in tool_name.lower():
+            continue
+        args = step.get("tool_arguments") or {}
+        light_calls.append(
+            {
+                "name": args.get("name"),
+                "type": args.get("type"),
+                "has_rotation": "rotation" in args and args.get("rotation") not in (None, [], ""),
+            }
+        )
+
+    expected_names = {"Key_Light", "Fill_Light", "Back_Light"}
+    created_names = {str(call.get("name")) for call in light_calls if call.get("name")}
+    return {
+        "status": "ok",
+        "light_create_calls": len(light_calls),
+        "lights_with_rotation": sum(1 for call in light_calls if call.get("has_rotation")),
+        "created_light_names": sorted(created_names),
+        "missing_expected_names": sorted(expected_names - created_names),
+        "calls": light_calls,
+    }
 
 
 def _parameter_correctness(validation: SceneValidationResult | None) -> float | str:

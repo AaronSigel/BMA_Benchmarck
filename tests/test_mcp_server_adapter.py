@@ -200,12 +200,9 @@ def test_call_tool_maps_camera_look_at_to_socket_command():
         result = adapter.call_tool("bma_create_camera_look_at", args)
 
     payload = json.loads(mock_sock.sendall.call_args.args[0].decode())
-    assert result == {
-        "ok": True,
-        "tool": "bma_create_camera_look_at",
-        "result": {"name": "Front_Camera"},
-        "error": None,
-    }
+    assert result["ok"] is True
+    assert result["tool"] == "bma_create_camera_look_at"
+    assert result["result"]["camera_name"] == "Front_Camera"
     assert payload["type"] == "create_camera_look_at"
     assert payload["params"] == args
 

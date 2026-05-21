@@ -148,6 +148,7 @@ def validate_report_bundle_result(bundle: Path | str, *, write_result: bool = Tr
     # Readiness gates: evaluate matrix-defined thresholds against actual run data.
     # Structural validation (required files, row counts) is separate from benchmark readiness.
     readiness_gates = None
+    gate_result: dict[str, Any] | None = None
     if isinstance(manifest, dict):
         meta = manifest.get("metadata")
         if isinstance(meta, dict):
@@ -177,7 +178,7 @@ def validate_report_bundle_result(bundle: Path | str, *, write_result: bool = Tr
                 message=f"benchmark readiness failed: {len(gate_result['failed_gates'])} gate(s) violated",
             )
 
-    return _finish_result(root, checks, write_result)
+    return _finish_result(root, checks, write_result, gate_result=gate_result)
 
 
 def _read_summary_rows(path: Path, errors: list[str]) -> list[dict[str, str]]:
@@ -243,10 +244,40 @@ def _evaluate_readiness_gates(
     Gates are blocking criteria — any failure sets readiness_ok=False.
     """
     failed_gates: list[dict[str, Any]] = []
+    warning_gates: list[dict[str, Any]] = []
     gates_checked: list[str] = []
 
-    def _fail(name: str, expected: Any, actual: Any) -> None:
-        failed_gates.append({"name": name, "expected": expected, "actual": actual, "severity": "blocking"})
+    if gates.get("require_hybrid_repair_used_on_failed_validation") is True:
+        gates = {
+            **gates,
+            "hybrid_repair_activation_required_for_failed_validation": True,
+        }
+
+    def _fail(name: str, expected: Any, actual: Any, *, severity: str = "blocking") -> None:
+        entry = {"name": name, "expected": expected, "actual": actual, "severity": severity}
+        if severity == "warning":
+            warning_gates.append(entry)
+        else:
+            failed_gates.append(entry)
+
+    def _check_rate_gate(
+        gate_name: str,
+        *,
+        actual_rate: float | None,
+        comparator: str,
+        threshold: float,
+        severity: str = "blocking",
+    ) -> None:
+        if gate_name not in gates or actual_rate is None:
+            return
+        gates_checked.append(gate_name)
+        threshold_value = float(gates[gate_name])
+        failed = (
+            actual_rate < threshold_value if comparator == "min"
+            else actual_rate > threshold_value
+        )
+        if failed:
+            _fail(gate_name, threshold_value, round(actual_rate, 4), severity=severity)
 
     # --- invalid_tool_response_export_max ---
     # Max allowed InvalidToolResponse / EmptySocketResponse / InvalidJsonResponse on export tasks.
@@ -294,33 +325,52 @@ def _evaluate_readiness_gates(
                 _fail(gate_name, threshold, round(rate, 4))
 
     # --- require_react_repair_steps_on_validation_issues ---
-    # At least some ReAct runs with validation issues must have repair steps > 0.
     gate_name = "require_react_repair_steps_on_validation_issues"
     if gates.get(gate_name) is True:
         gates_checked.append(gate_name)
         react_rows = [r for r in rows if str(r.get("strategy", "")).strip() == "react"]
         validation_issue_rows = [
             r for r in react_rows
-            if str(r.get("pass_type", "")).strip() in {"failed_validation", "runtime_error"}
+            if str(r.get("pass_type", "")).strip() in {"failed_validation", "runtime_error", "soft_pass"}
             and str(r.get("validation_issues", "")).strip() not in {"", "null", "None"}
         ]
         if validation_issue_rows:
-            # Check for any runs reporting repair activity (heuristic: agent_issues contains repair fields).
-            # Since summary.csv doesn't directly store react_repair_steps, we check agent_issues for clues.
-            # A gate violation is reported as a warning-level signal rather than a hard block here,
-            # because the repair step count is in the trace metadata, not summary.csv.
-            # We surface this as an informational failed gate when no evidence of repair is found.
-            has_repair_evidence = any(
-                "repair" in str(r.get("agent_issues", "")).lower()
-                for r in validation_issue_rows
+            has_repair_steps = any(_int_metric(r.get("react_repair_steps")) > 0 for r in validation_issue_rows)
+            if not has_repair_steps:
+                _fail(
+                    gate_name,
+                    "react_repair_steps > 0 on at least one run with validation issues",
+                    0,
+                )
+
+    # --- hybrid_repair_activation_required_for_failed_validation ---
+    gate_name = "hybrid_repair_activation_required_for_failed_validation"
+    if gates.get(gate_name) is True:
+        gates_checked.append(gate_name)
+        hybrid_rows = [
+            r for r in rows
+            if str(r.get("strategy", "")).strip() == "plan_execute_react_repair"
+            and str(r.get("pass_type", "")).strip() in {"failed_validation", "runtime_error", "soft_pass"}
+        ]
+        if hybrid_rows:
+            activated = sum(
+                1 for r in hybrid_rows
+                if str(r.get("hybrid_repair_used", "")).strip().lower() in {"true", "1", "yes"}
             )
-            if not has_repair_evidence:
-                failed_gates.append({
-                    "name": gate_name,
-                    "expected": "react_repair_steps > 0 on at least one run with validation issues",
-                    "actual": "no repair evidence found in agent_issues",
-                    "severity": "warning",
-                })
+            if activated == 0:
+                _fail(gate_name, "> 0 hybrid runs with hybrid_repair_used", 0)
+
+    # --- snapshot_invalid_schema_max ---
+    gate_name = "snapshot_invalid_schema_max"
+    if gate_name in gates:
+        gates_checked.append(gate_name)
+        threshold = int(gates[gate_name])
+        invalid_count = sum(
+            1 for r in rows
+            if str(r.get("repair_unavailable_reason", "")).strip() == "snapshot_invalid_schema"
+        )
+        if invalid_count > threshold:
+            _fail(gate_name, threshold, invalid_count)
 
     # --- export_smoke_required ---
     # This gate is evaluated by preflight, not by post-run analysis.
@@ -337,29 +387,116 @@ def _evaluate_readiness_gates(
             if success_count == 0:
                 _fail("export_smoke_required", "at_least_one_export_success", 0)
 
+    _check_rate_gate(
+        "reported_success_rate_min",
+        actual_rate=_reported_success_rate(rows),
+        comparator="min",
+        threshold=float(gates.get("reported_success_rate_min", 0)),
+    )
+    _check_rate_gate(
+        "runtime_error_rate_max",
+        actual_rate=_runtime_error_rate(rows),
+        comparator="max",
+        threshold=float(gates.get("runtime_error_rate_max", 1)),
+    )
+    for category, gate_name in (
+        ("geometry", "geometry_success_rate_min"),
+        ("materials", "materials_success_rate_min"),
+        ("camera", "camera_success_rate_min"),
+        ("lighting", "lighting_success_rate_min"),
+        ("export", "export_success_rate_min"),
+    ):
+        if gate_name in gates:
+            _check_rate_gate(
+                gate_name,
+                actual_rate=_category_success_rate(rows, category),
+                comparator="min",
+                threshold=float(gates[gate_name]),
+            )
+
     return {
-        "readiness_ok": len([fg for fg in failed_gates if fg.get("severity") != "warning"]) == 0,
+        "readiness_ok": len(failed_gates) == 0,
         "failed_gates": failed_gates,
+        "warning_gates": warning_gates,
         "gates_checked": gates_checked,
     }
 
 
+def _int_metric(value: Any) -> int:
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _task_category(row: dict[str, str]) -> str:
+    explicit = str(row.get("task_category", "")).strip()
+    if explicit:
+        return explicit
     task_id = str(row.get("task_id", "")).strip()
     parts = task_id.split("_")
     return parts[0] if parts else ""
 
 
-def _finish_result(root: Path, checks: list[dict[str, Any]], write_result: bool) -> dict[str, Any]:
-    status = "failed" if any(check.get("status") == "failed" for check in checks) else "passed"
+def _reported_success_rate(rows: list[dict[str, str]]) -> float | None:
+    if not rows:
+        return None
+    passed = sum(1 for row in rows if str(row.get("pass_type", "")).strip() in {"clean_pass", "soft_pass"})
+    return passed / len(rows)
+
+
+def _runtime_error_rate(rows: list[dict[str, str]]) -> float | None:
+    if not rows:
+        return None
+    errors = sum(1 for row in rows if str(row.get("pass_type", "")).strip() == "runtime_error")
+    return errors / len(rows)
+
+
+def _category_success_rate(rows: list[dict[str, str]], category: str) -> float | None:
+    category_rows = [row for row in rows if _task_category(row) == category]
+    if not category_rows:
+        return None
+    passed = sum(
+        1 for row in category_rows
+        if str(row.get("pass_type", "")).strip() in {"clean_pass", "soft_pass"}
+    )
+    return passed / len(category_rows)
+
+
+def _finish_result(
+    root: Path,
+    checks: list[dict[str, Any]],
+    write_result: bool,
+    *,
+    gate_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    structural_checks = [c for c in checks if not str(c.get("name", "")).startswith("readiness_gate")]
+    structural_failed = any(check.get("status") == "failed" for check in structural_checks)
+    structural_validity = "failed" if structural_failed else "passed"
+    readiness_ok = True if gate_result is None else bool(gate_result.get("readiness_ok"))
+    failed_gates = gate_result.get("failed_gates", []) if isinstance(gate_result, dict) else []
+    warning_gates = gate_result.get("warning_gates", []) if isinstance(gate_result, dict) else []
+    status = "failed" if structural_failed or (gate_result is not None and not readiness_ok) else "passed"
     result = {
         "status": status,
+        "structural_validity": structural_validity,
+        "readiness_ok": readiness_ok,
+        "failed_gates": failed_gates,
+        "warning_gates": warning_gates,
         "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "checks": checks,
     }
     if write_result and root.exists() and root.is_dir():
         (root / "bundle_validation_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         (root / "bundle_validation_result.md").write_text(_markdown_result(result), encoding="utf-8")
+        readiness_payload = {
+            "structural_validity": structural_validity,
+            "readiness_ok": readiness_ok,
+            "failed_gates": failed_gates,
+            "warning_gates": warning_gates,
+            "gates_checked": gate_result.get("gates_checked", []) if isinstance(gate_result, dict) else [],
+        }
+        (root / "readiness_result.json").write_text(json.dumps(readiness_payload, indent=2), encoding="utf-8")
     return result
 
 

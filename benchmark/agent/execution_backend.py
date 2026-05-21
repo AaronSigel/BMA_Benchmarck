@@ -242,6 +242,9 @@ def _prepare_blender_scene(
     log.info("[task:%s] resetting Blender scene before run", task_id)
     reset_result = mcp_executor.adapter.reset_scene()
     if "warning" in reset_result:
+        log.warning("[task:%s] scene reset failed, retrying once: %s", task_id, reset_result["warning"])
+        reset_result = mcp_executor.adapter.reset_scene()
+    if "warning" in reset_result:
         warning = str(reset_result["warning"])
         log.warning("[task:%s] scene reset failed: %s", task_id, warning)
         return f"scene reset failed: {warning}", None
@@ -268,16 +271,16 @@ def _capture_snapshot_to_path(tool_executor: ToolExecutor, snapshot_path: Path) 
     mcp_executor = _mcp_executor(tool_executor)
     if mcp_executor is None:
         return None
-    try:
-        result = mcp_executor.adapter.collect_scene_snapshot(snapshot_path)
-    except Exception as error:
-        log.warning("scene snapshot collection failed: %s", error)
-        return None
-    if isinstance(result, dict) and "warning" in result:
-        log.warning("scene snapshot collection warning: %s", result["warning"])
-        return None
-    if snapshot_path.exists():
-        return snapshot_path
+    for attempt in range(2):
+        try:
+            result = mcp_executor.adapter.collect_scene_snapshot(snapshot_path)
+        except Exception as error:
+            log.warning("scene snapshot collection failed (attempt %d): %s", attempt + 1, error)
+            result = {"warning": str(error)}
+        if isinstance(result, dict) and "warning" in result:
+            log.warning("scene snapshot collection warning (attempt %d): %s", attempt + 1, result["warning"])
+        elif snapshot_path.exists():
+            return snapshot_path
     return None
 
 

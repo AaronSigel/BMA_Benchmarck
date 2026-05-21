@@ -12,6 +12,7 @@ class ControlledErrorType(str, Enum):
     REACT_INVALID_ACTION = "ReactInvalidAction"
     REACT_NON_STRICT_RESPONSE = "ReactNonStrictResponse"
     REACT_BLOCKED_EXPORT = "ReactBlockedExport"
+    DIRECT_NO_ACTION = "DirectNoAction"
     LLM_PARSE_ERROR = "LlmParseError"
     INVALID_TOOL_CALL = "InvalidToolCall"
     BLENDER_SOCKET_UNAVAILABLE = "BlenderSocketUnavailable"
@@ -96,6 +97,10 @@ def normalize_error(
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
     elif "react strategy reached max_steps" in text or "reactmaxsteps" in text or "reached max_steps" in text or "max_steps" in text or "step limit" in text or "agentsteplimit" in text:
         error_type = ControlledErrorType.REACT_MAX_STEPS
+        inferred_source = explicit_source or ControlledErrorSource.AGENT
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
+    elif "directnoaction" in text or "direct no action" in text:
+        error_type = ControlledErrorType.DIRECT_NO_ACTION
         inferred_source = explicit_source or ControlledErrorSource.AGENT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
     elif "no tool call or json action returned by llm" in text or "failed to parse" in text or "did not include action" in text or "no action found" in text or "llmresponseparseerror" in text or "llmparseerror" in text or "reactnonstrictresponse" in text:

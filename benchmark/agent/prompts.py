@@ -76,6 +76,8 @@ class PromptBuilder:
             "When a task specifies object dimensions, use the dimensions parameter; do not approximate dimensions with scale.",
             "When assigning materials, prefer bma_assign_material; include material_name, base_color, roughness, and metallic when specified.",
             "When a camera must look at a target point, use target with bma_create_camera or bma_create_camera_look_at instead of manual Euler rotation.",
+            "For bma_create_light, pass rotation as XYZ radians (convert task degrees to radians). Include name, type, location, rotation, and energy for each required light.",
+            "For three-point lighting tasks, create Key_Light, Fill_Light, and Back_Light as separate bma_create_light calls with explicit rotation.",
             "For export tasks, create all required scene objects, materials, and lights before bma_export_scene.",
             "For .blend export tasks call bma_export_scene with format='blend' and filename='result.blend'; for GLB export tasks use format='glb' and the task filename such as 'exports/result.glb'.",
             "Return tool_calls when the API supports them, otherwise return a JSON action in content.",

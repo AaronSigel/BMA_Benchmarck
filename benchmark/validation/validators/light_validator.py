@@ -4,7 +4,7 @@ import math
 from typing import Any
 
 from benchmark.blender.models import LightSnapshot, SceneSnapshot, Vector3 as BlenderVector3
-from benchmark.tasks.models import BenchmarkTask, ExpectedLight, Vector3
+from benchmark.tasks.models import BenchmarkTask, ExpectedLight, ExpectedScene, Vector3
 from benchmark.validation.matcher import SceneMatcher
 from benchmark.validation.models import (
     MetricScore,
@@ -21,40 +21,18 @@ def _deg_to_rad_v3(v: Vector3) -> BlenderVector3:
 
 
 def _euler_to_direction(rotation_euler: BlenderVector3) -> tuple[float, float, float]:
-    """Convert Blender XYZ Euler angles (radians) to a normalized direction vector.
-
-    Blender area/spot lights point in the -Z direction in their local frame.
-    We rotate that vector by the Euler angles to get world-space direction.
-    """
+    """Convert Blender XYZ Euler angles (radians) to a normalized direction vector."""
     rx, ry, rz = rotation_euler.x, rotation_euler.y, rotation_euler.z
-    # Rotation matrices applied in XYZ order
     cx, sx = math.cos(rx), math.sin(rx)
     cy, sy = math.cos(ry), math.sin(ry)
     cz, sz = math.cos(rz), math.sin(rz)
-    # Local -Z axis transformed by R_z * R_y * R_x
-    dx = sy * cx * cz + sx * sz
-    dy = sy * cx * sz - sx * cz
-    dz = -cy * cx
-    # -Z axis of the light
-    dx = -sx * sy * cz - cx * sz
-    dy = -sx * sy * sz + cx * cz
-    dz = sx * cy
-    # Actually use local +Z rotated: light default direction is (0,0,-1) in local
-    lx = -(cy * sz)
-    ly = cy * cz
-    lz = -sy
-    # Standard Blender: rotate (0,0,-1) by XYZ Euler
-    local_z = (0.0, 0.0, -1.0)
-    # Apply rx
-    x1, y1, z1 = local_z
+    x1, y1, z1 = 0.0, 0.0, -1.0
     y2 = y1 * cx - z1 * sx
     z2 = y1 * sx + z1 * cx
     x2 = x1
-    # Apply ry
     x3 = x2 * cy + z2 * sy
     y3 = y2
     z3 = -x2 * sy + z2 * cy
-    # Apply rz
     x4 = x3 * cz - y3 * sz
     y4 = x3 * sz + y3 * cz
     z4 = z3
@@ -86,7 +64,45 @@ def _angle_between_deg(
 
 
 def _prefer_direction_for_rotation(expected: ExpectedLight) -> bool:
-    return expected.type.upper() in {"SUN", "AREA"}
+    return expected.type.upper() in {"SUN", "AREA", "SPOT"}
+
+
+def _resolve_target(target: Vector3 | str | None, snapshot: SceneSnapshot) -> Vector3 | None:
+    if target is None:
+        return None
+    if isinstance(target, str):
+        from benchmark.tasks.models import ExpectedObject
+
+        obj = SceneMatcher().match_expected_object(
+            ExpectedObject(name=target, type="MESH"),
+            snapshot.objects,
+        )
+        if obj is None:
+            return None
+        return Vector3(x=obj.location.x, y=obj.location.y, z=obj.location.z)
+    return target
+
+
+def _scene_center_target(expected_scene: ExpectedScene) -> Vector3 | None:
+    locations = [obj.location for obj in expected_scene.objects if obj.location is not None]
+    if not locations:
+        return None
+    count = len(locations)
+    return Vector3(
+        x=sum(loc.x for loc in locations) / count,
+        y=sum(loc.y for loc in locations) / count,
+        z=sum(loc.z for loc in locations) / count,
+    )
+
+
+def _resolve_light_target(
+    expected: ExpectedLight,
+    expected_scene: ExpectedScene,
+    snapshot: SceneSnapshot,
+) -> Vector3 | None:
+    if expected.target is not None:
+        return _resolve_target(expected.target, snapshot)
+    return _scene_center_target(expected_scene)
 
 
 class LightValidator:
@@ -134,9 +150,17 @@ class LightValidator:
             if type_score < 1.0:
                 issues.append(self._type_mismatch_issue(expected, actual, expected_path, actual_path))
 
-            transform_score = self._transform_score(expected, actual)
+            transform_score = self._transform_score(expected, actual, task.expected_scene, snapshot)
             transform_scores.append(transform_score)
-            self._append_transform_issues(expected, actual, expected_path, actual_path, issues)
+            self._append_transform_issues(
+                expected,
+                actual,
+                expected_path,
+                actual_path,
+                issues,
+                task.expected_scene,
+                snapshot,
+            )
 
             energy_score = self._energy_score(expected, actual)
             energy_scores.append(energy_score)
@@ -150,7 +174,8 @@ class LightValidator:
             self._metric("light_energy_score", energy_scores, 0.2),
         ]
         score = weighted_average([(metric.score, metric.weight) for metric in metrics])
-        status = ValidationStatus.PASSED if not issues and score == 1.0 else ValidationStatus.FAILED
+        blocking_issues = [issue for issue in issues if issue.severity == ValidationSeverity.ERROR]
+        status = ValidationStatus.PASSED if not blocking_issues else ValidationStatus.FAILED
         return ValidatorResult(
             name=self.name,
             status=status,
@@ -170,25 +195,48 @@ class LightValidator:
             or expected.target is not None
         )
 
-    def _transform_score(self, expected: ExpectedLight, actual: LightSnapshot) -> float:
+    def _direction_score(
+        self,
+        expected: ExpectedLight,
+        actual: LightSnapshot,
+        expected_scene: ExpectedScene,
+        snapshot: SceneSnapshot,
+    ) -> tuple[float, tuple[float, float, float], tuple[float, float, float], float]:
+        actual_dir = _euler_to_direction(actual.rotation_euler)
+        tol = expected.direction_tolerance_deg
+
+        if expected.target is not None:
+            target_point = _resolve_light_target(expected, expected_scene, snapshot)
+            if target_point is not None:
+                expected_dir = _direction_to_target(actual.location, target_point)
+                angle_deg = _angle_between_deg(actual_dir, expected_dir)
+                dir_score = 1.0 if angle_deg <= tol else max(0.0, 1.0 - (angle_deg - tol) / max(tol, 1.0))
+                return dir_score, actual_dir, expected_dir, angle_deg
+
+        if expected.rotation is not None and _prefer_direction_for_rotation(expected):
+            expected_dir = _euler_to_direction(_deg_to_rad_v3(expected.rotation))
+            angle_deg = _angle_between_deg(actual_dir, expected_dir)
+            dir_score = 1.0 if angle_deg <= tol else max(0.0, 1.0 - (angle_deg - tol) / max(tol, 1.0))
+            return dir_score, actual_dir, expected_dir, angle_deg
+
+        return 1.0, actual_dir, (0.0, 0.0, -1.0), 0.0
+
+    def _transform_score(
+        self,
+        expected: ExpectedLight,
+        actual: LightSnapshot,
+        expected_scene: ExpectedScene,
+        snapshot: SceneSnapshot,
+    ) -> float:
         scores: list[float] = []
         if expected.location is not None:
             scores.append(vector_tolerance_score(expected.location, actual.location, expected.tolerance))
 
-        if expected.target is not None:
-            # Direction-based check: compare actual light direction to expected target direction
-            actual_dir = _euler_to_direction(actual.rotation_euler)
-            expected_dir = _direction_to_target(actual.location, expected.target)
-            angle_deg = _angle_between_deg(actual_dir, expected_dir)
-            tol = expected.direction_tolerance_deg
-            dir_score = max(0.0, 1.0 - angle_deg / max(tol, 1.0))
+        if expected.target is not None or (
+            expected.rotation is not None and _prefer_direction_for_rotation(expected)
+        ):
+            dir_score, _, _, _ = self._direction_score(expected, actual, expected_scene, snapshot)
             scores.append(dir_score)
-        elif expected.rotation is not None and _prefer_direction_for_rotation(expected):
-            actual_dir = _euler_to_direction(actual.rotation_euler)
-            expected_dir = _euler_to_direction(_deg_to_rad_v3(expected.rotation))
-            angle_deg = _angle_between_deg(actual_dir, expected_dir)
-            tol = expected.direction_tolerance_deg
-            scores.append(max(0.0, 1.0 - angle_deg / max(tol, 1.0)))
         elif expected.rotation is not None:
             scores.append(
                 vector_tolerance_score(
@@ -204,6 +252,8 @@ class LightValidator:
         expected_path: str,
         actual_path: str,
         issues: list[ValidationIssue],
+        expected_scene: ExpectedScene,
+        snapshot: SceneSnapshot,
     ) -> None:
         if expected.location is not None:
             score = vector_tolerance_score(expected.location, actual.location, expected.tolerance)
@@ -220,43 +270,59 @@ class LightValidator:
                     )
                 )
 
-        if expected.target is not None:
-            actual_dir = _euler_to_direction(actual.rotation_euler)
-            expected_dir = _direction_to_target(actual.location, expected.target)
-            angle_deg = _angle_between_deg(actual_dir, expected_dir)
+        uses_direction = expected.target is not None or (
+            expected.rotation is not None and _prefer_direction_for_rotation(expected)
+        )
+        direction_ok = True
+        if uses_direction:
+            _, actual_dir, expected_dir, angle_deg = self._direction_score(
+                expected, actual, expected_scene, snapshot
+            )
             tol = expected.direction_tolerance_deg
-            if angle_deg > tol:
-                issues.append(ValidationIssue(
-                    code="light_direction_mismatch",
-                    message=(
-                        f"Light direction deviates {angle_deg:.1f}° from target "
-                        f"(tolerance {tol}°)."
-                    ),
-                    severity=ValidationSeverity.ERROR,
-                    expected_path=f"{expected_path}.target",
-                    actual_path=f"{actual_path}.rotation_euler",
-                    expected_value={"target": expected.target.model_dump(mode="json"), "tolerance_deg": tol},
-                    actual_value={"direction": list(actual_dir), "angle_deg": round(angle_deg, 2)},
-                ))
-        elif expected.rotation is not None and _prefer_direction_for_rotation(expected):
-            actual_dir = _euler_to_direction(actual.rotation_euler)
-            expected_dir = _euler_to_direction(_deg_to_rad_v3(expected.rotation))
-            angle_deg = _angle_between_deg(actual_dir, expected_dir)
-            tol = expected.direction_tolerance_deg
-            if angle_deg > tol:
-                issues.append(ValidationIssue(
-                    code="light_direction_mismatch",
-                    message=(
-                        f"Light direction deviates {angle_deg:.1f}° from expected rotation direction "
-                        f"(tolerance {tol}°)."
-                    ),
-                    severity=ValidationSeverity.ERROR,
-                    expected_path=f"{expected_path}.rotation",
-                    actual_path=f"{actual_path}.rotation_euler",
-                    expected_value={"direction": list(expected_dir), "tolerance_deg": tol},
-                    actual_value={"direction": list(actual_dir), "angle_deg": round(angle_deg, 2)},
-                ))
-        elif expected.rotation is not None:
+            direction_ok = angle_deg <= tol
+            if not direction_ok:
+                target_point = _resolve_light_target(expected, expected_scene, snapshot)
+                issues.append(
+                    ValidationIssue(
+                        code="light_direction_mismatch",
+                        message=(
+                            f"Light direction deviates {angle_deg:.1f}° from expected "
+                            f"(tolerance {tol}°)."
+                        ),
+                        severity=ValidationSeverity.ERROR,
+                        expected_path=(
+                            f"{expected_path}.target"
+                            if expected.target is not None
+                            else f"{expected_path}.rotation"
+                        ),
+                        actual_path=f"{actual_path}.rotation_euler",
+                        expected_value={
+                            "direction": list(expected_dir),
+                            "target": target_point.model_dump(mode="json") if target_point else None,
+                            "tolerance_deg": tol,
+                        },
+                        actual_value={"direction": list(actual_dir), "angle_deg": round(angle_deg, 2)},
+                    )
+                )
+
+        if expected.rotation is not None and _prefer_direction_for_rotation(expected) and direction_ok:
+            euler_score = vector_tolerance_score(
+                _deg_to_rad_v3(expected.rotation), actual.rotation_euler, expected.tolerance
+            )
+            if euler_score < 1.0:
+                issues.append(
+                    self._vector_mismatch_issue(
+                        code="light_rotation_mismatch",
+                        field="rotation",
+                        expected_value=_deg_to_rad_v3(expected.rotation),
+                        actual_value=actual.rotation_euler,
+                        tolerance=expected.tolerance,
+                        expected_path=expected_path,
+                        actual_path=actual_path,
+                        severity=ValidationSeverity.WARNING,
+                    )
+                )
+        elif expected.rotation is not None and not _prefer_direction_for_rotation(expected):
             score = vector_tolerance_score(
                 _deg_to_rad_v3(expected.rotation), actual.rotation_euler, expected.tolerance
             )
@@ -278,8 +344,6 @@ class LightValidator:
             return 1.0
         if actual.energy is None:
             return 0.0
-        # Use relative tolerance: tolerance represents the allowed fraction of expected energy.
-        # e.g. tolerance=0.10 → ±10% of expected_energy.
         relative_band = abs(expected.energy) * expected.tolerance
         return tolerance_score(expected.energy, actual.energy, max(relative_band, 1.0))
 
@@ -320,12 +384,13 @@ class LightValidator:
         tolerance: float,
         expected_path: str,
         actual_path: str,
+        severity: ValidationSeverity = ValidationSeverity.ERROR,
     ) -> ValidationIssue:
         actual_field = "rotation_euler" if field == "rotation" else field
         return ValidationIssue(
             code=code,
             message=f"Expected light {field} within tolerance {tolerance}, got a different value.",
-            severity=ValidationSeverity.ERROR,
+            severity=severity,
             expected_path=f"{expected_path}.{field}",
             actual_path=f"{actual_path}.{actual_field}",
             expected_value=expected_value.model_dump(mode="json"),

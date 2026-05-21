@@ -87,6 +87,32 @@ class DirectToolCallingStrategy:
         )
 
         tool_calls = _extract_tool_calls(response)
+        if not tool_calls:
+            retry_started = datetime.datetime.now(datetime.timezone.utc)
+            retry_response = llm_client.complete(
+                [
+                    *messages,
+                    LlmMessage(role="assistant", content=response.content or ""),
+                    LlmMessage(
+                        role="user",
+                        content="Return exactly one tool call or one JSON action.",
+                    ),
+                ],
+                tools=tool_schemas,
+                timeout_sec=agent_config.step_timeout_sec,
+            )
+            retry_finished = datetime.datetime.now(datetime.timezone.utc)
+            trace = trace.add_step(
+                AgentStepType.LLM_CALL,
+                raw_llm_response=_response_to_raw(retry_response),
+                started_at=retry_started,
+                finished_at=retry_finished,
+                duration_sec=(retry_finished - retry_started).total_seconds(),
+                metadata={"direct_no_action_retry": True},
+            )
+            response = retry_response
+            tool_calls = _extract_tool_calls(response)
+
         max_tool_steps = max(agent_config.max_steps - len(trace.steps) - 1, 0)
         error_message = None
         executed_count = 0
@@ -113,20 +139,26 @@ class DirectToolCallingStrategy:
             error_message = "Direct tool-calling strategy reached max_steps before executing all tool calls"
 
         success = error_message is None
-        final_message = response.content if response.content and not tool_calls else None
+        final_message = None
         if success and tool_calls:
             final_message = f"Executed {executed_count} tool call(s)."
-        if not tool_calls and final_message is None:
-            final_message = "No tool call or JSON action returned by LLM."
+        if not tool_calls:
+            final_message = "DirectNoAction: no tool call or JSON action returned by LLM."
             success = False
-            error_message = final_message
+            error_message = "DirectNoAction"
 
         trace = trace.add_step(
             AgentStepType.FINAL if success else AgentStepType.ERROR,
             observation=final_message,
             error=error_message,
+            metadata={"direct_error_type": "DirectNoAction"} if error_message == "DirectNoAction" else {},
         )
         finished_at = datetime.datetime.now(datetime.timezone.utc)
+        structured_error = None
+        if error_message == "DirectNoAction":
+            from benchmark.runner.controlled_errors import controlled_error_payload
+
+            structured_error = controlled_error_payload("DirectNoAction", source="agent")
         return trace.model_copy(
             update={
                 "success": success,
@@ -134,6 +166,7 @@ class DirectToolCallingStrategy:
                 "final_message": final_message,
                 "finished_at": finished_at,
                 "duration_sec": (finished_at - started_at).total_seconds(),
+                "structured_error": structured_error,
             }
         )
 

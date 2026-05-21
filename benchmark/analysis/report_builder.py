@@ -110,6 +110,17 @@ def _na(value: object) -> str:
     return str(value)
 
 
+def _export_task_success_rate(runs: list, export_kind: str) -> float | None:
+    filtered = [
+        run for run in runs
+        if run.task_id and export_kind in run.task_id.lower()
+    ]
+    if not filtered:
+        return None
+    passed = sum(1 for run in filtered if run.pass_type in {"clean_pass", "soft_pass"})
+    return passed / len(filtered)
+
+
 def _md_table(headers: list[str], rows: list[list[str]]) -> str:
     sep = "| " + " | ".join("---" for _ in headers) + " |"
     header_row = "| " + " | ".join(headers) + " |"
@@ -532,6 +543,30 @@ def build_markdown_report(
             ))
 
     # ------------------------------------------------------------------
+    # 7b. Category Readiness
+    # ------------------------------------------------------------------
+    if runs:
+        lines.append("## Category Readiness\n")
+        category_rows = []
+        for category in ("geometry", "materials", "camera", "lighting", "export"):
+            cat_runs = [run for run in runs if _category(run.task_id) == category]
+            if not cat_runs:
+                continue
+            passed = sum(1 for run in cat_runs if run.pass_type in {"clean_pass", "soft_pass"})
+            category_rows.append([
+                category,
+                str(len(cat_runs)),
+                _na(round(passed / len(cat_runs), 3)),
+                str(sum(1 for run in cat_runs if run.pass_type == "clean_pass")),
+                str(sum(1 for run in cat_runs if run.pass_type == "soft_pass")),
+            ])
+        if category_rows:
+            lines.append(_md_table(
+                ["Category", "Runs", "Success Rate", "Clean Pass", "Soft Pass"],
+                category_rows,
+            ))
+
+    # ------------------------------------------------------------------
     # 7c. ReAct Diagnostics
     # ------------------------------------------------------------------
     if config.include_error_taxonomy and runs:
@@ -579,6 +614,23 @@ def build_markdown_report(
             )
             react_clean_pass = sum(1 for r in react_runs if r.pass_type == "clean_pass")
             react_soft_pass = sum(1 for r in react_runs if r.pass_type == "soft_pass")
+            react_repair_steps_total = sum(int(r.metrics.get("react_repair_steps") or 0) for r in react_runs)
+            deterministic_repair_steps_total = sum(
+                int(r.metrics.get("deterministic_repair_steps") or 0) for r in react_runs
+            )
+            react_invalid_action = sum(
+                1 for r in react_runs
+                if str(r.metrics.get("react_error_type") or r.metrics.get("structured_error_type") or "") == "ReactInvalidAction"
+            )
+            react_no_progress_errors = sum(
+                1 for r in react_runs if str(r.metrics.get("react_error_type") or "") == "ReactNoProgress"
+            )
+            resolution_rates = [
+                float(r.metrics["react_issue_resolution_rate"])
+                for r in react_runs
+                if isinstance(r.metrics.get("react_issue_resolution_rate"), (int, float))
+            ]
+            avg_resolution = round(sum(resolution_rates) / len(resolution_rates), 3) if resolution_rates else None
             lines.append(_md_table(["Metric", "Value"], [
                 ["react_runs", str(len(react_runs))],
                 ["react_passed", str(react_passed)],
@@ -595,6 +647,36 @@ def build_markdown_report(
                 ["react_repair_attempts", str(react_repair_attempts)],
                 ["react_completed_after_scene_passed", str(react_completed_early)],
                 ["react_average_tool_calls", _na(avg_steps)],
+                ["react_repair_steps", str(react_repair_steps_total)],
+                ["deterministic_repair_steps", str(deterministic_repair_steps_total)],
+                ["react_issue_resolution_rate_avg", _na(avg_resolution)],
+                ["ReactInvalidAction", str(react_invalid_action)],
+                ["ReactNoProgress", str(react_no_progress_errors)],
+            ]))
+
+    # ------------------------------------------------------------------
+    # 7c2. Hybrid Diagnostics
+    # ------------------------------------------------------------------
+    if config.include_error_taxonomy and runs:
+        hybrid_runs = [r for r in runs if r.strategy == "plan_execute_react_repair"]
+        if hybrid_runs:
+            lines.append("## Hybrid Diagnostics\n")
+            hybrid_used = sum(
+                1 for r in hybrid_runs
+                if str(r.metrics.get("hybrid_repair_used", "")).strip().lower() in {"true", "1", "yes"}
+            )
+            improved = sum(
+                1 for r in hybrid_runs if str(r.metrics.get("repair_improved_score", "")).strip().lower() in {"true", "1", "yes"}
+            )
+            reduced = sum(
+                1 for r in hybrid_runs if str(r.metrics.get("repair_reduced_issue_count", "")).strip().lower() in {"true", "1", "yes"}
+            )
+            lines.append(_md_table(["Metric", "Value"], [
+                ["hybrid_runs", str(len(hybrid_runs))],
+                ["hybrid_repair_used", str(hybrid_used)],
+                ["repair_improved_score", str(improved)],
+                ["repair_reduced_issue_count", str(reduced)],
+                ["repair_error_type_count", str(sum(1 for r in hybrid_runs if r.metrics.get("repair_error_type")))],
             ]))
 
     # ------------------------------------------------------------------
@@ -638,8 +720,12 @@ def build_markdown_report(
                 ["export_missing", str(_count_issue("export_missing"))],
                 ["export_file_invalid", str(_count_issue("export_file_invalid"))],
                 ["export_import_missing", str(_count_issue("export_import_missing"))],
-                ["export_import_material_missing", str(_count_issue("export_import_material_missing"))],
+                ["export_import_material_lost_after_export", str(_count_issue("export_import_material_lost_after_export"))],
+                ["export_import_material_renamed", str(_count_issue("export_import_material_renamed"))],
+                ["export_import_location_mismatch", str(_count_issue("export_import_location_mismatch"))],
                 ["export_import_transform_mismatch", str(_count_issue("export_import_transform_mismatch"))],
+                ["blend_export_success_rate", _na(_export_task_success_rate(export_runs, "blend"))],
+                ["glb_export_success_rate", _na(_export_task_success_rate(export_runs, "glb"))],
                 ["material_missing", str(_count_issue("material_missing"))],
                 ["object_missing", str(_count_issue("object_missing"))],
                 ["avg_export_score", _na(avg_export_score)],

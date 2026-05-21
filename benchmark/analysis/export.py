@@ -122,7 +122,26 @@ _RUN_METRICS_COLUMNS = [
     "retry_count",
     "error_count",
     "most_common_error",
+    "react_repair_steps",
+    "deterministic_repair_steps",
+    "hybrid_repair_used",
+    "repair_unavailable_reason",
+    "import_back_imported_object_count",
+    "import_back_expected_object_count",
+    "import_back_missing_objects",
+    "import_back_extra_objects",
+    "import_back_material_mismatches",
+    "import_back_transform_mismatches",
+    "import_back_import_error_type",
 ]
+
+
+def _json_metric(value: Any) -> str:
+    if value in (None, "", "null", "None"):
+        return ""
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
 
 
 def _most_common_error(result: RunAnalysisResult) -> str:
@@ -195,6 +214,17 @@ def _run_to_row(result: RunAnalysisResult) -> dict[str, Any]:
         "retry_count": result.retry_count,
         "error_count": result.error_count,
         "most_common_error": _most_common_error(result),
+        "react_repair_steps": result.metrics.get("react_repair_steps", ""),
+        "deterministic_repair_steps": result.metrics.get("deterministic_repair_steps", ""),
+        "hybrid_repair_used": result.metrics.get("hybrid_repair_used", ""),
+        "repair_unavailable_reason": result.metrics.get("repair_unavailable_reason", ""),
+        "import_back_imported_object_count": result.metrics.get("import_back.imported_object_count", ""),
+        "import_back_expected_object_count": result.metrics.get("import_back.expected_object_count", ""),
+        "import_back_missing_objects": _json_metric(result.metrics.get("import_back.missing_objects")),
+        "import_back_extra_objects": _json_metric(result.metrics.get("import_back.extra_objects")),
+        "import_back_material_mismatches": _json_metric(result.metrics.get("import_back.material_mismatches")),
+        "import_back_transform_mismatches": _json_metric(result.metrics.get("import_back.transform_mismatches")),
+        "import_back_import_error_type": result.metrics.get("import_back.import_error_type", ""),
     }
 
 
@@ -210,25 +240,39 @@ def _task_category(result: RunAnalysisResult) -> str:
 
 
 def _scene_passed_but_agent_error(result: RunAnalysisResult) -> bool:
+    error_type = str(result.metrics.get("structured_error_type") or "").strip()
+    has_error_type = error_type not in {"", "null", "None"}
     return (
         result.scene_status == "passed"
-        and bool(result.agent_status)
-        and result.agent_status not in {"completed", "completed_after_scene_passed"}
+        and (
+            (
+                bool(result.agent_status)
+                and result.agent_status not in {"completed", "completed_after_scene_passed"}
+            )
+            or has_error_type
+        )
     )
 
 
 def _effective_pass_type(result: RunAnalysisResult) -> str:
     if result.pass_type in {"clean_pass", "soft_pass", "failed_validation", "runtime_error"}:
-        return str(result.pass_type)
-    if result.pass_type == "failed":
-        return "failed_validation"
-    if result.pass_type == "error":
-        return "runtime_error"
-    if result.success is True:
-        return "clean_pass"
-    if result.success is False:
-        return "failed_validation"
-    return "runtime_error"
+        effective = str(result.pass_type)
+    elif result.pass_type == "failed":
+        effective = "failed_validation"
+    elif result.pass_type == "error":
+        effective = "runtime_error"
+    elif result.success is True:
+        effective = "clean_pass"
+    elif result.success is False:
+        effective = "failed_validation"
+    else:
+        effective = "runtime_error"
+    if effective == "clean_pass" and _scene_passed_but_agent_error(result):
+        return "soft_pass"
+    error_type = str(result.metrics.get("structured_error_type") or "").strip()
+    if effective == "clean_pass" and error_type not in {"", "null", "None"}:
+        return "soft_pass"
+    return effective
 
 
 def _artifact_dir(result: RunAnalysisResult) -> str:
@@ -267,8 +311,14 @@ def _export_status(result: RunAnalysisResult, export_issues: str) -> tuple[str, 
             "export_import_object_missing": "import_back_missing_objects",
             "export_import_mesh_count_mismatch": "import_back_missing_objects",
             "export_import_material_missing": "import_back_material_mismatch",
+            "export_import_material_lost_after_export": "import_back_material_mismatch",
+            "export_import_material_parameters_mismatch": "import_back_material_mismatch",
             "export_import_material_color_mismatch": "import_back_material_mismatch",
             "export_import_transform_mismatch": "import_back_transform_mismatch",
+            "export_import_location_mismatch": "import_back_transform_mismatch",
+            "export_import_scale_mismatch": "import_back_transform_mismatch",
+            "export_import_rotation_mismatch": "import_back_transform_mismatch",
+            "export_import_dimension_mismatch": "import_back_transform_mismatch",
         }
         return "failed", mapping.get(first_issue, first_issue or "export_tool_failed")
     return "failed", "pre_export_scene_incomplete"

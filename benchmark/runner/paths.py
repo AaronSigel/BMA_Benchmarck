@@ -38,7 +38,7 @@ class RunArtifactLayout:
         return self.exports_dir() / "result.glb"
 
     def result_blend(self) -> Path:
-        return self.exports_dir() / "result.blend"
+        return self.run_dir() / "result.blend"
 
     def logs_dir(self) -> Path:
         return self.run_dir() / "logs"

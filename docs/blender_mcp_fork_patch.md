@@ -118,6 +118,14 @@ Legend: **✓** = allowed, **—** = blocked
 | `bma_create_light` | ✓ | — | ✓ | ✓ | ✓ |
 | `bma_create_camera` | ✓ | — | ✓ | ✓ | ✓ |
 | `bma_create_camera_look_at` | ✓ | — | ✓ | ✓ | ✓ |
+
+### `create_camera_look_at` socket contract
+
+The addon socket handler for `create_camera_look_at` must **always** return JSON (never an empty socket response):
+
+- Success: `{"status": "success", "result": {"ok": true, "tool": "bma_create_camera_look_at", "camera_name": "...", "location": [...], "target": "...", "set_active": true}}`
+- Missing target object: `{"status": "error", "error": {"type": "ObjectNotFound", "message": "...", "camera_name": "...", "target": "..."}}`
+- Other failures: structured `CameraLookAtFailed` error payload with `camera_name` and `target`.
 | `bma_export_scene` | ✓ | — | ✓ | ✓ | ✓ |
 | `get_viewport_screenshot` | — | ✓ | ✓ | ✓ | ✓ |
 | `execute_blender_code` | **—** | **—** | **—** | ✓ | ✓ |

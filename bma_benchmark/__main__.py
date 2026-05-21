@@ -45,6 +45,21 @@ def main() -> int:
         print(f"runs: {analysis.summary.total_runs}")
         return 0
 
+    if args.command == "lighting-report":
+        import json as json_module
+
+        from benchmark.analysis.run_analysis import summarize_lighting_failures
+
+        task_ids = [item.strip() for item in args.tasks.split(",") if item.strip()] if args.tasks else None
+        report = summarize_lighting_failures(args.input, task_ids=task_ids, sample_limit=args.sample_limit)
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json_module.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+            print(f"lighting_report: {args.output}")
+        else:
+            print(json_module.dumps(report, indent=2, ensure_ascii=False))
+        return 0
+
     if args.command == "build-report":
         from benchmark.experiments.e2e_runner import build_reports, run_analysis
         from benchmark.experiments.models import ExperimentMatrix
@@ -103,6 +118,16 @@ def _parser() -> argparse.ArgumentParser:
 
     analyze = sub.add_parser("analyze")
     analyze.add_argument("--input", type=Path, required=True)
+
+    lighting_report = sub.add_parser("lighting-report")
+    lighting_report.add_argument("--input", type=Path, required=True)
+    lighting_report.add_argument(
+        "--tasks",
+        type=str,
+        default="lighting_001_area_light,lighting_003_three_point_lighting",
+    )
+    lighting_report.add_argument("--output", type=Path)
+    lighting_report.add_argument("--sample-limit", type=int, default=5)
 
     build_report = sub.add_parser("build-report")
     build_report.add_argument("--input", type=Path, required=True)

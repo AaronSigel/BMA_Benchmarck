@@ -9,14 +9,17 @@ from benchmark.runner.execution import (
 )
 from benchmark.runner.models import ExecutionMode, RunConfig
 
+FIXTURE_SNAPSHOT = Path("tests/fixtures/validation/valid_geometry_snapshot.json")
+FIXTURE_ARTIFACTS_DIR = FIXTURE_SNAPSHOT.parent
+
 
 def make_run_config(tmp_path: Path, **overrides: object) -> RunConfig:
     data = {
         "run_id": "geometry_001_replay",
         "task_id": "geometry_001_basic_primitives",
         "execution_mode": ExecutionMode.EXTERNAL_SNAPSHOT,
-        "snapshot_path": Path("artifacts/blender_smoke/scene_snapshot.json"),
-        "artifacts_dir": Path("artifacts/blender_smoke"),
+        "snapshot_path": FIXTURE_SNAPSHOT,
+        "artifacts_dir": FIXTURE_ARTIFACTS_DIR,
         "output_dir": tmp_path / "run",
     }
     data.update(overrides)
@@ -25,7 +28,7 @@ def make_run_config(tmp_path: Path, **overrides: object) -> RunConfig:
 
 def copy_snapshot(destination: Path) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2("artifacts/blender_smoke/scene_snapshot.json", destination)
+    shutil.copy2(FIXTURE_SNAPSHOT, destination)
     return destination
 
 

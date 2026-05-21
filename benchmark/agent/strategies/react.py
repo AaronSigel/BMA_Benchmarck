@@ -17,9 +17,42 @@ from benchmark.mcp.tool_contract import TOOL_CONTRACT_MAP, ToolCategory
 
 log = logging.getLogger(__name__)
 
+# Default max_steps per task category when max_steps_by_category is not overridden.
+_DEFAULT_CATEGORY_MAX_STEPS: dict[str, int] = {
+    "geometry": 4,
+    "materials": 5,
+    "lighting": 5,
+    "camera": 4,
+    "export": 8,
+    "composition": 8,
+}
+
+# Issue codes whose presence blocks export.
+_EXPORT_BLOCKING_CODES = frozenset({
+    "object_missing",
+    "object_missing_for_transform",
+    "material_missing",
+    "object_material_missing",
+    "light_missing",
+    "camera_missing",
+})
+
+# Tools that mutate the scene (require object existence precondition checks).
+_OBJECT_REF_TOOLS = frozenset({"bma_set_transform", "bma_assign_material", "bma_set_material"})
+
 
 class ReactStrategy:
-    """Iterative ReAct strategy: thought/action, tool observation, repeat."""
+    """Validator-driven iterative ReAct loop.
+
+    Each step:
+    1. Inject current validation state + suggested repair into the prompt.
+    2. LLM returns a JSON action (thought / action / finish).
+    3. Guard checks (export block, duplicate object, repeated action, precondition).
+    4. Execute tool.
+    5. Run scene validation.
+    6. Check issue-level and score-level progress.
+    7. Repeat until scene passes, max_steps, or no-progress limit.
+    """
 
     def __init__(
         self,
@@ -29,9 +62,9 @@ class ReactStrategy:
     ) -> None:
         self.prompt_builder = prompt_builder or PromptBuilder()
         self.tool_schema_provider = tool_schema_provider or ToolSchemaProvider()
-        # Injected by AgentRuntime when stop_after_scene_passed=True.
-        # Called with a snapshot output path; returns (scene_ok, score_or_None).
-        self.scene_validator_fn: Callable[[Path], tuple[bool, float | None]] | None = None
+        # Injected by AgentRuntime when stop_after_scene_passed or detect_no_progress is True.
+        # Returns (scene_ok, score_or_None, SceneValidationResult_or_None).
+        self.scene_validator_fn: Callable[[Path], tuple[bool, float | None, Any]] | None = None
 
     def run(
         self,
@@ -66,7 +99,10 @@ class ReactStrategy:
             self.tool_schema_provider.to_openai_tool_schema(contract)
             for contract in tool_contracts
         ]
-        observations: list[str | dict[str, Any]] = []
+
+        # Resolve effective max_steps from task category (P0.6).
+        effective_max_steps = _resolve_max_steps(task, agent_config)
+
         system_message = LlmMessage(
             role="system",
             content=self.prompt_builder.build_system_prompt(
@@ -76,32 +112,61 @@ class ReactStrategy:
             ),
         )
 
+        # Load BenchmarkTask model once for mapper / checklist (best-effort).
+        task_obj = _try_load_task(task)
+
+        observations: list[str | dict[str, Any]] = []
         final_message = None
         error_message = None
         success = False
+
+        # Guard state
         previous_action_signature: str | None = None
         consecutive_repeated_actions = 0
         created_object_names: set[str] = set()
+
+        # Counters for trace metadata
         duplicate_object_count = 0
         repeated_action_count = 0
         wasted_step_count = 0
         no_progress_step_count = 0
         consecutive_no_progress = 0
+
+        # Validation / progress state
         previous_scene_score: float | None = None
+        previous_issue_codes: set[str] = set()
+        last_validation_result: Any = None  # SceneValidationResult | None
+
+        # Inspection tracking
         mutation_steps = 0
         mutation_preceded_by_inspection = 0
         last_tool_was_inspection = False
 
-        log.info("[react:%s] starting task=%s max_steps=%d profile=%s", trace.run_id[:8], task_id, agent_config.max_steps, agent_config.mcp_profile)
+        # Build first-step checklist (P2.2) — injected before any validation is available.
+        initial_step_context: dict[str, Any] | None = None
+        if task_obj is not None:
+            from benchmark.agent.strategies.issue_action_mapper import build_task_checklist
+            initial_step_context = {"task_checklist": build_task_checklist(task_obj)}
 
-        while len(trace.steps) < agent_config.max_steps:
+        log.info(
+            "[react:%s] starting task=%s max_steps=%d (effective=%d) profile=%s",
+            trace.run_id[:8], task_id, agent_config.max_steps, effective_max_steps, agent_config.mcp_profile,
+        )
+
+        while len(trace.steps) < effective_max_steps:
             step_num = len(trace.steps) + 1
-            log.info("[react:%s] step %d/%d — calling LLM", trace.run_id[:8], step_num, agent_config.max_steps)
+
+            # Build validator-driven step context (P0.2).
+            step_context = _build_step_context(
+                last_validation_result, task_obj, initial_step_context if step_num == 1 else None
+            )
+
+            log.info("[react:%s] step %d/%d — calling LLM", trace.run_id[:8], step_num, effective_max_steps)
             messages = [
                 system_message,
                 LlmMessage(
                     role="user",
-                    content=self.prompt_builder.build_react_prompt_context(task, observations),
+                    content=self.prompt_builder.build_react_prompt_context(task, observations, step_context),
                 ),
             ]
             llm_started_at = datetime.datetime.now(datetime.timezone.utc)
@@ -134,17 +199,17 @@ class ReactStrategy:
                 trace = trace.add_step(AgentStepType.ERROR, error=error_message)
                 break
 
-            if len(trace.steps) >= agent_config.max_steps:
+            if len(trace.steps) >= effective_max_steps:
                 error_message = "ReAct strategy reached max_steps before executing next action"
                 break
 
+            # --- Guard: repeated action (existing) ---
             signature = f"{action.tool_name}:{action.arguments}"
             if agent_config.detect_repeated_actions and signature == previous_action_signature:
                 consecutive_repeated_actions += 1
                 repeated_action_count += 1
                 wasted_step_count += 1
                 if consecutive_repeated_actions == 1:
-                    # First repeat: inject a repair hint and let the agent try again
                     repair_hint = (
                         f"The previous action ({action.tool_name}) was repeated and did not "
                         "improve the scene. Choose a different tool or finish if the scene is complete."
@@ -160,11 +225,10 @@ class ReactStrategy:
                         metadata={"repair_attempt": True, "repeated_action": True},
                     )
                     log.info(
-                        "[react:%s] step %d — repair hint injected for repeated action: %s",
+                        "[react:%s] step %d — repair hint for repeated action: %s",
                         trace.run_id[:8], step_num, action.tool_name,
                     )
                     continue
-                # Second consecutive repeat: stop
                 error_message = f"ReAct repeated the same action: {action.tool_name}"
                 trace = trace.add_step(
                     AgentStepType.ERROR,
@@ -176,24 +240,25 @@ class ReactStrategy:
                 consecutive_repeated_actions = 0
             previous_action_signature = signature
 
+            # --- Guard: duplicate object (existing + strengthened) ---
             if agent_config.detect_duplicate_objects and action.tool_name == "bma_create_object":
                 object_name = action.arguments.get("name")
                 if isinstance(object_name, str) and object_name and object_name in created_object_names:
                     wasted_step_count += 1
                     repair_hint = (
-                        f"Object '{object_name}' already exists. "
-                        "Do not create it again; update its transform or material instead."
+                        f"Object '{object_name}' already exists in the scene. "
+                        "Do not create it again. "
+                        "If its transform is wrong, use bma_set_transform. "
+                        "If its material is missing, use bma_assign_material."
                     )
-                    observations.append(
-                        {
-                            "tool": action.tool_name,
-                            "arguments": action.arguments,
-                            "observation": {
-                                "object_already_exists_handled": object_name,
-                                "repair_hint": repair_hint,
-                            },
-                        }
-                    )
+                    observations.append({
+                        "tool": action.tool_name,
+                        "arguments": action.arguments,
+                        "observation": {
+                            "object_already_exists_handled": object_name,
+                            "repair_hint": repair_hint,
+                        },
+                    })
                     trace = trace.add_step(
                         AgentStepType.OBSERVATION,
                         observation=repair_hint,
@@ -203,17 +268,73 @@ class ReactStrategy:
                 if isinstance(object_name, str) and object_name:
                     created_object_names.add(object_name)
 
+            # --- Guard: precondition check for transform/material tools (P1.1) ---
+            if action.tool_name in _OBJECT_REF_TOOLS and created_object_names:
+                target_name = action.arguments.get("object_name")
+                if isinstance(target_name, str) and target_name and target_name not in created_object_names:
+                    wasted_step_count += 1
+                    repair_hint = (
+                        f"Cannot call {action.tool_name}: object '{target_name}' has not been created yet. "
+                        "Create it first with bma_create_object."
+                    )
+                    observations.append({
+                        "tool": "__precondition_failed__",
+                        "arguments": {},
+                        "observation": {"precondition_failed": True, "repair_hint": repair_hint},
+                    })
+                    trace = trace.add_step(
+                        AgentStepType.OBSERVATION,
+                        observation=repair_hint,
+                        metadata={"precondition_failed": True, "wasted_step": True},
+                    )
+                    continue
+
+            # --- Guard: export block (P0.4) ---
+            if action.tool_name == "bma_export_scene" and last_validation_result is not None:
+                blocking = [
+                    i for i in last_validation_result.issues
+                    if i.code in _EXPORT_BLOCKING_CODES
+                ]
+                if blocking:
+                    wasted_step_count += 1
+                    blocking_desc = ", ".join({i.code for i in blocking})
+                    repair_hint = (
+                        f"Cannot export: scene has unresolved issues ({blocking_desc}). "
+                        "Fix all missing objects and materials before exporting."
+                    )
+                    observations.append({
+                        "tool": "__export_blocked__",
+                        "arguments": {},
+                        "observation": {"export_blocked": True, "blocking_issues": blocking_desc, "repair_hint": repair_hint},
+                    })
+                    trace = trace.add_step(
+                        AgentStepType.OBSERVATION,
+                        observation=repair_hint,
+                        metadata={"export_blocked": True, "wasted_step": True},
+                    )
+                    continue
+
+            # --- Execute tool ---
             log.info("[react:%s] step %d — tool_call: %s args=%s", trace.run_id[:8], step_num, action.tool_name, list((action.arguments or {}).keys()))
-            _tool_category = (TOOL_CONTRACT_MAP.get(action.tool_name).category if action.tool_name in TOOL_CONTRACT_MAP else ToolCategory.OTHER)
-            _is_mutation = _tool_category in {ToolCategory.OBJECT, ToolCategory.TRANSFORM, ToolCategory.MATERIAL, ToolCategory.LIGHT, ToolCategory.CAMERA, ToolCategory.EXPORT}
+            _tool_category = (
+                TOOL_CONTRACT_MAP.get(action.tool_name).category
+                if action.tool_name in TOOL_CONTRACT_MAP else ToolCategory.OTHER
+            )
+            _is_mutation = _tool_category in {
+                ToolCategory.OBJECT, ToolCategory.TRANSFORM, ToolCategory.MATERIAL,
+                ToolCategory.LIGHT, ToolCategory.CAMERA, ToolCategory.EXPORT,
+            }
             _is_inspection = _tool_category == ToolCategory.INSPECTION
             if _is_mutation:
                 mutation_steps += 1
                 if last_tool_was_inspection:
                     mutation_preceded_by_inspection += 1
             last_tool_was_inspection = _is_inspection
+
             tool_result = tool_executor.call_tool(action.tool_name, action.arguments)
             observation = tool_result.result if tool_result.error is None else {"error": tool_result.error}
+
+            # Track actual created object name (may differ from requested due to .001 suffix).
             if (
                 agent_config.detect_duplicate_objects
                 and action.tool_name == "bma_create_object"
@@ -226,17 +347,25 @@ class ReactStrategy:
                 if isinstance(actual_name, str) and actual_name != requested_name and actual_name.startswith(f"{requested_name}."):
                     duplicate_object_count += 1
                     wasted_step_count += 1
+
+            # Update live object name tracking from snapshot tool results.
+            if action.tool_name == "bma_get_scene_snapshot" and isinstance(observation, dict):
+                obj_list = observation.get("objects") or []
+                if isinstance(obj_list, list):
+                    for obj_entry in obj_list:
+                        if isinstance(obj_entry, dict) and isinstance(obj_entry.get("name"), str):
+                            created_object_names.add(obj_entry["name"])
+
             if tool_result.error:
                 log.warning("[react:%s] step %d — tool %s error: %s", trace.run_id[:8], step_num, action.tool_name, tool_result.error)
             else:
                 log.info("[react:%s] step %d — tool %s ok (%.2fs)", trace.run_id[:8], step_num, action.tool_name, tool_result.duration_sec or 0)
-            observations.append(
-                {
-                    "tool": tool_result.name,
-                    "arguments": action.arguments,
-                    "observation": observation,
-                }
-            )
+
+            observations.append({
+                "tool": tool_result.name,
+                "arguments": action.arguments,
+                "observation": observation,
+            })
             trace = trace.add_step(
                 AgentStepType.TOOL_CALL,
                 thought=action.thought,
@@ -249,6 +378,8 @@ class ReactStrategy:
                 finished_at=tool_result.finished_at,
                 duration_sec=tool_result.duration_sec,
             )
+
+            # --- Scene validation check ---
             _should_check_scene = (
                 (agent_config.stop_after_scene_passed or agent_config.detect_no_progress)
                 and self.scene_validator_fn is not None
@@ -256,10 +387,13 @@ class ReactStrategy:
             if _should_check_scene:
                 snap_path = output_dir / f"mid_step_{step_num}_snapshot.json"
                 try:
-                    scene_ok, current_score = self.scene_validator_fn(snap_path)
+                    scene_ok, current_score, val_result = self.scene_validator_fn(snap_path)
                 except Exception as _ve:
                     log.debug("[react:%s] step %d — scene check failed: %s", trace.run_id[:8], step_num, _ve)
-                    scene_ok, current_score = False, None
+                    scene_ok, current_score, val_result = False, None, None
+
+                if val_result is not None:
+                    last_validation_result = val_result
 
                 if agent_config.stop_after_scene_passed and scene_ok:
                     log.info("[react:%s] step %d — scene passed, stopping early", trace.run_id[:8], step_num)
@@ -269,16 +403,41 @@ class ReactStrategy:
                     break
 
                 if agent_config.detect_no_progress and current_score is not None:
+                    # Issue-level progress check (P0.5): progress if score improved OR
+                    # a priority issue disappeared OR issue count decreased.
+                    current_issue_codes = {i.code for i in (val_result.issues if val_result else [])}
                     score_improved = previous_scene_score is None or current_score > previous_scene_score
-                    if not score_improved and not tool_result.error:
+                    issues_reduced = len(current_issue_codes) < len(previous_issue_codes)
+                    priority_resolved = bool(previous_issue_codes - current_issue_codes)
+                    made_progress = score_improved or issues_reduced or priority_resolved
+
+                    if not made_progress and not tool_result.error:
                         consecutive_no_progress += 1
                         no_progress_step_count += 1
                         log.debug(
-                            "[react:%s] step %d — no progress (score %.3f, prev %.3f), consecutive=%d",
-                            trace.run_id[:8], step_num, current_score, previous_scene_score or 0.0, consecutive_no_progress,
+                            "[react:%s] step %d — no progress (score %.3f, prev %.3f, issues %d→%d), consecutive=%d",
+                            trace.run_id[:8], step_num, current_score, previous_scene_score or 0.0,
+                            len(previous_issue_codes), len(current_issue_codes), consecutive_no_progress,
                         )
-                        if consecutive_no_progress >= agent_config.no_progress_limit:
-                            error_message = f"no_progress_detected: score did not improve for {consecutive_no_progress} consecutive steps"
+                        # P1.2: on first stall inject a repair hint instead of stopping immediately.
+                        if consecutive_no_progress == 1 and val_result is not None:
+                            hint = _build_no_progress_hint(val_result, task_obj)
+                            observations.append({
+                                "tool": "__no_progress__",
+                                "arguments": {},
+                                "observation": {"no_progress": True, "repair_hint": hint},
+                            })
+                            trace = trace.add_step(
+                                AgentStepType.OBSERVATION,
+                                observation=hint,
+                                metadata={"no_progress_detected": True, "repair_attempt": True},
+                            )
+                            log.info("[react:%s] step %d — no progress hint injected", trace.run_id[:8], step_num)
+                        elif consecutive_no_progress >= agent_config.no_progress_limit:
+                            error_message = (
+                                f"no_progress_detected: score did not improve for "
+                                f"{consecutive_no_progress} consecutive steps"
+                            )
                             trace = trace.add_step(
                                 AgentStepType.ERROR,
                                 error=error_message,
@@ -287,7 +446,9 @@ class ReactStrategy:
                             break
                     else:
                         consecutive_no_progress = 0
+
                     previous_scene_score = current_score
+                    previous_issue_codes = current_issue_codes
 
         if final_message is None and error_message is None:
             error_message = "ReAct strategy reached max_steps"
@@ -307,6 +468,7 @@ class ReactStrategy:
                     "repeated_action_count": repeated_action_count,
                     "wasted_step_count": wasted_step_count,
                     "no_progress_step_count": no_progress_step_count,
+                    "effective_max_steps": effective_max_steps,
                     "inspection_before_mutation_rate": (
                         mutation_preceded_by_inspection / mutation_steps
                         if mutation_steps > 0 else "not_available"
@@ -315,6 +477,95 @@ class ReactStrategy:
             }
         )
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_max_steps(task: dict[str, Any], config: AgentConfig) -> int:
+    """Return the effective max_steps, taking task category overrides into account."""
+    category = str(task.get("category") or "").lower()
+    if config.max_steps_by_category and category in config.max_steps_by_category:
+        return config.max_steps_by_category[category]
+    if category in _DEFAULT_CATEGORY_MAX_STEPS:
+        return _DEFAULT_CATEGORY_MAX_STEPS[category]
+    return config.max_steps
+
+
+def _try_load_task(task: dict[str, Any]) -> Any:
+    """Parse task dict into BenchmarkTask model; return None on failure."""
+    try:
+        from benchmark.tasks.models import BenchmarkTask
+        return BenchmarkTask.model_validate(task)
+    except Exception:
+        return None
+
+
+def _build_step_context(
+    val_result: Any,
+    task_obj: Any,
+    initial_context: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Build the current-scene-state dict injected into each step's prompt."""
+    if val_result is None:
+        return initial_context  # First step: task checklist
+
+    from benchmark.agent.strategies.issue_action_mapper import select_top_issue, map_issue_to_repair
+
+    issues = val_result.issues
+    top_issue = select_top_issue(issues) if issues else None
+    suggested_repair = None
+    if top_issue is not None and task_obj is not None:
+        action = map_issue_to_repair(top_issue, task_obj)
+        if action is not None:
+            suggested_repair = {
+                "tool": action.tool_name,
+                "arguments": action.arguments_template,
+                "description": action.description,
+            }
+            if action.requires_prior_step:
+                suggested_repair["note"] = (
+                    f"After this step, also run: {action.requires_prior_step.tool_name}"
+                )
+
+    ctx: dict[str, Any] = {
+        "scene_score": round(val_result.total_score, 3),
+        "scene_status": val_result.overall_status,
+        "remaining_issue_count": len(issues),
+    }
+    if top_issue is not None:
+        ctx["top_issue"] = {
+            "code": top_issue.code,
+            "message": top_issue.message,
+            "severity": top_issue.severity,
+        }
+    if suggested_repair is not None:
+        ctx["suggested_repair"] = suggested_repair
+    return ctx
+
+
+def _build_no_progress_hint(val_result: Any, task_obj: Any) -> str:
+    """Build a repair hint to inject when no progress is detected."""
+    from benchmark.agent.strategies.issue_action_mapper import select_top_issue, map_issue_to_repair
+
+    issues = val_result.issues if val_result else []
+    top_issue = select_top_issue(issues) if issues else None
+    if top_issue is None:
+        return "No progress detected. Try a different approach or finish if the scene is complete."
+
+    hint = (
+        f"No progress detected. The top unresolved issue is '{top_issue.code}': {top_issue.message}."
+    )
+    if task_obj is not None:
+        repair = map_issue_to_repair(top_issue, task_obj)
+        if repair is not None:
+            hint += f" Suggested repair: use {repair.tool_name} with {repair.arguments_template}."
+    return hint
+
+
+# ---------------------------------------------------------------------------
+# Action parsing
+# ---------------------------------------------------------------------------
 
 class _ReactAction:
     def __init__(
@@ -334,6 +585,12 @@ class _ReactAction:
 def _parse_react_action(response: LlmResponse) -> _ReactAction:
     action = response.json_action()
     if isinstance(action, dict):
+        # New schema: {"thought": "...", "action": {...}, "finish": bool}
+        if action.get("finish") is True:
+            return _ReactAction(
+                thought=_optional_str(action.get("thought")),
+                final_answer=action.get("thought") or "finish",
+            )
         if "final_answer" in action:
             return _ReactAction(
                 thought=_optional_str(action.get("thought")),
@@ -360,13 +617,9 @@ def _parse_react_action(response: LlmResponse) -> _ReactAction:
 
     if response.content:
         if _is_pseudo_tool_call(response.content):
-            # Model wrote tool calls as plain text instead of structured calls.
-            # Try to parse it rather than failing the step outright.
             parsed = _parse_pseudo_tool_call(response.content)
             if parsed is not None:
-                log.warning(
-                    "ReAct: parsed pseudo tool call in plain text — tool=%s", parsed.tool_name
-                )
+                log.warning("ReAct: parsed pseudo tool call in plain text — tool=%s", parsed.tool_name)
                 return parsed
             log.warning("ReAct: response looks like pseudo tool call in plain text — not accepting as final_answer")
             return _ReactAction()
@@ -378,31 +631,24 @@ def _optional_str(value: Any) -> str | None:
     return str(value) if value is not None else None
 
 
-# Detects model responses that look like pseudo tool calls written as plain text
-# instead of structured tool_call JSON.  Example pattern the model produces:
-#   "Tool: bma_create_object\nArguments: {...}"
+# Detects model responses that look like pseudo tool calls written as plain text.
 _PSEUDO_TOOL_RE = re.compile(
     r"^\s*(Tool|Action|Arguments?|Observation)\s*:",
     re.MULTILINE | re.IGNORECASE,
 )
 
-# Matches LangChain-style: "Action: tool_name" / "Action Input: {...}"
 _ACTION_NAME_RE = re.compile(r"^\s*Action\s*:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
 _ACTION_INPUT_RE = re.compile(r"^\s*Action\s+Input\s*:\s*(\{.*)", re.MULTILINE | re.IGNORECASE | re.DOTALL)
-# Matches "Tool: tool_name" / "Arguments: {...}"
 _TOOL_NAME_RE = re.compile(r"^\s*Tool\s*:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
 _TOOL_ARGS_RE = re.compile(r"^\s*Arguments?\s*:\s*(\{.*)", re.MULTILINE | re.IGNORECASE | re.DOTALL)
-# Thought extraction
 _THOUGHT_RE = re.compile(r"^\s*Thought\s*:\s*(.+?)(?=^\s*(?:Action|Tool)\s*:)", re.MULTILINE | re.IGNORECASE | re.DOTALL)
 
 
 def _is_pseudo_tool_call(content: str) -> bool:
-    """Return True if content looks like text-serialised tool calls, not a genuine final answer."""
     return bool(_PSEUDO_TOOL_RE.search(content))
 
 
 def _extract_json_obj(text: str) -> dict[str, Any] | None:
-    """Extract the first complete JSON object from text."""
     import json as _json
     depth = 0
     start = text.find("{")
@@ -422,8 +668,6 @@ def _extract_json_obj(text: str) -> dict[str, Any] | None:
 
 
 def _parse_pseudo_tool_call(content: str) -> "_ReactAction | None":
-    """Try to extract a tool name and arguments from a plain-text ReAct response."""
-    # LangChain style: Action / Action Input
     name_match = _ACTION_NAME_RE.search(content)
     if name_match:
         tool_name = name_match.group(1).strip()
@@ -435,7 +679,6 @@ def _parse_pseudo_tool_call(content: str) -> "_ReactAction | None":
         thought = thought_match.group(1).strip() if thought_match else None
         return _ReactAction(thought=thought, tool_name=tool_name, arguments=args)
 
-    # Tool / Arguments style
     name_match2 = _TOOL_NAME_RE.search(content)
     if name_match2:
         tool_name = name_match2.group(1).strip()

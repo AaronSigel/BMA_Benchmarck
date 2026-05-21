@@ -27,27 +27,32 @@ def write_report_text_ru(analysis: ExperimentAnalysisResult, path: Path) -> None
     strategies = ", ".join(sorted({r.strategy for r in runs if r.strategy})) or "N/A"
     profiles = ", ".join(sorted({r.mcp_profile for r in runs if r.mcp_profile})) or "N/A"
     best = _best_strategy_name(analysis)
+    best_profile = _best_profile_name(analysis)
     weak_categories = _weak_categories(analysis)
     top_validation = _top_issue_text(analysis, "validation")
     top_agent = _top_issue_text(analysis, "agent")
     top_tool = _top_issue_text(analysis, "tool")
+    react = [r for r in runs if r.strategy == "react"]
+    react_counts = _status_counts(react)
+    react_cost = _cost_total(react)
+    total_cost = _cost_total(runs)
     text = f"""# Текст для отчёта
 
 ## 1. Описание экспериментального запуска
 
-В рамках диагностического прогона была использована матрица `{analysis.experiment_id}` из {s.total_runs} запусков. Прогон включал {len(set(r.task_id for r in runs))} Blender-задач, стратегии {strategies} и MCP-профили {profiles}. В качестве модели использовалась {models}. Основной целью запуска являлась проверка воспроизводимости стенда и выявление различий между режимами выполнения, а не достижение максимального качества на всех задачах.
+В рамках диагностического прогона была использована матрица `{analysis.experiment_id}` из {s.total_runs} запусков. Прогон включал {len(set(r.task_id for r in runs))} Blender-задач, {len(set(r.strategy for r in runs))} стратегии агента ({strategies}) и {len(set(r.mcp_profile for r in runs if r.mcp_profile))} MCP-профилей ({profiles}). В качестве модели использовалась {models}. Основной целью запуска являлась проверка воспроизводимости стенда и выявление различий между режимами выполнения, а не достижение максимального качества на всех задачах.
 
 ## 2. Сводные результаты
 
-Чисто успешных запусков зафиксировано {s.clean_pass_count}, soft pass запусков - {s.soft_pass_count}, failed validation - {s.failed_validation_count or s.failed_count}, runtime error - {s.runtime_error_count or s.error_count}. Строгая доля успеха составила {_pct(s.strict_success_rate)}, а отчётная доля успеха с учётом soft pass - {_pct(s.reported_success_rate)}.
+Чисто успешных запусков зафиксировано {s.clean_pass_count}, soft pass запусков - {s.soft_pass_count}, failed validation - {s.failed_validation_count or s.failed_count}, runtime error - {s.runtime_error_count or s.error_count}. Строгая доля успеха составила {_pct(s.strict_success_rate)}, отчётная доля успеха с учётом soft pass - {_pct(s.reported_success_rate)}, а доля неуспешных запусков - {_pct(s.failure_rate)}. Суммарная provider-reported стоимость OpenRouter составила {_num(total_cost, 6)} USD.
 
 ## 3. Сравнение стратегий
 
-Наиболее устойчивой стратегией по отчётной доле успешных запусков стала {best}. ReAct в MVP сохраняется как диагностическая стратегия; низкий success rate ReAct не является ошибкой стенда, а отражает ограничения текущей реализации agent loop на многошаговых Blender-задачах.
+Наиболее устойчивой стратегией по отчётной доле успешных запусков стала {best}. ReAct в MVP сохраняется как диагностическая стратегия: для неё выполнено {len(react)} запусков, clean pass - {react_counts["clean_pass"]}, failed validation - {react_counts["failed_validation"]}, runtime error - {react_counts["runtime_error"]}, стоимость - {_num(react_cost, 6)} USD. Низкий success rate ReAct не является ошибкой стенда, а отражает ограничения текущей реализации agent loop на многошаговых Blender-задачах.
 
 ## 4. Сравнение MCP-профилей
 
-Сравнение MCP-профилей проводилось по одинаковой матрице задач и стратегий. Профили рассматривались как разные режимы доступности инструментов, поэтому различия в результатах интерпретируются как влияние tool surface на устойчивость агента.
+Сравнение MCP-профилей проводилось по одинаковой матрице задач и стратегий. Профили рассматривались как разные режимы доступности инструментов, поэтому различия в результатах интерпретируются как влияние tool surface на устойчивость агента. Лучшим профилем по отчётной доле успешных запусков стал {best_profile}.
 
 ## 5. Анализ категорий задач
 
@@ -59,7 +64,7 @@ def write_report_text_ru(analysis: ExperimentAnalysisResult, path: Path) -> None
 
 ## 7. Ограничения прогона
 
-MVP-прогон использует одну модель и одну повторность, поэтому результаты отражают диагностическую картину конкретной конфигурации, а не финальную оценку всех возможных моделей и режимов. Стоимость берётся только из provider-reported данных OpenRouter; внутренние формулы оценки стоимости не используются.
+MVP-прогон использует одну модель и одну повторность, поэтому результаты отражают диагностическую картину конкретной конфигурации, а не финальную оценку всех возможных моделей и режимов. Export и Lighting остаются сложными категориями, требующими отдельной стабилизации. Benchmark оценивает не только итоговую сцену, но и процесс tool-use. Стоимость берётся только из provider-reported данных OpenRouter; внутренние формулы оценки стоимости не используются.
 
 ## 8. Вывод
 
@@ -72,7 +77,7 @@ def write_readme_report(path: Path) -> None:
     path.write_text(
         """# Report Bundle
 
-Пакет содержит готовые материалы benchmark-прогона.
+Пакет содержит готовые материалы benchmark-прогона, которые можно перенести в научный отчёт без ручной агрегации raw JSON.
 
 - `summary.csv` - основной источник данных для таблиц и анализа.
 - `summary.json` и `experiment_analysis.json` - машинно-читаемые агрегаты.
@@ -81,6 +86,8 @@ def write_readme_report(path: Path) -> None:
 - `figures/` - PNG-графики для иллюстраций.
 - `manifest.json` - сведения о матрице и runtime.
 
+Для таблиц используйте `summary.csv`: одна строка соответствует одному запуску и содержит `pass_type`, стратегию, MCP-профиль, модель, score, длительность, provider-reported cost и issue-поля. Для текстового анализа используйте `report_text_ru.md`. Графики находятся в `figures/` и связаны с тем же `summary.csv`.
+
 `pass_type` является основным отчётным статусом:
 
 - `clean_pass` - validation пройдена без issues.
@@ -88,7 +95,11 @@ def write_readme_report(path: Path) -> None:
 - `failed_validation` - агент завершил выполнение, сцена доступна, validation failed.
 - `runtime_error` - запуск не дошёл до корректной итоговой сцены из-за agent/tool/runtime ошибки.
 
-`failed_validation` показывает проблему качества итоговой сцены. `runtime_error` показывает проблему выполнения агента, инструмента или runtime. Для стоимости используются только provider-reported данные OpenRouter.
+`failed_validation` показывает проблему качества итоговой сцены. `runtime_error` показывает проблему выполнения агента, инструмента или runtime.
+
+ReAct в текущем MVP является диагностической стратегией. Его низкая доля успеха интерпретируется как результат эксперимента и ограничение текущего agent loop, а не как ошибка benchmark-стенда.
+
+Стоимость OpenRouter интерпретируется только как provider-reported cost: если провайдер не вернул стоимость, стенд не подставляет внутреннюю оценку. Ограничения MVP: используется одна модель, одна повторность, export и lighting остаются сложными категориями, результаты зависят от доступности OpenRouter и MCP/Blender runtime.
 """,
         encoding="utf-8",
     )
@@ -198,6 +209,18 @@ def _best_strategy_name(analysis: ExperimentAnalysisResult) -> str:
     return best_name
 
 
+def _best_profile_name(analysis: ExperimentAnalysisResult) -> str:
+    best_name = "N/A"
+    best_rate = -1.0
+    for name, items in _group_rows(analysis.runs, lambda r: r.mcp_profile or "unknown"):
+        c = _status_counts(items)
+        rate = (c["clean_pass"] + c["soft_pass"]) / len(items) if items else 0.0
+        if rate > best_rate:
+            best_name = name
+            best_rate = rate
+    return best_name
+
+
 def _weak_categories(analysis: ExperimentAnalysisResult) -> str:
     values: list[tuple[str, float]] = []
     for name, items in _group_rows(analysis.runs, _category):
@@ -209,3 +232,11 @@ def _weak_categories(analysis: ExperimentAnalysisResult) -> str:
 def _top_issue_text(analysis: ExperimentAnalysisResult, kind: str) -> str:
     items = _issue_counts(analysis.runs, kind).most_common(5)
     return ", ".join(f"{code} ({count})" for code, count in items) if items else "не зафиксированы"
+
+
+def _num(value: object, digits: int = 3) -> str:
+    if value is None:
+        return "N/A"
+    if isinstance(value, float):
+        return f"{value:.{digits}f}"
+    return str(value)

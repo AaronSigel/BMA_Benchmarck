@@ -46,6 +46,8 @@ report_config_path: configs/reports/default_report.yaml
 metadata:
   purpose: diagnostic_repeat_single_model
   expected_runs: 270
+  report_ready_mvp: true
+  timestamp_output_root: true
   preflight:
     enabled: true
     mode: diagnostic

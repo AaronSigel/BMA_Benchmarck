@@ -87,4 +87,9 @@ def create_agent_strategy(strategy_name: AgentStrategyName | str) -> AgentStrate
 
         return RemoteAgentStrategy()
 
+    if strategy == AgentStrategyName.PLAN_EXECUTE_REACT_REPAIR:
+        from benchmark.agent.strategies.plan_execute_react_repair import PlanExecuteReactRepairStrategy
+
+        return PlanExecuteReactRepairStrategy()
+
     raise UnsupportedAgentStrategyError(f"Unsupported agent strategy: {strategy.value}")

@@ -14,6 +14,23 @@ _EXTERNAL_ASSET_TOOLS = frozenset(
 )
 _AGENT_HIDDEN_TOOLS = frozenset({"get_bma_profile_info", "get_scene_info", "get_object_info"})
 
+_REACT_RULES = """\
+ReAct loop rules — follow exactly:
+1. Fix exactly one validation issue per step.
+2. Do not create an object that already exists in the scene; update its transform or material instead.
+3. Do not export the scene before all required objects and materials exist.
+4. If the scene has already passed validation, set finish=true immediately.
+5. Return ONLY a JSON object — no markdown fences, no explanatory text outside the JSON.
+
+Required response schema (action step):
+{"thought": "<one-sentence reasoning>", "action": {"tool": "<bma_tool_name>", "arguments": {<key: value>}}, "finish": false}
+
+Required response schema (done):
+{"thought": "<why scene is complete>", "action": null, "finish": true}
+
+When a suggested repair is provided in the current scene state, use it unless you have a specific reason to deviate.\
+"""
+
 
 class PromptContext(BaseModel):
     task_id: str | None = None
@@ -53,6 +70,11 @@ class PromptBuilder:
                 "Fallback JSON action format: "
                 '{"tool_name": "<tool>", "arguments": {"key": "value"}}.'
             ),
+            (
+                "For ReAct strategy: return only a JSON object with keys thought, action, finish. "
+                "Set finish=true when the scene satisfies all requirements. "
+                "Do not include markdown fences or explanatory text outside the JSON."
+            ),
             "After modifying the scene, use inspection tools when they are available.",
         ]
         if profile in _PYTHON_RESTRICTED_PROFILES or not agent_config.allow_python_tools:
@@ -79,12 +101,15 @@ class PromptBuilder:
         self,
         task: dict[str, Any],
         observations: list[str | dict[str, Any]],
+        step_context: dict[str, Any] | None = None,
     ) -> str:
         lines = [
             self.build_task_prompt(task),
-            "Use a ReAct loop: reason briefly, call one allowed tool, then use the observation.",
-            "Observations:",
+            _REACT_RULES,
         ]
+        if step_context:
+            lines.append(f"Current scene state:\n{_format_value(step_context)}")
+        lines.append("Observations:")
         for index, observation in enumerate(observations):
             lines.append(f"{index}: {_format_value(_strip_secrets(observation))}")
         return "\n".join(lines)
@@ -128,8 +153,9 @@ def build_task_prompt(task: dict[str, Any] | PromptContext) -> str:
 def build_react_prompt_context(
     task: dict[str, Any],
     observations: list[str | dict[str, Any]],
+    step_context: dict[str, Any] | None = None,
 ) -> str:
-    return PromptBuilder().build_react_prompt_context(task, observations)
+    return PromptBuilder().build_react_prompt_context(task, observations, step_context)
 
 
 def build_plan_prompt(task: dict[str, Any]) -> str:

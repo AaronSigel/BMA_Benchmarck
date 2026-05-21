@@ -13,6 +13,7 @@ class AgentStrategyName(str, Enum):
     REACT = "react"
     PLAN_AND_EXECUTE = "plan_and_execute"
     REMOTE_AGENT = "remote_agent"
+    PLAN_EXECUTE_REACT_REPAIR = "plan_execute_react_repair"
 
 
 class LlmProvider(str, Enum):
@@ -126,6 +127,7 @@ class AgentConfig(BaseModel):
     allow_inspection_tools: bool = True
     system_prompt_template: str | None = None
     allowed_tools: list[str] = Field(default_factory=list)
+    max_steps_by_category: dict[str, int] = Field(default_factory=dict)
     trace_enabled: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 

@@ -105,6 +105,62 @@ Run an experiment:
 The example experiment uses an existing `SceneSnapshot` fixture and does not
 require Blender, MCP, or LLM access.
 
+## Report-Ready MVP
+
+### Назначение стенда
+
+BMA Benchmark оценивает AI-агентов, которые выполняют Blender-задачи через MCP. Стенд фиксирует не только итоговую сцену, но и процесс tool-use: доступные инструменты, ошибки вызовов, runtime-состояние агента, validation issues и provider-reported стоимость.
+
+### Архитектура benchmark pipeline
+
+Pipeline состоит из матрицы эксперимента, генерации run-конфигов, запуска агента через MCP/Blender runtime, сохранения raw artifacts, scene validation, анализа запусков и генерации отчётного пакета. Основной результат report-ready запуска находится в `report_bundle/`.
+
+### Формат задач
+
+Задачи описаны YAML-файлами в `tasks/` и сгруппированы по категориям: geometry, materials, lighting, camera и export. Каждая задача задаёт ожидаемые объекты, трансформы, материалы, свет, камеру или export-артефакты, которые затем проверяются валидаторами.
+
+### Стратегии агента
+
+Поддерживаются `direct_tool_calling`, `plan_and_execute` и `react`. Для report-ready MVP основным рабочим режимом обычно считается наиболее устойчивый режим по фактическому `reported_success_rate`; `react` сохраняется как диагностическая стратегия для изучения ограничений многошагового agent loop.
+
+### MCP-профили
+
+Матрица сравнивает профили `minimal`, `no_python`, `inspection_enabled`, `python_enabled` и `full`. Они отражают разные поверхности доступных MCP-инструментов и позволяют оценить влияние tool gating на устойчивость выполнения.
+
+### Метрики и статусы
+
+Главный отчётный статус находится в колонке `pass_type`:
+
+| pass_type | Meaning |
+|---|---|
+| `clean_pass` | Сцена прошла validation без замечаний. |
+| `soft_pass` | Запуск прошёл по score, но содержит validation issues. |
+| `failed_validation` | Финальная сцена получена, но validation failed. |
+| `runtime_error` | Агент, tool runtime или инфраструктура не дошли до корректной финальной сцены. |
+
+`reported_success_rate = (clean_pass + soft_pass) / total_runs`, `strict_success_rate = clean_pass / total_runs`, `failure_rate = (failed_validation + runtime_error) / total_runs`.
+
+### Основной report-ready запуск
+
+```bash
+python -m bma_benchmark run-matrix \
+  --config configs/matrices/diagnostic_repeat_gemini_v5.yaml
+```
+
+Матрица `diagnostic_repeat_gemini_v5` рассчитана на 270 запусков: 18 задач, 3 стратегии, 5 MCP-профилей, 1 модель и 1 повтор. Для неё включён `report_ready_mvp`, поэтому отчёты и `report_bundle/` создаются автоматически.
+
+### Как читать report_bundle
+
+`summary.csv` является главным источником данных для таблиц. `experiment_analysis.json` и `summary.json` содержат машинно-читаемые агрегаты. `report.md` и `report.html` содержат таблицы, key findings и diagnostics. `report_text_ru.md` содержит готовый русский текст анализа. `README_REPORT.md` объясняет назначение файлов и интерпретацию статусов. PNG-графики находятся в `figures/`.
+
+### Ограничения MVP
+
+Report-ready MVP использует одну модель в основной матрице. ReAct сохраняется как диагностическая стратегия. Export и Lighting остаются сложными категориями. Результаты зависят от доступности OpenRouter, MCP socket, Blender runtime и provider-reported cost. Стоимость берётся только из OpenRouter provider-reported данных, без внутренней подстановки цены.
+
+### Дальнейшее развитие
+
+Следующие шаги: добавить повторности для статистической устойчивости, расширить набор моделей, усилить export/import-back диагностику, стабилизировать ReAct loop, добавить confidence intervals и подготовить cross-run сравнение нескольких report bundles.
+
 ## Stage 2: Blender Automation
 
 Stage 2 adds the dependency and configuration surface for running Blender in headless mode from the benchmark package. The goal of this stage is to launch Blender, execute Blender Python scripts inside that process, and save formal artifacts such as scene snapshots under `artifacts/`.

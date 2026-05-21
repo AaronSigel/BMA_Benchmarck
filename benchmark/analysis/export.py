@@ -234,7 +234,7 @@ def _export_status(result: RunAnalysisResult, export_issues: str) -> tuple[str, 
         return "not_applicable", ""
     pass_type = _effective_pass_type(result)
     if pass_type in {"clean_pass", "soft_pass"} and export_issues == "null":
-        return "passed", ""
+        return "passed", "none"
     if pass_type == "runtime_error":
         return "failed", "pre_export_scene_incomplete"
     if export_issues != "null":
@@ -242,9 +242,16 @@ def _export_status(result: RunAnalysisResult, export_issues: str) -> tuple[str, 
         mapping = {
             "export_missing": "export_file_missing",
             "scene_export_missing": "export_file_missing",
-            "export_file_invalid": "export_tool_failed",
+            "export_empty_file": "export_file_invalid",
+            "export_format_unsupported": "export_file_invalid",
+            "export_file_invalid": "export_file_invalid",
             "export_import_missing": "import_back_failed",
+            "export_import_file_too_small": "import_back_failed",
+            "export_import_failed": "import_back_failed",
+            "export_import_object_missing": "import_back_missing_objects",
+            "export_import_mesh_count_mismatch": "import_back_missing_objects",
             "export_import_material_missing": "import_back_material_mismatch",
+            "export_import_material_color_mismatch": "import_back_material_mismatch",
             "export_import_transform_mismatch": "import_back_transform_mismatch",
         }
         return "failed", mapping.get(first_issue, first_issue or "export_tool_failed")

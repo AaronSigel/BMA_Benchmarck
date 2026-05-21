@@ -106,7 +106,7 @@ def test_react_plan_and_tool_result_prompts() -> None:
         {"objects": [], "token": "secret-token"},
     )
 
-    assert "Use a ReAct loop" in react_prompt
+    assert "ReAct loop rules" in react_prompt
     assert "empty scene" in react_prompt
     assert "Create a concise execution plan" in plan_prompt
     assert "Tool result for get_scene_info" in tool_result_message

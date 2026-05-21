@@ -264,8 +264,8 @@ def _inject_scene_validator(
     tool_executor: Any,
     task_data: dict[str, Any],
 ) -> None:
-    """Inject a scene validation callback into ReactStrategy when stop_after_scene_passed is enabled."""
-    if not config.stop_after_scene_passed:
+    """Inject a scene validation callback into ReactStrategy when validation-based stopping is enabled."""
+    if not (config.stop_after_scene_passed or config.detect_no_progress):
         return
     from benchmark.agent.strategies.react import ReactStrategy
     if not isinstance(strategy, ReactStrategy):
@@ -277,11 +277,11 @@ def _inject_scene_validator(
     import logging as _log_mod
     _log = _log_mod.getLogger(__name__)
 
-    def _scene_validator_fn(snap_path: Path) -> tuple[bool, float | None]:
+    def _scene_validator_fn(snap_path: Path) -> tuple[bool, float | None, Any]:
         try:
             adapter.collect_scene_snapshot(snap_path)
             if not snap_path.exists():
-                return False, None
+                return False, None, None
             from benchmark.blender.models import SceneSnapshot
             from benchmark.tasks.models import BenchmarkTask
             from benchmark.validation.scene_validator import SceneValidator
@@ -290,9 +290,9 @@ def _inject_scene_validator(
             task_obj = BenchmarkTask.model_validate(task_data)
             result = SceneValidator().validate(task_obj, snapshot)
             scene_ok = result.overall_status in {ValidationStatus.PASSED, ValidationStatus.WARNING}
-            return scene_ok, result.total_score
+            return scene_ok, result.total_score, result
         except Exception as exc:
-            _log.debug("stop_after_scene_passed: scene check error: %s", exc)
-            return False, None
+            _log.debug("scene_validator_fn: scene check error: %s", exc)
+            return False, None, None
 
     strategy.scene_validator_fn = _scene_validator_fn

@@ -1241,6 +1241,7 @@ def _category_table(runs: list[RunAnalysisResult]) -> list[list[str]]:
     rows: list[list[str]] = []
     for category, items in _group_rows(runs, _category):
         c = _status_counts(items)
+        issues = _issue_counts(items, "validation").most_common(3)
         rows.append([
             category,
             str(len(items)),
@@ -1250,6 +1251,7 @@ def _category_table(runs: list[RunAnalysisResult]) -> list[list[str]]:
             str(c["runtime_error"]),
             _pct((c["clean_pass"] + c["soft_pass"]) / len(items) if items else None),
             _num(_avg_score(items)),
+            ", ".join(f"{code}:{count}" for code, count in issues) or "none",
         ])
     return rows
 
@@ -1275,6 +1277,75 @@ def _strategy_profile_table(runs: list[RunAnalysisResult]) -> list[list[str]]:
 
 def _issue_table(runs: list[RunAnalysisResult], kind: str) -> list[list[str]]:
     return [[code, str(count)] for code, count in _issue_counts(runs, kind).most_common(10)]
+
+
+def _export_failure_type(result: RunAnalysisResult) -> str:
+    is_export = _category(result) == "export" or "export" in result.task_id.lower()
+    if not is_export:
+        return "not_applicable"
+    from benchmark.analysis.export import _export_status, _format_issue_counts
+
+    return _export_status(result, _format_issue_counts(result, "export"))[1]
+
+
+def _react_diagnostics_table(runs: list[RunAnalysisResult]) -> list[list[str]]:
+    react_runs = [r for r in runs if r.strategy == "react"]
+    c = _status_counts(react_runs)
+    return [
+        ["react_runs", str(len(react_runs))],
+        ["react_clean_pass", str(c["clean_pass"])],
+        ["react_failed_validation", str(c["failed_validation"])],
+        ["react_runtime_error", str(c["runtime_error"])],
+        ["react_max_steps_reached", str(sum(1 for r in react_runs if r.agent_status == "max_steps_reached"))],
+        ["react_repeated_actions", str(sum(int(r.metrics.get("repeated_action_count") or 0) for r in react_runs))],
+        ["react_no_progress", str(sum(int(r.metrics.get("no_progress_step_count") or 0) for r in react_runs))],
+        ["react_duplicate_objects", str(sum(int(r.metrics.get("duplicate_object_count") or 0) for r in react_runs))],
+        ["react_cost_usd", _num(_cost_total(react_runs), 6)],
+    ]
+
+
+def _export_diagnostics_table(runs: list[RunAnalysisResult]) -> list[list[str]]:
+    export_runs = [r for r in runs if _category(r) == "export" or "export" in r.task_id.lower()]
+    c = _status_counts(export_runs)
+    failure_counts = Counter(_export_failure_type(r) for r in export_runs)
+    rows = [
+        ["export_runs", str(len(export_runs))],
+        ["export_clean_pass", str(c["clean_pass"])],
+        ["export_soft_pass", str(c["soft_pass"])],
+        ["export_failed_validation", str(c["failed_validation"])],
+        ["export_runtime_error", str(c["runtime_error"])],
+        ["export_reported_success_rate", _pct((c["clean_pass"] + c["soft_pass"]) / len(export_runs) if export_runs else None)],
+    ]
+    for failure_type in (
+        "none",
+        "pre_export_scene_incomplete",
+        "export_tool_failed",
+        "export_file_missing",
+        "export_file_invalid",
+        "import_back_failed",
+        "import_back_missing_objects",
+        "import_back_material_mismatch",
+        "import_back_transform_mismatch",
+    ):
+        rows.append([failure_type, str(failure_counts.get(failure_type, 0))])
+    return rows
+
+
+def _lighting_diagnostics_table(runs: list[RunAnalysisResult]) -> list[list[str]]:
+    lighting_runs = [r for r in runs if _category(r) == "lighting" or "lighting" in r.task_id.lower()]
+    c = _status_counts(lighting_runs)
+    issue_counts = _issue_counts(lighting_runs, "validation")
+    rows = [
+        ["lighting_runs", str(len(lighting_runs))],
+        ["lighting_clean_pass", str(c["clean_pass"])],
+        ["lighting_soft_pass", str(c["soft_pass"])],
+        ["lighting_failed_validation", str(c["failed_validation"])],
+        ["lighting_runtime_error", str(c["runtime_error"])],
+        ["lighting_reported_success_rate", _pct((c["clean_pass"] + c["soft_pass"]) / len(lighting_runs) if lighting_runs else None)],
+    ]
+    for code, count in issue_counts.most_common(6):
+        rows.append([code, str(count)])
+    return rows
 
 
 def _best_strategy(runs: list[RunAnalysisResult]) -> tuple[str, int, int] | None:
@@ -1336,6 +1407,7 @@ def _overall_rows(analysis: ExperimentAnalysisResult) -> list[list[str]]:
         ["runtime_error", str(s.runtime_error_count or s.error_count)],
         ["reported_success_rate", _pct(s.reported_success_rate)],
         ["strict_success_rate", _pct(s.strict_success_rate)],
+        ["failure_rate", _pct(s.failure_rate)],
         ["avg_score_completed", _num(s.average_score_completed)],
         ["avg_score_strict", _num(s.average_score_strict)],
         ["total_duration_sec", _num(sum((r.duration_sec or 0.0) for r in runs), 1)],
@@ -1364,7 +1436,7 @@ def build_markdown_report(analysis: ExperimentAnalysisResult, config: ReportConf
         _task_table(runs),
     )])
     lines.extend(["## 5. Results by Task Category", "", _md_table(
-        ["task_category", "runs", "clean_pass", "soft_pass", "failed_validation", "runtime_error", "reported_success_rate", "avg_score"],
+        ["task_category", "runs", "clean_pass", "soft_pass", "failed_validation", "runtime_error", "reported_success_rate", "avg_score", "top_issues"],
         _category_table(runs),
     )])
     lines.extend(["## 6. Strategy x MCP Profile", "", _md_table(
@@ -1384,6 +1456,16 @@ def build_markdown_report(analysis: ExperimentAnalysisResult, config: ReportConf
         ["runs_with_provider_cost", str(sum(1 for r in runs if r.metrics.get("provider_cost_available") is True))],
         ["runs_without_provider_cost", str(sum(1 for r in runs if r.metrics.get("provider_cost_available") is not True))],
     ])])
+    if config.include_error_taxonomy:
+        react_rows = _react_diagnostics_table(runs)
+        if runs and any(r.strategy == "react" for r in runs):
+            lines.extend(["## ReAct Diagnostics", "", "ReAct в текущем MVP используется как диагностическая стратегия. Низкий success rate ReAct не является ошибкой benchmark-стенда, а отражает ограничения текущего agent loop на многошаговых Blender-задачах.", "", _md_table(["metric", "value"], react_rows)])
+        export_rows = _export_diagnostics_table(runs)
+        if runs and any(_category(r) == "export" or "export" in r.task_id.lower() for r in runs):
+            lines.extend(["## Export Diagnostics", "", _md_table(["metric", "value"], export_rows)])
+        lighting_rows = _lighting_diagnostics_table(runs)
+        if runs and any(_category(r) == "lighting" or "lighting" in r.task_id.lower() for r in runs):
+            lines.extend(["## Lighting Diagnostics", "", _md_table(["metric", "value"], lighting_rows)])
     figures = [
         "figures/success_by_strategy.png",
         "figures/success_by_profile.png",
@@ -1408,9 +1490,13 @@ def _legacy_compat_sections(analysis: ExperimentAnalysisResult, config: ReportCo
         out.extend(["## Artifact Freshness", "", _md_table(["Field", "Value"], freshness_rows)])
     out.extend(["## 1. Summary", "", _md_table(["Metric", "Value"], [
         ["Total runs", str(analysis.summary.total_runs)],
-        ["Successful (passed)", str(analysis.summary.successful_runs)],
-        ["Failed", str(analysis.summary.failed_validation_count or analysis.summary.failed_count)],
-        ["Errors", str(analysis.summary.runtime_error_count or analysis.summary.error_count)],
+        ["Clean pass", str(analysis.summary.clean_pass_count)],
+        ["Soft pass", str(analysis.summary.soft_pass_count)],
+        ["Failed validation", str(analysis.summary.failed_validation_count or analysis.summary.failed_count)],
+        ["Runtime / agent error", str(analysis.summary.runtime_error_count or analysis.summary.error_count)],
+        ["Reported success rate", _pct(analysis.summary.reported_success_rate)],
+        ["Strict success rate", _pct(analysis.summary.strict_success_rate)],
+        ["Failure rate", _pct(analysis.summary.failure_rate)],
         ["Avg scene score", _num(analysis.summary.average_scene_score)],
     ])])
     out.extend(["## 2. Best / Worst Runs", ""])

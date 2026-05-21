@@ -28,6 +28,7 @@ def test_agent_model_enums_match_stage_contract() -> None:
         "react",
         "plan_and_execute",
         "remote_agent",
+        "plan_execute_react_repair",
     ]
     assert [item.value for item in LlmProvider] == [
         "openrouter",

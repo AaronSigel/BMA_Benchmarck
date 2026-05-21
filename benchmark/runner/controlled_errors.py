@@ -74,39 +74,35 @@ def normalize_error(
     inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
     recoverable = True
 
-    if "react strategy reached max_steps" in text or "max_steps" in text or "step limit" in text:
+    if "react strategy reached max_steps" in text or "reached max_steps" in text or "max_steps" in text or "step limit" in text or "agentsteplimit" in text:
         error_type = ControlledErrorType.REACT_MAX_STEPS
         inferred_source = explicit_source or ControlledErrorSource.AGENT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
-    elif "no tool call or json action returned by llm" in text or "failed to parse" in text:
+    elif "no tool call or json action returned by llm" in text or "failed to parse" in text or "did not include action" in text or "no action found" in text or "llmresponseparseerror" in text:
         error_type = ControlledErrorType.LLM_PARSE_ERROR
         inferred_source = explicit_source or ControlledErrorSource.AGENT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
+    elif "repeated the same action" in text or "no_progress_detected" in text or "no progress detected" in text or "repeated action" in text:
+        error_type = ControlledErrorType.REACT_MAX_STEPS
+        inferred_source = explicit_source or ControlledErrorSource.AGENT
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
+    elif "duplicate object" in text:
+        error_type = ControlledErrorType.INVALID_TOOL_CALL
+        inferred_source = explicit_source or ControlledErrorSource.TOOL
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
     elif "reset" in text and "scene" in text:
         error_type = ControlledErrorType.RESET_SCENE_FAILED
         inferred_source = explicit_source or ControlledErrorSource.BLENDER
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.RESET_SCENE
-    elif "pre-run scene snapshot could not be collected" in text or "snapshot" in text:
+    elif "pre-run scene snapshot could not be collected" in text or ("snapshot" in text and "not" in text):
         error_type = ControlledErrorType.SNAPSHOT_UNAVAILABLE
         inferred_source = explicit_source or ControlledErrorSource.BLENDER
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.PRE_RUN_SNAPSHOT
-    elif "no response from blender socket" in text or ("socket" in text and ("unavailable" in text or "no response" in text or "refused" in text)):
+    elif "no response from blender socket" in text or "blendersocketunavailable" in text or ("socket" in text and ("unavailable" in text or "no response" in text or "refused" in text or "error" in text)):
         error_type = ControlledErrorType.BLENDER_SOCKET_UNAVAILABLE
         inferred_source = explicit_source or ControlledErrorSource.BLENDER
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
-    elif "validation" in text or "validator" in text:
-        error_type = ControlledErrorType.VALIDATION_UNAVAILABLE
-        inferred_source = explicit_source or ControlledErrorSource.VALIDATOR
-        inferred_stage = _stage(failure_stage) or ControlledFailureStage.VALIDATION
-    elif "export" in text or ".glb" in text or ".blend" in text:
-        error_type = ControlledErrorType.EXPORT_UNAVAILABLE
-        inferred_source = explicit_source or ControlledErrorSource.TOOL
-        inferred_stage = _stage(failure_stage) or ControlledFailureStage.EXPORT
-    elif "invalid json" in text or "jsondecode" in text:
-        error_type = ControlledErrorType.INVALID_TOOL_RESPONSE
-        inferred_source = explicit_source or ControlledErrorSource.TOOL
-        inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
-    elif "timeout" in text or "timed out" in text:
+    elif "timeout" in text or "timed out" in text or "timed-out" in text:
         if "openrouter" in text or "provider" in text or "llm" in text:
             error_type = ControlledErrorType.LLM_PROVIDER_ERROR
             inferred_source = explicit_source or ControlledErrorSource.PROVIDER
@@ -115,14 +111,26 @@ def normalize_error(
             error_type = ControlledErrorType.TOOL_TIMEOUT
             inferred_source = explicit_source or ControlledErrorSource.TOOL
             inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
-    elif "openrouter" in text or "provider" in text or "api key" in text or "llm" in text:
+    elif "openrouter" in text or "api key" in text or "llm provider" in text or "llmprovider" in text or "401" in text or "403" in text or "rate limit" in text:
         error_type = ControlledErrorType.LLM_PROVIDER_ERROR
         inferred_source = explicit_source or ControlledErrorSource.PROVIDER
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
-    elif "invalid tool call" in text or "tool is not allowed" in text or "unknown tool" in text:
+    elif "invalid json" in text or "jsondecode" in text or "json decode" in text or "invalid json from" in text:
+        error_type = ControlledErrorType.INVALID_TOOL_RESPONSE
+        inferred_source = explicit_source or ControlledErrorSource.TOOL
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
+    elif "invalid tool call" in text or "tool is not allowed" in text or "unknown tool" in text or "tool not found" in text or "not allowed in this profile" in text or "tooldisablederror" in text:
         error_type = ControlledErrorType.INVALID_TOOL_CALL
         inferred_source = explicit_source or ControlledErrorSource.TOOL
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
+    elif "export" in text or ".glb" in text or ".blend" in text:
+        error_type = ControlledErrorType.EXPORT_UNAVAILABLE
+        inferred_source = explicit_source or ControlledErrorSource.TOOL
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.EXPORT
+    elif "validation" in text or "validator" in text:
+        error_type = ControlledErrorType.VALIDATION_UNAVAILABLE
+        inferred_source = explicit_source or ControlledErrorSource.VALIDATOR
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.VALIDATION
     elif "report" in text:
         error_type = ControlledErrorType.REPORT_BUILD_ERROR
         inferred_source = explicit_source or ControlledErrorSource.REPORTING
@@ -131,15 +139,32 @@ def normalize_error(
         error_type = ControlledErrorType.PREFLIGHT_CHECK_FAILED
         inferred_source = explicit_source or ControlledErrorSource.PREFLIGHT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.PREFLIGHT
-    elif "blender" in text or "crash" in text:
+    elif "blender" in text or "crash" in text or "blenderruntimeerror" in text:
         error_type = ControlledErrorType.BLENDER_RUNTIME_ERROR
         inferred_source = explicit_source or ControlledErrorSource.BLENDER
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
         recoverable = False
+    elif "provider" in text or "llm" in text:
+        error_type = ControlledErrorType.LLM_PROVIDER_ERROR
+        inferred_source = explicit_source or ControlledErrorSource.PROVIDER
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
     elif "tool" in text or "unknown" in text:
         error_type = ControlledErrorType.INVALID_TOOL_RESPONSE
         inferred_source = explicit_source or ControlledErrorSource.TOOL
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
+    elif "snapshot" in text:
+        error_type = ControlledErrorType.SNAPSHOT_UNAVAILABLE
+        inferred_source = explicit_source or ControlledErrorSource.BLENDER
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.PRE_RUN_SNAPSHOT
+    elif "connection" in text or "socket" in text or "refused" in text:
+        error_type = ControlledErrorType.BLENDER_SOCKET_UNAVAILABLE
+        inferred_source = explicit_source or ControlledErrorSource.BLENDER
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
+    elif "execution" in text or "runtime" in text or "script" in text:
+        error_type = ControlledErrorType.BLENDER_RUNTIME_ERROR
+        inferred_source = explicit_source or ControlledErrorSource.BLENDER
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
+        recoverable = False
 
     return ControlledError(
         error_type=error_type,

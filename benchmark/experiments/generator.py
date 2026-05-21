@@ -59,7 +59,7 @@ def generate_experiment_config(matrix: ExperimentMatrix) -> ExperimentConfig:
                                     task_id=task.id,
                                     execution_mode=execution_mode,
                                     task_path=task_paths[task.id],
-                                    snapshot_path=_snapshot_path(matrix),
+                                    snapshot_path=_snapshot_path(matrix, task.id),
                                     artifacts_dir=_artifacts_dir(matrix, mode_output_dir),
                                     output_dir=mode_output_dir,
                                     mcp_config_path=mcp_profile["config_path"],
@@ -146,7 +146,12 @@ def _mcp_config_root(matrix: ExperimentMatrix) -> Path:
     return Path(matrix.metadata.get("mcp_config_root", "configs/mcp"))
 
 
-def _snapshot_path(matrix: ExperimentMatrix) -> Path | None:
+def _snapshot_path(matrix: ExperimentMatrix, task_id: str | None = None) -> Path | None:
+    if task_id:
+        by_task = matrix.metadata.get("snapshot_path_by_task")
+        if isinstance(by_task, dict) and task_id in by_task:
+            value = by_task[task_id]
+            return Path(value) if value else None
     value = matrix.metadata.get("snapshot_path")
     return Path(value) if value else None
 

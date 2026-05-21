@@ -1,8 +1,8 @@
 matrix_id: diagnostic_repeat_gemini_v5
 title: Diagnostic repeat Gemini v5
 description: >
-  Two-repeat diagnostic matrix matching the previous 540-run size after v5
-  stabilization.
+  Single-repeat diagnostic matrix for report-ready MVP:
+  18 tasks × 3 strategies × 5 MCP profiles × 1 model × 1 repetition = 270 runs.
 tasks:
   ids:
     - geometry_001_basic_primitives

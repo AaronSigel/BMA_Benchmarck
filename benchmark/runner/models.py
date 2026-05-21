@@ -1,6 +1,6 @@
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -96,6 +96,7 @@ class RunResult(BaseModel):
     finished_at: str | None
     duration_sec: float | None = Field(default=None, ge=0.0)
     error: str | None = None
+    structured_error: dict[str, Any] | None = None
     summary: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("run_id", "task_id", "started_at")

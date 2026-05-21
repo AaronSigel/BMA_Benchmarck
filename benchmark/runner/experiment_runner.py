@@ -236,6 +236,7 @@ class ExperimentRunner:
             finished_at=_now_utc(),
             duration_sec=time.perf_counter() - started_perf,
             error=error,
+            structured_error=structured_error,
             summary={
                 **_error_summary,
                 **_run_metadata_summary(config, summary),
@@ -321,6 +322,7 @@ def _write_stub_trace_if_needed(
         steps=[],
         success=False,
         error=structured_error,
+        structured_error=structured_error,
         final_message=None,
         started_at=started_at,
         finished_at=finished_at,

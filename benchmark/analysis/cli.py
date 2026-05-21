@@ -173,6 +173,50 @@ def cmd_build_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_validate_report_bundle(args: argparse.Namespace) -> int:
+    from benchmark.analysis.report_bundle_validator import validate_report_bundle_result
+
+    bundle = Path(args.bundle)
+    result = validate_report_bundle_result(bundle)
+    passed = result["status"] == "passed"
+
+    failed_checks = [c for c in result["checks"] if c["status"] == "failed"]
+    if failed_checks:
+        for check in failed_checks:
+            print(f"FAIL  {check['name']}: {check.get('message', '')}", file=sys.stderr)
+    else:
+        print(f"OK  bundle validated: {bundle}")
+
+    if args.output:
+        out = Path(args.output)
+        out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        print(f"result written to {out}")
+
+    return 0 if passed else 1
+
+
+def cmd_compare_bundles(args: argparse.Namespace) -> int:
+    from benchmark.analysis.bundle_compare import compare_bundles
+
+    bundle_a = Path(args.bundle_a)
+    bundle_b = Path(args.bundle_b)
+
+    for p in (bundle_a, bundle_b):
+        if not p.exists():
+            print(f"Error: bundle not found: {p}", file=sys.stderr)
+            return 1
+
+    output_dir = Path(args.output) if args.output else None
+    result = compare_bundles(bundle_a, bundle_b, output_dir=output_dir)
+
+    out_root = output_dir or bundle_b.parent
+    print(f"total_runs: a={result['total_runs']['a']}  b={result['total_runs']['b']}  delta={result['total_runs']['delta']:+d}")
+    clean = result["clean_pass_rate"]
+    print(f"clean_pass_rate: a={clean['a']:.1%}  b={clean['b']:.1%}  delta={clean['delta']:+.1%}")
+    print(f"comparison_report.json → {out_root / 'comparison_report.json'}")
+    return 0
+
+
 def cmd_compare(args: argparse.Namespace) -> int:
     from benchmark.analysis.comparison import analyze_experiment, compare_runs
 
@@ -237,6 +281,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Grouping dimension (default: strategy)",
     )
 
+    # validate-report-bundle
+    p_vrb = sub.add_parser("validate-report-bundle", help="Validate a report bundle directory.")
+    p_vrb.add_argument("--bundle", required=True, help="Path to the report bundle directory")
+    p_vrb.add_argument("--output", help="Write full validation result JSON to this file")
+
+    # compare-bundles
+    p_cb = sub.add_parser("compare-bundles", help="Compare two report bundles and write a diff report.")
+    p_cb.add_argument("--bundle-a", required=True, help="Path to the baseline bundle")
+    p_cb.add_argument("--bundle-b", required=True, help="Path to the comparison bundle")
+    p_cb.add_argument("--output", help="Directory to write comparison_report.json/.md (default: bundle-b parent)")
+
     return parser
 
 
@@ -249,6 +304,8 @@ def main(argv: list[str] | None = None) -> int:
         "analyze-experiment": cmd_analyze_experiment,
         "build-report": cmd_build_report,
         "compare": cmd_compare,
+        "validate-report-bundle": cmd_validate_report_bundle,
+        "compare-bundles": cmd_compare_bundles,
     }
 
     handler = dispatch.get(args.command)

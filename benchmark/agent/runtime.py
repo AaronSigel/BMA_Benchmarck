@@ -121,6 +121,11 @@ class AgentRuntime:
         if trace.error and error_message is None:
             error_message = trace.error
 
+        if trace.error and isinstance(trace.error, str) and trace.structured_error is None:
+            from benchmark.runner.controlled_errors import controlled_error_payload
+            structured = controlled_error_payload(trace.error)
+            trace = trace.model_copy(update={"structured_error": structured})
+
         run_artifacts_dir = artifacts_dir
         if artifacts_dir is not None:
             layout = build_artifact_layout(artifacts_dir, run_id)

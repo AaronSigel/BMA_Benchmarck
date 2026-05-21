@@ -108,14 +108,25 @@ def _write_resume_report(output_dir: Path, entries: list[dict[str, str]]) -> Non
         status = entry.get("status", "unknown")
         counts[status] = counts.get(status, 0) + 1
     payload = {
+        "resume_enabled": True,
         "total_runs": len(entries),
-        "status_counts": counts,
+        "completed_existing": counts.get("completed_existing", 0),
+        "skipped_existing": counts.get("skipped_existing", 0),
+        "rerun_missing": counts.get("rerun_missing", 0),
+        "rerun_incomplete": counts.get("rerun_incomplete", 0),
+        "rerun_corrupted": counts.get("rerun_corrupted", 0),
+        "rerun_failed_again": counts.get("rerun_failed_again", 0),
         "runs": entries,
     }
     (output_dir / "resume_report.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     lines = ["# Resume Report", "", "| Status | Count |", "| --- | --- |"]
+    for key in ("completed_existing", "skipped_existing", "rerun_missing", "rerun_incomplete", "rerun_corrupted", "rerun_failed_again"):
+        count = counts.get(key, 0)
+        if count:
+            lines.append(f"| {key} | {count} |")
     for status, count in sorted(counts.items()):
-        lines.append(f"| {status} | {count} |")
+        if status not in ("completed_existing", "skipped_existing", "rerun_missing", "rerun_incomplete", "rerun_corrupted", "rerun_failed_again"):
+            lines.append(f"| {status} | {count} |")
     lines.extend(["", "| Run | Status | Result |", "| --- | --- | --- |"])
     for entry in entries:
         lines.append(f"| {entry.get('run_id')} | {entry.get('status')} | {entry.get('result_status', '')} |")

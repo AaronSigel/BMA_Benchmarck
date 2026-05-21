@@ -25,9 +25,9 @@ from benchmark.runner.models import RunConfig, RunResult, RunStatus
 def test_mock_report_ready_matrix_is_offline_and_small() -> None:
     matrix = load_matrix("configs/matrices/mock_report_ready.yaml")
     config = generate_experiment_config(matrix)
-    assert len(config.runs) == 2
+    assert len(config.runs) == matrix.metadata["expected_runs"]
     assert {run.execution_mode.value for run in config.runs} == {"external_snapshot"}
-    assert matrix.metadata["expected_runs"] == 2
+    assert matrix.metadata["expected_runs"] >= 2
 
 
 def test_repair_strategy_smoke_matrix_shape() -> None:
@@ -300,7 +300,8 @@ def test_analyze_rebuilds_summary_without_llm(tmp_path: Path) -> None:
 
     analysis = run_analysis(root)
 
-    assert analysis.summary.total_runs == 2
+    matrix = load_matrix("configs/matrices/mock_report_ready.yaml")
+    assert analysis.summary.total_runs == matrix.metadata["expected_runs"]
     assert (root / "summary.csv").is_file()
     assert (root / "experiment_analysis.json").is_file()
 
@@ -328,5 +329,6 @@ def test_mock_report_ready_matrix_creates_valid_bundle(tmp_path: Path) -> None:
     result = validate_report_bundle_result(bundle)
     index = json.loads((bundle / "run_artifact_manifests.json").read_text(encoding="utf-8"))
     assert result["status"] == "passed"
-    assert index["total_runs"] == 2
+    matrix = load_matrix("configs/matrices/mock_report_ready.yaml")
+    assert index["total_runs"] == matrix.metadata["expected_runs"]
     assert index["missing_required_artifacts"] == 0

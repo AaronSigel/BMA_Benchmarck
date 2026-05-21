@@ -1,10 +1,15 @@
 matrix_id: mock_report_ready
 title: Mock report-ready matrix
-description: Offline report pipeline smoke matrix without OpenRouter, Blender, or MCP socket.
+description: >
+  Offline report pipeline smoke matrix without OpenRouter, Blender, or MCP socket.
+  4 tasks × 1 agent × 1 MCP profile × 1 model × 1 repetition = 4 runs.
+  Produces all four pass_type values for full pipeline coverage.
 tasks:
   ids:
     - geometry_001_basic_primitives
     - geometry_002_positions
+    - geometry_003_dimensions
+    - geometry_004_rotation
 agents:
   ids:
     - mock_agent
@@ -21,11 +26,14 @@ output_root: artifacts/experiments/mock_report_ready
 report_config_path: configs/reports/default_report.yaml
 metadata:
   purpose: offline_report_ready
-  expected_runs: 2
+  expected_runs: 4
   report_ready_mvp: true
   timestamp_output_root: false
-  snapshot_path: tests/fixtures/validation/valid_geometry_snapshot.json
-  artifacts_dir: tests/fixtures/validation
+  snapshot_path_by_task:
+    geometry_001_basic_primitives: tests/fixtures/validation/mock_geometry_pass.json
+    geometry_002_positions: tests/fixtures/validation/missing_object_snapshot.json
+    geometry_003_dimensions: tests/fixtures/validation/wrong_material_snapshot.json
+    geometry_004_rotation: tests/fixtures/validation/nonexistent_mock_snapshot.json
   preflight:
     enabled: true
     mode: diagnostic

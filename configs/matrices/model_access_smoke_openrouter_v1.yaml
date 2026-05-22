@@ -58,8 +58,12 @@ metadata:
     require_export_smoke: true
     require_tool_contract_smoke: true
     require_snapshot_smoke: true
-    require_model_access_smoke: false
+    require_model_access_smoke: true
     require_tool_calling_smoke: true
+    model_smoke:
+      mcp_profile: minimal
+      probe_tool: bma_get_scene_snapshot
+      timeout_sec: 60
 
   strategy_limits:
     direct_tool_calling:

@@ -357,6 +357,189 @@ def run_profile_preflight_for_experiment(config: ExperimentConfig) -> dict[str, 
     }
 
 
+def _write_preflight_model_smoke(output_root: Path, result: dict[str, Any]) -> None:
+    output_root.mkdir(parents=True, exist_ok=True)
+    (output_root / "preflight_model_smoke.json").write_text(
+        json.dumps(result, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _collect_openrouter_model_runs(config: ExperimentConfig) -> dict[str, RunConfig]:
+    """Возвращает по одному representative run на каждую OpenRouter-модель."""
+    from benchmark.agent.config_loader import load_agent_config
+    from benchmark.agent.models import LlmProvider
+
+    model_runs: dict[str, RunConfig] = {}
+    for run in config.runs:
+        if run.agent_config_path is None:
+            continue
+        meta = run.metadata if isinstance(run.metadata, dict) else {}
+        model_id = meta.get("model_id")
+        if not isinstance(model_id, str) or not model_id or model_id == "default":
+            continue
+        if model_id in model_runs:
+            continue
+        path_str = str(run.agent_config_path).lower()
+        if "openrouter" in path_str:
+            model_runs[model_id] = run
+            continue
+        try:
+            agent = load_agent_config(run.agent_config_path)
+            if agent.llm and agent.llm.provider == LlmProvider.OPENROUTER:
+                model_runs[model_id] = run
+        except Exception:  # noqa: BLE001
+            continue
+    return model_runs
+
+
+def _resolve_run_generation_profile(run: RunConfig, config: ExperimentConfig) -> dict[str, Any] | None:
+    meta = run.metadata if isinstance(run.metadata, dict) else {}
+    generation_profile = meta.get("generation_profile")
+    if isinstance(generation_profile, dict):
+        return generation_profile
+    exp_meta = config.metadata if isinstance(config.metadata, dict) else {}
+    generation_profile = exp_meta.get("generation_profile")
+    if isinstance(generation_profile, dict):
+        return generation_profile
+    matrix_policy = exp_meta.get("matrix_policy") or meta.get("matrix_policy")
+    if isinstance(matrix_policy, dict) and isinstance(matrix_policy.get("generation_profile"), dict):
+        return matrix_policy["generation_profile"]
+    return None
+
+
+def run_openrouter_model_smoke_for_experiment(
+    config: ExperimentConfig,
+    output_root: Path,
+    *,
+    require_tool_call: bool = False,
+    smoke_cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Проверяет доступность моделей OpenRouter и (опционально) native tool-calling."""
+    smoke_cfg = smoke_cfg if isinstance(smoke_cfg, dict) else {}
+    probe_tool = str(smoke_cfg.get("probe_tool") or "bma_get_scene_snapshot")
+    mcp_profile_override = smoke_cfg.get("mcp_profile")
+    timeout_sec = int(smoke_cfg.get("timeout_sec") or 60)
+
+    api_available = bool(os.environ.get("OPENROUTER_API_KEY"))
+    model_runs = _collect_openrouter_model_runs(config)
+    if not model_runs:
+        result = {
+            "ok": True,
+            "skipped": True,
+            "reason": "no openrouter runs in experiment config",
+            "models": [],
+            "api_available": api_available,
+        }
+        _write_preflight_model_smoke(output_root, result)
+        return result
+
+    if not api_available:
+        result = {
+            "ok": False,
+            "error": "OPENROUTER_API_KEY is not set",
+            "require_tool_call": require_tool_call,
+            "probe_tool": probe_tool,
+            "models": [{"model_id": model_id, "ok": False, "error": "OPENROUTER_API_KEY is not set"} for model_id in sorted(model_runs)],
+            "api_available": False,
+        }
+        _write_preflight_model_smoke(output_root, result)
+        return result
+
+    from benchmark.agent.config_loader import load_agent_config
+    from benchmark.agent.errors import LlmClientError
+    from benchmark.agent.llm.base import LlmMessage
+    from benchmark.agent.llm.factory import create_llm_client
+    from benchmark.agent.strategies.direct_tool_calling import _extract_tool_calls
+    from benchmark.agent.tool_context import ToolSchemaProvider
+    from benchmark.experiments.matrix_policy import apply_generation_profile
+
+    tool_provider = ToolSchemaProvider()
+    model_results: list[dict[str, Any]] = []
+    all_ok = True
+    resolved_mcp_profile: str | None = None
+
+    for model_id, run in sorted(model_runs.items()):
+        started = time.perf_counter()
+        item: dict[str, Any] = {"model_id": model_id, "ok": False}
+        try:
+            agent_config = load_agent_config(run.agent_config_path)
+            if agent_config.llm is None:
+                raise ValueError("agent config has no llm section")
+
+            mcp_profile = str(mcp_profile_override or run.mcp_profile or agent_config.mcp_profile)
+            resolved_mcp_profile = resolved_mcp_profile or mcp_profile
+            llm_config = apply_generation_profile(
+                agent_config.llm.model_copy(update={"model": model_id}),
+                _resolve_run_generation_profile(run, config),
+            )
+            client = create_llm_client(llm_config)
+
+            probe_contracts = [
+                contract
+                for contract in tool_provider.get_tools_for_profile(mcp_profile)
+                if contract.name == probe_tool
+            ]
+            if require_tool_call and not probe_contracts:
+                raise ValueError(f"probe tool {probe_tool!r} not available for profile {mcp_profile!r}")
+
+            tool_schemas = None
+            allowed_tools = {probe_tool}
+            if require_tool_call:
+                tool_schemas = [
+                    tool_provider.to_openai_tool_schema(contract)
+                    for contract in probe_contracts
+                ]
+
+            messages = [
+                LlmMessage(
+                    role="system",
+                    content="You are a Blender benchmark agent. Use tool calls when asked.",
+                ),
+                LlmMessage(
+                    role="user",
+                    content=f"Call {probe_tool} to inspect the current scene.",
+                ),
+            ]
+            response = client.complete(messages, tools=tool_schemas, timeout_sec=timeout_sec)
+
+            if require_tool_call:
+                tool_calls = _extract_tool_calls(response)
+                if not tool_calls:
+                    raise ValueError("model returned no tool calls or JSON action")
+                invalid = [call.name for call in tool_calls if call.name not in allowed_tools]
+                if invalid:
+                    raise ValueError(f"unexpected tool names: {invalid}")
+                item["tool_call_count"] = len(tool_calls)
+            elif not response.content and not response.tool_calls:
+                raise ValueError("model returned empty response")
+
+            item["ok"] = True
+            item["finish_reason"] = response.finish_reason
+            if "tool_call_count" not in item:
+                item["tool_call_count"] = len(response.tool_calls or [])
+        except LlmClientError as exc:
+            item["error"] = str(exc)
+            all_ok = False
+        except Exception as exc:  # noqa: BLE001
+            item["error"] = str(exc)
+            all_ok = False
+
+        item["duration_sec"] = round(time.perf_counter() - started, 6)
+        model_results.append(item)
+
+    result = {
+        "ok": all_ok,
+        "require_tool_call": require_tool_call,
+        "probe_tool": probe_tool,
+        "mcp_profile": resolved_mcp_profile,
+        "api_available": api_available,
+        "models": model_results,
+    }
+    _write_preflight_model_smoke(output_root, result)
+    return result
+
+
 def preflight_cfg_from_config(config: ExperimentConfig) -> dict[str, Any]:
     """Извлекает preflight policy из metadata эксперимента (matrix source of truth)."""
     meta = config.metadata if isinstance(config.metadata, dict) else {}
@@ -404,18 +587,15 @@ def run_matrix_required_preflight(
                 contract_smoke["error"] = "export smoke required but export_results missing"
                 ok = False
 
-    if cfg.get("require_model_access_smoke"):
-        models = sorted({str(run.metadata.get("model_id")) for run in config.runs if run.metadata.get("model_id")})
-        needs_openrouter = any("openrouter" in str(run.agent_config_path or "") for run in config.runs)
-        api_available = bool(os.environ.get("OPENROUTER_API_KEY"))
-        model_check = {
-            "ok": api_available or not needs_openrouter,
-            "required": needs_openrouter,
-            "models": models or ["default"],
-            "api_available": api_available,
-        }
-        checks["model_access_smoke"] = model_check
-        if not model_check["ok"]:
+    if cfg.get("require_model_access_smoke") or cfg.get("require_tool_calling_smoke"):
+        model_smoke = run_openrouter_model_smoke_for_experiment(
+            config,
+            output_root,
+            require_tool_call=bool(cfg.get("require_tool_calling_smoke")),
+            smoke_cfg=cfg.get("model_smoke") if isinstance(cfg.get("model_smoke"), dict) else None,
+        )
+        checks["openrouter_model_smoke"] = model_smoke
+        if not model_smoke.get("ok"):
             ok = False
 
     profile_preflight = run_profile_preflight_for_experiment(config)

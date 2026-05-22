@@ -4,7 +4,7 @@ import json
 import shutil
 from collections import Counter
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from benchmark.analysis.models import ExperimentAnalysisResult
 from benchmark.analysis.report_builder import (
@@ -17,6 +17,31 @@ from benchmark.analysis.report_builder import (
     _status_counts,
     build_key_findings,
 )
+
+
+def reporting_policy_from_analysis(analysis: ExperimentAnalysisResult) -> dict[str, Any]:
+    """Политика reporting из matrix metadata (source of truth)."""
+    meta = analysis.metadata if isinstance(analysis.metadata, dict) else {}
+    reporting = meta.get("reporting")
+    if isinstance(reporting, dict):
+        return reporting
+    matrix_policy = meta.get("matrix_policy")
+    if isinstance(matrix_policy, dict) and isinstance(matrix_policy.get("reporting"), dict):
+        return matrix_policy["reporting"]
+    return {}
+
+
+def should_write_report_language(analysis: ExperimentAnalysisResult, language: str) -> bool:
+    reporting = reporting_policy_from_analysis(analysis)
+    languages = reporting.get("report_language", ["en", "ru"])
+    if isinstance(languages, list):
+        return language in languages
+    return language == "ru"
+
+
+def reporting_include(analysis: ExperimentAnalysisResult, key: str, *, default: bool = True) -> bool:
+    reporting = reporting_policy_from_analysis(analysis)
+    return bool(reporting.get(key, default))
 
 
 def write_report_text_ru(analysis: ExperimentAnalysisResult, path: Path) -> None:
@@ -160,9 +185,12 @@ def write_figures(analysis: ExperimentAnalysisResult, figures_dir: Path) -> list
         plt.close(fig)
         paths.append(out)
 
-    save_bar("success_by_strategy.png", *_success_series(analysis.runs, lambda r: r.strategy), "Success by strategy", "reported success rate")
-    save_bar("success_by_profile.png", *_success_series(analysis.runs, lambda r: r.mcp_profile or "unknown"), "Success by MCP profile", "reported success rate")
-    save_bar("success_by_category.png", *_success_series(analysis.runs, _category), "Success by task category", "reported success rate")
+    if reporting_include(analysis, "include_strategy_breakdown", default=True):
+        save_bar("success_by_strategy.png", *_success_series(analysis.runs, lambda r: r.strategy), "Success by strategy", "reported success rate")
+    if reporting_include(analysis, "include_mcp_profile_breakdown", default=True):
+        save_bar("success_by_profile.png", *_success_series(analysis.runs, lambda r: r.mcp_profile or "unknown"), "Success by MCP profile", "reported success rate")
+    if reporting_include(analysis, "include_category_breakdown", default=True):
+        save_bar("success_by_category.png", *_success_series(analysis.runs, _category), "Success by task category", "reported success rate")
 
     validation = _issue_counts(analysis.runs, "validation").most_common(10)
     save_bar(
@@ -172,7 +200,8 @@ def write_figures(analysis: ExperimentAnalysisResult, figures_dir: Path) -> list
         "Top validation issues",
         "count",
     )
-    save_bar("cost_by_strategy.png", *_cost_series(analysis.runs), "OpenRouter cost by strategy", "USD")
+    if reporting_include(analysis, "include_cost_by_strategy", default=True):
+        save_bar("cost_by_strategy.png", *_cost_series(analysis.runs), "OpenRouter cost by strategy", "USD")
     save_bar("score_by_strategy.png", *_score_series(analysis.runs), "Score by strategy", "average score")
     save_bar("error_breakdown.png", ["failed_validation", "runtime_error"], [
         float(analysis.summary.failed_validation_count or analysis.summary.failed_count),

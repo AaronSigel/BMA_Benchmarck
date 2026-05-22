@@ -11,14 +11,15 @@ from benchmark.analysis.models import ExperimentAnalysisResult
 from benchmark.experiments.generator import generate_experiment_config
 from benchmark.experiments.manifests import write_manifest_for_matrix
 from benchmark.experiments.matrix import load_matrix
+from benchmark.experiments.matrix_policy import resolve_matrix_policy
 from benchmark.experiments.preflight import (
     PreflightError,
     collect_runtime_metadata,
     latest_artifact_mtime,
     prepare_output_root,
-    run_contract_smoke_for_experiment,
+    preflight_cfg_from_config,
+    run_matrix_required_preflight,
     filter_config_by_profile_preflight,
-    run_profile_preflight_for_experiment,
     write_preflight_report,
 )
 from benchmark.experiments.readiness import check_matrix_readiness
@@ -81,60 +82,87 @@ class E2EBenchmarkRunner:
         if not readiness.ok:
             raise RuntimeError("; ".join(readiness.errors))
         config = generate_experiment_config(matrix)
+        policy = resolve_matrix_policy(matrix)
+        preflight_cfg = preflight_cfg_from_config(config) or (
+            policy.get("preflight") if isinstance(policy.get("preflight"), dict) else {}
+        )
         preflight: dict[str, Any] = {
             "artifact_freshness": freshness,
             "planned_runs": len(config.runs),
-            "expected_runs": matrix.metadata.get("expected_runs"),
-            "readiness_gates": matrix.metadata.get("readiness_gates"),
+            "expected_runs": policy.get("expected_runs"),
+            "readiness_gates": policy.get("readiness_gates"),
+            "matrix_policy": policy,
         }
         preflight_report = write_preflight_report(config, matrix.output_root)
         preflight["preflight_report"] = preflight_report
-        preflight_enabled = bool(matrix.metadata.get("preflight", {}).get("enabled") if isinstance(matrix.metadata.get("preflight"), dict) else matrix.metadata.get("preflight_enabled"))
-        if preflight_enabled or fail_fast_profile_preflight or run_contract_smoke:
-            profile_preflight = run_profile_preflight_for_experiment(config)
-            preflight["mcp_profile_preflight"] = profile_preflight
-            preflight_cfg = matrix.metadata.get("preflight", {})
-            preflight_mode = preflight_cfg.get("mode", "diagnostic") if isinstance(preflight_cfg, dict) else "diagnostic"
+
+        preflight_enabled = bool(preflight_cfg.get("enabled")) or bool(matrix.metadata.get("preflight_enabled"))
+        force_contract = run_contract_smoke or any(
+            bool(preflight_cfg.get(flag))
+            for flag in (
+                "require_tool_contract_smoke",
+                "require_snapshot_smoke",
+                "require_export_smoke",
+                "require_tool_calling_smoke",
+            )
+        )
+        if preflight_enabled or fail_fast_profile_preflight or force_contract:
+            matrix_preflight = run_matrix_required_preflight(
+                config,
+                matrix.output_root,
+                preflight_cfg=preflight_cfg if preflight_enabled or force_contract else {"enabled": True},
+            )
+            preflight["matrix_required_preflight"] = matrix_preflight
+            preflight_mode = str(preflight_cfg.get("mode", matrix_preflight.get("mode", "diagnostic")))
             preflight_fail_fast = bool(
                 fail_fast_profile_preflight
+                or matrix_preflight.get("fail_fast")
                 or (
-                    isinstance(preflight_cfg, dict)
-                    and (preflight_cfg.get("fail_fast") or preflight_cfg.get("fail_fast_on_profile_error"))
-                    and preflight_mode == "strict"
+                    preflight_cfg.get("fail_fast") or preflight_cfg.get("fail_fast_on_profile_error")
                 )
+                and preflight_mode == "strict"
             )
-            if not profile_preflight["ok"] and preflight_fail_fast:
-                failed = [
-                    item.get("profile")
-                    for item in profile_preflight.get("profiles", [])
-                    if item.get("preflight_status") != "passed"
-                ]
-                raise RuntimeError(f"MCP profile preflight failed: {', '.join(str(x) for x in failed)}")
-            if preflight_mode == "strict" and preflight_fail_fast:
-                config = filter_config_by_profile_preflight(config, profile_preflight)
-            else:
-                config = _mark_profile_preflight(config, profile_preflight)
-            preflight["skipped_by_preflight"] = preflight["planned_runs"] - len(config.runs)
-        if run_contract_smoke:
-            contract_smoke = run_contract_smoke_for_experiment(config, matrix.output_root)
-            preflight["mcp_contract_smoke"] = contract_smoke
-            if not contract_smoke.get("ok"):
+            profile_preflight = matrix_preflight.get("checks", {}).get("mcp_profile_preflight")
+            if isinstance(profile_preflight, dict):
+                preflight["mcp_profile_preflight"] = profile_preflight
+                if not profile_preflight.get("ok") and preflight_fail_fast:
+                    failed = [
+                        item.get("profile")
+                        for item in profile_preflight.get("profiles", [])
+                        if item.get("preflight_status") != "passed"
+                    ]
+                    raise RuntimeError(f"MCP profile preflight failed: {', '.join(str(x) for x in failed)}")
+                if preflight_mode == "strict" and preflight_fail_fast:
+                    config = filter_config_by_profile_preflight(config, profile_preflight)
+                else:
+                    config = _mark_profile_preflight(config, profile_preflight)
+                preflight["skipped_by_preflight"] = preflight["planned_runs"] - len(config.runs)
+
+            contract_smoke = matrix_preflight.get("checks", {}).get("mcp_contract_smoke")
+            if contract_smoke is not None:
+                preflight["mcp_contract_smoke"] = contract_smoke
+            elif force_contract and not preflight_enabled:
+                from benchmark.experiments.preflight import run_contract_smoke_for_experiment
+
+                contract_smoke = run_contract_smoke_for_experiment(config, matrix.output_root)
+                preflight["mcp_contract_smoke"] = contract_smoke
+
+            if isinstance(contract_smoke, dict) and not contract_smoke.get("ok"):
                 contract_error = str(contract_smoke.get("error", "unknown"))
                 if "execute_code failed" in contract_error or "reset" in contract_error.lower():
                     raise PreflightError(
                         "Blender harness scene reset failed during preflight: "
                         + contract_error
                     )
-                _preflight_cfg = matrix.metadata.get("preflight") or {}
-                _smoke_fail_fast = bool(
-                    fail_fast_profile_preflight
-                    or (isinstance(_preflight_cfg, dict) and _preflight_cfg.get("fail_fast"))
-                )
-                if _smoke_fail_fast:
+                if preflight_fail_fast or preflight_cfg.get("fail_fast"):
                     raise PreflightError(
                         "Socket is reachable, but running server does not support expected BMA contract: "
                         + contract_error
                     )
+
+            if not matrix_preflight.get("ok") and preflight_fail_fast:
+                raise PreflightError(f"Matrix preflight failed: {matrix_preflight}")
+
         preflight["runtime"] = collect_runtime_metadata(config, matrix.output_root)
         manifest_path = write_manifest_for_matrix(
             matrix,
@@ -221,7 +249,12 @@ def _refresh_manifest(prepared: PreparedExperiment) -> None:
 
 
 def build_reports(analysis: ExperimentAnalysisResult, matrix: ExperimentMatrix) -> Path:
-    from benchmark.analysis.report_bundle import create_report_bundle, write_figures, write_report_text_ru
+    from benchmark.analysis.report_bundle import (
+        create_report_bundle,
+        should_write_report_language,
+        write_figures,
+        write_report_text_ru,
+    )
     from benchmark.analysis.report_builder import build_html_report, build_markdown_report
     from benchmark.analysis.report_bundle_validator import validate_report_bundle_result
 
@@ -232,23 +265,25 @@ def build_reports(analysis: ExperimentAnalysisResult, matrix: ExperimentMatrix) 
     markdown_path.write_text(build_markdown_report(analysis, report_config), encoding="utf-8")
     html_path.write_text(build_html_report(analysis, report_config), encoding="utf-8")
     text_path = Path(report_config.output_dir) / "report_text_ru.md"
-    write_report_text_ru(analysis, text_path)
+    bundle_files = [
+        Path(report_config.output_dir) / "summary.csv",
+        Path(report_config.output_dir) / "summary.json",
+        Path(report_config.output_dir) / "experiment_analysis.json",
+        markdown_path,
+        html_path,
+        Path(report_config.output_dir) / "preflight_report.json",
+        Path(report_config.output_dir) / "preflight_report.md",
+        Path(report_config.output_dir) / "resume_report.json",
+        Path(report_config.output_dir) / "resume_report.md",
+    ]
+    if should_write_report_language(analysis, "ru"):
+        write_report_text_ru(analysis, text_path)
+        bundle_files.append(text_path)
     write_figures(analysis, Path(report_config.output_dir) / "figures")
     bundle = create_report_bundle(
         Path(report_config.output_dir),
         analysis,
-        [
-            Path(report_config.output_dir) / "summary.csv",
-            Path(report_config.output_dir) / "summary.json",
-            Path(report_config.output_dir) / "experiment_analysis.json",
-            markdown_path,
-            html_path,
-            text_path,
-            Path(report_config.output_dir) / "preflight_report.json",
-            Path(report_config.output_dir) / "preflight_report.md",
-            Path(report_config.output_dir) / "resume_report.json",
-            Path(report_config.output_dir) / "resume_report.md",
-        ],
+        bundle_files,
     )
     validation = validate_report_bundle_result(bundle)
     _append_bundle_validation_section(markdown_path, validation)

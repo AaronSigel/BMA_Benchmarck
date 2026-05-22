@@ -1,0 +1,457 @@
+matrix_id: final_multimodel_openrouter_v1
+title: Final multimodel OpenRouter benchmark v1
+description: >
+  Final controlled multi-model benchmark matrix for the stabilized BMA_Bench
+  report-ready pipeline: 18 tasks × 4 strategies × 5 MCP profiles × 5 models
+  × 2 repetitions = 3600 runs. The matrix is limited to API-based LLM backends
+  through OpenRouter and uses a fixed generation profile to keep the comparison
+  reproducible, interpretable, and budget-controlled.
+
+tasks:
+  ids:
+    - geometry_001_basic_primitives
+    - geometry_002_positions
+    - geometry_003_dimensions
+    - geometry_004_rotation
+    - geometry_005_composition
+
+    - materials_001_basic_colors
+    - materials_002_roughness
+    - materials_003_metallic
+    - materials_004_multiple_objects
+    - materials_005_material_composition
+
+    - lighting_001_area_light
+    - lighting_002_sun_light
+    - lighting_003_three_point_lighting
+
+    - camera_001_front_view
+    - camera_002_top_view
+    - camera_003_composition_view
+
+    - export_001_blend_file
+    - export_002_glb_file
+
+agents:
+  ids:
+    - direct_openrouter
+    - plan_execute_openrouter
+    - react_openrouter
+    - plan_execute_react_repair_openrouter
+  config_root: configs/agents
+
+mcp_profiles:
+  - minimal
+  - no_python
+  - inspection_enabled
+  - python_enabled
+  - full
+
+models:
+  ids:
+    # Stabilized low-cost baseline used in readiness/diagnostic runs.
+    - google/gemini-2.5-flash-lite
+
+    # Compact OpenAI-family model for cross-provider comparison.
+    - openai/gpt-5-mini
+
+    # DeepSeek model with strong tool-use / code-agent relevance.
+    - deepseek/deepseek-chat-v3.1
+
+    # Qwen coder-oriented model for agentic coding and tool-use behavior.
+    - qwen/qwen3-coder
+
+    # Low-cost Mistral-family instruct baseline with function/tool calling.
+    - mistralai/mistral-small-3.2-24b-instruct
+
+execution_modes:
+  - agent_mcp
+
+repetitions: 2
+
+output_root: artifacts/experiments/final_multimodel_openrouter_v1
+report_config_path: configs/reports/default_report.yaml
+
+metadata:
+  purpose: final_multimodel_benchmark_api_llm_openrouter
+  expected_runs: 3600
+  report_ready_mvp: false
+  final_benchmark: true
+  timestamp_output_root: true
+
+  scope:
+    primary_backend_type: api_based_llm
+    provider_gateway: openrouter
+    excluded_from_main_matrix:
+      - claude_code
+      - codex
+      - local_ollama
+      - local_llm_runtime
+    note: >
+      The final benchmark compares API-based LLM backends under the same
+      benchmark-controlled agent strategies, MCP tool profiles, validators,
+      runtime taxonomy, and reporting pipeline. External CLI/IDE agents are
+      treated as future remote-agent extensions and are not part of this matrix.
+
+  model_set:
+    selection_policy: budget_controlled_cross_provider_tool_use
+    repetitions_per_model: 2
+    total_models: 5
+    models:
+      - id: google/gemini-2.5-flash-lite
+        role: baseline_low_cost
+        provider_family: google
+        pricing_class: low_cost
+        notes: >
+          Baseline model already used in stabilized readiness and diagnostic
+          runs. Included to preserve continuity with earlier experiments.
+
+      - id: openai/gpt-5-mini
+        role: compact_cross_provider
+        provider_family: openai
+        pricing_class: medium_cost
+        notes: >
+          Compact OpenAI-family comparison model. Included to provide a
+          mainstream commercial API baseline without using a top-tier expensive
+          model.
+
+      - id: deepseek/deepseek-chat-v3.1
+        role: tool_use_code_agent_baseline
+        provider_family: deepseek
+        pricing_class: low_to_medium_cost
+        notes: >
+          Included as a cost-controlled model with explicit relevance to
+          structured tool calling, code agents, search agents, and agentic
+          workflows.
+
+      - id: qwen/qwen3-coder
+        role: coder_tool_use_baseline
+        provider_family: qwen
+        pricing_class: medium_cost
+        notes: >
+          Included as a coder-oriented model focused on agentic coding,
+          function calling, tool use, and long-context repository-style tasks.
+
+      - id: mistralai/mistral-small-3.2-24b-instruct
+        role: low_cost_open_weight_instruct_baseline
+        provider_family: mistral
+        pricing_class: very_low_cost
+        notes: >
+          Included as a budget-friendly Mistral-family instruct model with
+          function/tool calling and structured-output relevance.
+
+  supplementary_model_policy:
+    enabled: false
+    note: >
+      More expensive or less budget-aligned models, such as Claude-family
+      premium comparisons, may be evaluated later on a reduced supplementary
+      matrix. They are intentionally excluded from the main 3600-run matrix to
+      keep the final experiment cost-controlled.
+
+  generation_profile:
+    id: balanced_tool_use_v1
+    apply_to_all_models: true
+    temperature: 0.2
+    top_p: 0.9
+    top_k: null
+    max_tokens: 6144
+    seed: null
+    reasoning:
+      enabled: false
+      effort: null
+      max_reasoning_tokens: null
+    note: >
+      Decoding parameters are fixed across the main benchmark. Parameter sweeps
+      are intentionally excluded from the final matrix to keep cost, runtime,
+      and interpretation controlled.
+
+  preflight:
+    enabled: true
+    mode: diagnostic
+    fail_fast: false
+    require_export_smoke: true
+    require_tool_contract_smoke: true
+    require_snapshot_smoke: true
+    require_model_access_smoke: true
+    require_tool_calling_smoke: true
+    note: >
+      The runner should verify model availability through OpenRouter before
+      starting the full matrix. If a selected model is unavailable, rate-limited,
+      or does not support the required tool-calling behavior, the matrix should
+      fail before consuming the full benchmark budget.
+
+  run_order:
+    mode: stratified_interleaved
+    seed: 20260522
+    stratify_by:
+      - model_id
+      - repetition
+      - task_id
+      - agent_id
+      - mcp_profile
+    note: >
+      Interleaving is recommended to reduce model-order and long-running Blender
+      worker bias. If the current runner does not support run-order control,
+      this block should be preserved in metadata and the actual order should be
+      recorded in the manifest.
+
+  strict_matrix_policy: true
+  strategy_limits:
+    direct_tool_calling:
+      max_steps: 20
+    plan_and_execute:
+      max_steps: 40
+    react:
+      max_steps: 25
+      max_steps_by_category:
+        export: 35
+        lighting: 25
+      stop_after_scene_passed: true
+      detect_repeated_actions: true
+      detect_duplicate_objects: true
+      detect_no_progress: true
+      no_progress_limit: 3
+      no_progress_limit_by_category:
+        export: 5
+        lighting: 5
+      repair_activation_diagnostics: true
+
+    plan_execute_react_repair:
+      max_steps: 40
+      max_steps_by_category:
+        export: 50
+        lighting: 40
+      stop_after_scene_passed: true
+      detect_repeated_actions: true
+      detect_duplicate_objects: true
+      detect_no_progress: true
+      no_progress_limit: 3
+      no_progress_limit_by_category:
+        export: 5
+        lighting: 5
+      repair_activation_diagnostics: true
+
+  worker_lifecycle:
+    restart_every_n_runs: 30
+    restart_on_tool_timeout: true
+    restart_on_empty_socket_response: true
+    restart_on_reset_failure: true
+    restart_on_consecutive_snapshot_failures: 2
+    health_check_after_restart: true
+    health_check_steps:
+      - socket_ping
+      - reset_scene
+      - create_cube
+      - collect_snapshot
+      - reset_scene
+
+  readiness_gates:
+    # Overall quality gates.
+    reported_success_rate_min: 0.80
+    runtime_error_rate_max: 0.10
+    model_failure_rate_max: 0.20
+    validation_failure_rate_max: 0.20
+
+    # Category gates.
+    geometry_success_rate_min: 0.80
+    materials_success_rate_min: 0.85
+    camera_success_rate_min: 0.80
+    lighting_success_rate_min: 0.70
+    export_success_rate_min: 0.70
+
+    # Contract/reporting gates.
+    export_smoke_required: true
+    invalid_tool_response_export_max: 0
+    clean_pass_with_error_type_max: 0
+    unclassified_error_max: 0
+    llm_parse_error_rate_max: 0.02
+
+    # Agent behavior gates.
+    react_max_steps_rate_max: 0.20
+    require_react_repair_steps_on_validation_issues: true
+    require_hybrid_repair_used_on_failed_validation: true
+
+    # Infrastructure reliability gates.
+    infra_error_rate_max: 0.05
+    socket_timeout_count_max: 50
+    empty_socket_response_count_max: 50
+    reset_failure_rate_max: 0.02
+    snapshot_failure_rate_max: 0.05
+
+  reporting:
+    include_raw_and_infra_filtered_metrics: true
+    include_model_breakdown: true
+    include_strategy_breakdown: true
+    include_mcp_profile_breakdown: true
+    include_task_breakdown: true
+    include_category_breakdown: true
+    include_repetition_stability: true
+    include_cross_model_comparison: true
+    include_react_repair_diagnostics: true
+    include_hybrid_repair_diagnostics: true
+    include_export_import_back_diagnostics: true
+    include_runtime_reliability_section: true
+    include_cost_summary: true
+    include_cost_by_model: true
+    include_cost_by_strategy: true
+    report_language:
+      - en
+      - ru
+
+  cost:
+    source: openrouter
+    disable_internal_estimate: true
+    record_provider_reported_cost: true
+    budget_policy:
+      repetitions_limited_to: 2
+      parameter_sweep_enabled: false
+      model_count_limited_to: 5
+      note: >
+        The final matrix uses five API-based models and two repetitions per
+        model. A third repetition may be added later only for ambiguous
+        models/categories if the two-repeat variance is too high.
+
+  third_repetition_policy:
+    enabled: conditional
+    run_full_third_repetition: false
+    trigger_conditions:
+      model_reported_success_delta_between_repetitions_gt: 0.10
+      category_success_delta_between_repetitions_gt: 0.15
+      strategy_success_delta_between_repetitions_gt: 0.15
+      infra_error_rate_in_any_repetition_gt: 0.08
+      ambiguous_model_ranking_margin_lt: 0.03
+    rerun_scope:
+      - affected_model
+      - affected_category
+      - affected_strategy
+    note: >
+      A third repetition is not part of the main matrix by default. It may be
+      launched selectively for unstable models, categories, or strategies if the
+      two-repeat results are too noisy or rankings are ambiguous.
+
+  analysis_policy:
+    primary_metrics:
+      - reported_success_rate
+      - strict_success_rate
+      - average_scene_score
+      - model_failure_rate
+      - validation_failure_rate
+      - infra_error_rate
+      - runtime_error_rate
+    secondary_metrics:
+      - tool_call_count
+      - trajectory_length
+      - repair_steps
+      - deterministic_repair_steps
+      - soft_success_diagnostic_rate
+      - provider_reported_cost
+      - runtime_duration_sec
+    comparison_axes:
+      - model_id
+      - agent_id
+      - mcp_profile
+      - task_category
+      - repetition
+    statistical_scope:
+      repetitions: 2
+      note: >
+        Two repetitions are used as a budget-controlled stability check. The
+        experiment should avoid claims of strong statistical significance and
+        should report between-repetition variation descriptively.
+
+  acceptance_policy:
+    decision_levels:
+      - accept_for_report
+      - accept_with_caveats
+      - rerun_required
+
+    accept_for_report_if:
+      structural_validity: passed
+      readiness_ok: true
+      invalid_tool_response_export: 0
+      unclassified_error: 0
+      clean_pass_with_error_type: 0
+      reported_success_rate_min: 0.80
+      runtime_error_rate_max: 0.10
+      infra_error_rate_max: 0.05
+      model_failure_rate_max: 0.20
+      validation_failure_rate_max: 0.20
+      required_model_count: 5
+      required_repetitions_per_model: 2
+      expected_runs_match: true
+
+    accept_with_caveats_if:
+      structural_validity: passed
+      readiness_ok: false
+      allowed_failed_gate_types:
+        - infrastructure_warning
+        - non_blocking_category_warning
+        - cost_warning
+      max_allowed_blocking_failed_gates: 0
+      max_socket_timeout_count: 50
+      max_empty_socket_response_count: 50
+      min_reported_success_rate: 0.75
+      min_category_success_rates:
+        geometry: 0.75
+        materials: 0.80
+        camera: 0.75
+        lighting: 0.65
+        export: 0.65
+      note: >
+        Results may be used in the report with explicit limitations if the
+        remaining issues are non-blocking infrastructure warnings or minor
+        category degradation. Blocking contract/reporting failures are not
+        allowed under this mode.
+
+    rerun_required_if:
+      structural_validity: failed
+      expected_runs_match: false
+      invalid_tool_response_export_gt: 0
+      unclassified_error_gt: 0
+      clean_pass_with_error_type_gt: 0
+      llm_parse_error_rate_gt: 0.02
+      reported_success_rate_below: 0.75
+      runtime_error_rate_gt: 0.10
+      infra_error_rate_gt: 0.08
+      model_failure_rate_gt: 0.25
+      validation_failure_rate_gt: 0.25
+      category_success_below:
+        geometry: 0.70
+        materials: 0.75
+        camera: 0.70
+        lighting: 0.60
+        export: 0.60
+      note: >
+        If any hard contract, report consistency, structural validity, or severe
+        quality threshold is violated, the run must not be used as the final
+        benchmark result without rerun or targeted repair.
+
+    rerun_policy:
+      default_action: analyze_failed_gates_before_rerun
+      do_not_expand_matrix: true
+      rerun_scope:
+        if_structural_failure: full_matrix
+        if_contract_failure: affected_runs_or_full_matrix
+        if_infra_failure: affected_runs_or_affected_model
+        if_model_specific_failure: affected_model_only
+        if_category_failure: affected_category_subset
+        if_strategy_failure: affected_strategy_subset
+      preserve_failed_artifacts: true
+      require_rerun_reason_in_manifest: true
+
+    report_usage_policy:
+      primary_results:
+        use_metric: reported_success_rate
+        include_strict_success_rate: true
+        include_infra_filtered_metrics: true
+        include_cost_metrics: true
+        include_repetition_stability: true
+      limitations_required_if:
+        repetitions_per_model_lte: 2
+        infra_error_rate_gt: 0.03
+        soft_success_diagnostic_rate_gt: 0.10
+        any_category_success_below: 0.75
+      note: >
+        The report must distinguish scene-level success, strict success,
+        soft-pass diagnostics, validation failures, model/agent failures, and
+        infrastructure/runtime failures.

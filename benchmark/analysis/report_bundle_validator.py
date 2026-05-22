@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from benchmark.experiments.acceptance_policy import evaluate_acceptance_policy
+from benchmark.experiments.third_repetition import evaluate_third_repetition_policy
 from benchmark.runner.error_classification import is_hard_model_failure, is_soft_success_diagnostic
 
 
@@ -170,11 +172,21 @@ def validate_report_bundle_result(bundle: Path | str, *, write_result: bool = Tr
     # Readiness gates: evaluate matrix-defined thresholds against actual run data.
     # Structural validation (required files, row counts) is separate from benchmark readiness.
     readiness_gates = None
+    acceptance_policy = None
+    third_repetition_policy = None
+    matrix_policy = None
     gate_result: dict[str, Any] | None = None
     if isinstance(manifest, dict):
         meta = manifest.get("metadata")
         if isinstance(meta, dict):
             readiness_gates = meta.get("readiness_gates")
+            acceptance_policy = meta.get("acceptance_policy")
+            third_repetition_policy = meta.get("third_repetition_policy")
+            matrix_policy = meta.get("matrix_policy")
+            if isinstance(matrix_policy, dict):
+                readiness_gates = readiness_gates or matrix_policy.get("readiness_gates")
+                acceptance_policy = acceptance_policy or matrix_policy.get("acceptance_policy")
+                third_repetition_policy = third_repetition_policy or matrix_policy.get("third_repetition_policy")
     if readiness_gates is not None and rows:
         gate_result = _evaluate_readiness_gates(readiness_gates, rows)
         if gate_result["readiness_ok"]:
@@ -200,7 +212,46 @@ def validate_report_bundle_result(bundle: Path | str, *, write_result: bool = Tr
                 message=f"benchmark readiness failed: {len(gate_result['failed_gates'])} gate(s) violated",
             )
 
-    return _finish_result(root, checks, write_result, gate_result=gate_result)
+    expected = _expected_runs(manifest, analysis)
+    planned = len(rows) if rows else None
+    structural_failed = any(
+        check.get("status") == "failed"
+        for check in checks
+        if not str(check.get("name", "")).startswith("readiness_gate")
+    )
+    acceptance_result = evaluate_acceptance_policy(
+        acceptance_policy,
+        rows=rows,
+        gate_result=gate_result,
+        structural_validity="failed" if structural_failed else "passed",
+        planned_runs=planned,
+        expected_runs=expected,
+    )
+    third_rep_result = evaluate_third_repetition_policy(third_repetition_policy, rows)
+    if acceptance_result.get("evaluated"):
+        level = acceptance_result.get("decision_level")
+        add(
+            "acceptance_policy",
+            "passed" if level in {"accept_for_report", "accept_with_caveats"} else "failed",
+            decision_level=level,
+            reasons=acceptance_result.get("reasons", []),
+        )
+    if third_rep_result.get("evaluated") and third_rep_result.get("recommend_third_repetition"):
+        add(
+            "third_repetition_policy",
+            "warning",
+            message="third repetition recommended by matrix policy",
+            triggered=third_rep_result.get("triggered", []),
+        )
+
+    return _finish_result(
+        root,
+        checks,
+        write_result,
+        gate_result=gate_result,
+        acceptance_result=acceptance_result,
+        third_repetition_result=third_rep_result,
+    )
 
 
 def _read_summary_rows(path: Path, errors: list[str]) -> list[dict[str, str]]:
@@ -537,6 +588,37 @@ def _evaluate_readiness_gates(
                 gate_category="infra",
                 affected_runs=[_affected_run_entry(r) for r in affected],
             )
+    gate_name = "unclassified_error_max"
+    if gate_name in gates:
+        gates_checked.append(gate_name)
+        threshold = int(gates[gate_name])
+        affected = [
+            r for r in rows
+            if str(r.get("error_type", "")).strip() == "UnclassifiedError"
+        ]
+        count = len(affected)
+        if count > threshold:
+            _fail(
+                gate_name,
+                threshold,
+                count,
+                affected_runs=[_affected_run_entry(r) for r in affected],
+            )
+
+    gate_name = "llm_parse_error_rate_max"
+    if gate_name in gates:
+        gates_checked.append(gate_name)
+        threshold = float(gates[gate_name])
+        parse_types = {"LlmParseError", "InvalidJsonResponse"}
+        affected = [
+            r for r in rows
+            if str(r.get("error_type", "")).strip() in parse_types
+            or "parse" in str(r.get("error_class", "")).strip().lower()
+        ]
+        rate = len(affected) / len(rows) if rows else 0.0
+        if rate > threshold:
+            _fail(gate_name, threshold, round(rate, 4), affected_runs=[_affected_run_entry(r) for r in affected])
+
     for category, gate_name in (
         ("geometry", "geometry_success_rate_min"),
         ("materials", "materials_success_rate_min"),
@@ -685,6 +767,8 @@ def _finish_result(
     write_result: bool,
     *,
     gate_result: dict[str, Any] | None = None,
+    acceptance_result: dict[str, Any] | None = None,
+    third_repetition_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     structural_checks = [c for c in checks if not str(c.get("name", "")).startswith("readiness_gate")]
     structural_failed = any(check.get("status") == "failed" for check in structural_checks)
@@ -699,6 +783,8 @@ def _finish_result(
         "readiness_ok": readiness_ok,
         "failed_gates": failed_gates,
         "warning_gates": warning_gates,
+        "acceptance_policy": acceptance_result,
+        "third_repetition_recommendation": third_repetition_result,
         "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "checks": checks,
     }

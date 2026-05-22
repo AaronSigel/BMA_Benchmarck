@@ -5,6 +5,12 @@ from pathlib import Path
 
 import yaml
 
+from benchmark.experiments.matrix_policy import (
+    apply_policy_to_experiment_metadata,
+    apply_policy_to_run_metadata,
+    order_runs,
+    resolve_matrix_policy,
+)
 from benchmark.experiments.models import ExperimentMatrix
 from benchmark.experiments.matrix import (
     ExperimentMatrixError,
@@ -29,6 +35,7 @@ def generate_experiment_config(matrix: ExperimentMatrix) -> ExperimentConfig:
     mcp_profiles = select_mcp_profiles(matrix, mcp_profile_pool)
     models = _select_models(matrix)
     execution_modes = matrix.execution_modes or [ExecutionMode.AGENT_MCP]
+    policy = resolve_matrix_policy(matrix)
 
     runs: list[RunConfig] = []
     include_model_in_run_id = len(models) > 1
@@ -66,30 +73,35 @@ def generate_experiment_config(matrix: ExperimentMatrix) -> ExperimentConfig:
                                     mcp_profile=mcp_profile["profile"],
                                     agent_config_path=agent["config_path"],
                                     agent_output_dir=mode_output_dir / "agent",
-                                    metadata={
-                                        "matrix_id": matrix.matrix_id,
-                                        "agent_id": agent["agent_id"],
-                                        "agent_strategy": agent["strategy"],
-                                        "mcp_profile": mcp_profile["profile"],
-                                        "model_id": model_id,
-                                        "repetition": repetition,
-                                        "strategy_limits": matrix.metadata.get("strategy_limits", {}),
-                                        "worker_lifecycle": matrix.metadata.get("worker_lifecycle", {}),
-                                    },
+                                    metadata=apply_policy_to_run_metadata(
+                                        {
+                                            "matrix_id": matrix.matrix_id,
+                                            "agent_id": agent["agent_id"],
+                                            "agent_strategy": agent["strategy"],
+                                            "mcp_profile": mcp_profile["profile"],
+                                            "model_id": model_id,
+                                            "repetition": repetition,
+                                        },
+                                        policy,
+                                    ),
                                 )
                             )
+
+    runs = order_runs(runs, policy.get("run_order") if isinstance(policy.get("run_order"), dict) else None)
 
     return ExperimentConfig(
         experiment_id=matrix.matrix_id,
         runs=runs,
-        metadata={
-            "matrix_id": matrix.matrix_id,
-            "title": matrix.title,
-            "description": matrix.description,
-            "repetitions": matrix.repetitions,
-            "expected_runs": matrix.metadata.get("expected_runs"),
-            "worker_lifecycle": matrix.metadata.get("worker_lifecycle", {}),
-        },
+        metadata=apply_policy_to_experiment_metadata(
+            {
+                "matrix_id": matrix.matrix_id,
+                "title": matrix.title,
+                "description": matrix.description,
+                "repetitions": matrix.repetitions,
+                "expected_runs": matrix.metadata.get("expected_runs"),
+            },
+            policy,
+        ),
     )
 
 

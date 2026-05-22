@@ -80,6 +80,25 @@ def test_run_metadata_overrides_agent_model_and_mcp_profile(tmp_path: Path) -> N
     assert config.llm.model == "qwen/qwen3-14b"
 
 
+def test_run_metadata_applies_generation_profile(tmp_path: Path) -> None:
+    agent_path = make_agent_config(tmp_path / "agent.yaml")
+    run_config = make_run_config(tmp_path, agent_path, ExecutionMode.AGENT_MCP).model_copy(
+        update={
+            "metadata": {
+                "generation_profile": {
+                    "apply_to_all_models": True,
+                    "temperature": 0.2,
+                    "top_p": 0.9,
+                    "max_tokens": 6144,
+                }
+            }
+        }
+    )
+    config = _apply_run_overrides(load_agent_config(agent_path), run_config)
+    assert config.llm is not None
+    assert config.llm.max_tokens == 6144
+
+
 def test_run_metadata_applies_strategy_limits_by_category(tmp_path: Path) -> None:
     agent_path = make_agent_config(tmp_path / "agent.yaml")
     run_config = make_run_config(tmp_path, agent_path, ExecutionMode.AGENT_MCP).model_copy(

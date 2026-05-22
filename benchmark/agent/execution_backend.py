@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import shutil
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import ValidationError
@@ -10,6 +11,7 @@ from pydantic import ValidationError
 log = logging.getLogger(__name__)
 
 from benchmark.agent.config_loader import load_agent_config
+from benchmark.experiments.matrix_policy import apply_generation_profile
 from benchmark.agent.llm import LlmResponse, LlmToolCall, MockLlmClient
 from benchmark.agent.models import AgentConfig, AgentStrategyName, LlmProvider
 from benchmark.agent.remote import MockRemoteAgentClient
@@ -191,18 +193,31 @@ def _copy_trace_to_run_root(trace_path: Path | None, output_dir: Path) -> Path |
 
 
 def _apply_run_overrides(agent_config: AgentConfig, config: RunConfig) -> AgentConfig:
-    updates = {}
+    updates: dict[str, Any] = {}
+    meta = config.metadata if isinstance(config.metadata, dict) else {}
+
     if config.mcp_profile:
         updates["mcp_profile"] = config.mcp_profile
-    model_id = config.metadata.get("model_id")
-    if (
-        isinstance(model_id, str)
-        and model_id
-        and model_id != "default"
-        and agent_config.llm is not None
-    ):
-        updates["llm"] = agent_config.llm.model_copy(update={"model": model_id})
-    strategy_limits = config.metadata.get("strategy_limits")
+
+    llm = agent_config.llm
+    if llm is not None:
+        model_id = meta.get("model_id")
+        if isinstance(model_id, str) and model_id and model_id != "default":
+            llm = llm.model_copy(update={"model": model_id})
+        generation_profile = meta.get("generation_profile")
+        if generation_profile is None:
+            matrix_policy = meta.get("matrix_policy")
+            if isinstance(matrix_policy, dict):
+                generation_profile = matrix_policy.get("generation_profile")
+        llm = apply_generation_profile(llm, generation_profile if isinstance(generation_profile, dict) else None)
+        updates["llm"] = llm
+
+    strategy_limits = meta.get("strategy_limits")
+    if strategy_limits is None:
+        matrix_policy = meta.get("matrix_policy")
+        if isinstance(matrix_policy, dict):
+            strategy_limits = matrix_policy.get("strategy_limits")
+    agent_metadata = dict(agent_config.metadata)
     if isinstance(strategy_limits, dict):
         limits = strategy_limits.get(agent_config.strategy.value)
         if isinstance(limits, dict):
@@ -230,6 +245,13 @@ def _apply_run_overrides(agent_config: AgentConfig, config: RunConfig) -> AgentC
                     for key, value in limits["no_progress_limit_by_category"].items()
                     if isinstance(value, int)
                 }
+            if limits.get("repair_activation_diagnostics") is True:
+                agent_metadata["repair_activation_diagnostics"] = True
+            elif limits.get("repair_activation_diagnostics") is False:
+                agent_metadata["repair_activation_diagnostics"] = False
+    if agent_metadata != agent_config.metadata:
+        updates["metadata"] = agent_metadata
+
     if not updates:
         return agent_config
     return agent_config.model_copy(update=updates)

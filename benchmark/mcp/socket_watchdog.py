@@ -172,6 +172,8 @@ class BlenderSocketWatchdog:
             return False
         if adapter is None:
             return True
+        if not self._lifecycle_flag("health_check_after_restart", default=True):
+            return True
         return self.mini_check(adapter)
 
     def record_snapshot_success(self) -> None:

@@ -9,6 +9,7 @@ import yaml
 
 from benchmark.experiments.models import EnvironmentRequirement, ExperimentMatrix, ReadinessCheckResult
 from benchmark.experiments.generator import generate_experiment_config
+from benchmark.experiments.matrix_policy import resolve_matrix_policy, validate_matrix_policy
 from benchmark.experiments.matrix import (
     ExperimentMatrixError,
     load_agent_pool,
@@ -79,21 +80,17 @@ def check_matrix_readiness(matrix: ExperimentMatrix) -> ReadinessCheckResult:
 
     _check_writable_dir(matrix.output_root, "output_root_writable", errors, requirements)
 
-    expected_runs = matrix.metadata.get("expected_runs")
-    if isinstance(expected_runs, int):
-        try:
-            planned_runs = len(generate_experiment_config(matrix).runs)
-            if planned_runs != expected_runs:
-                message = (
-                    f"planned_runs ({planned_runs}) != expected_runs ({expected_runs}) "
-                    f"for matrix {matrix.matrix_id}"
-                )
-                if bool(matrix.metadata.get("strict_readiness", False)):
-                    errors.append(message)
-                else:
-                    warnings.append(message)
-        except Exception as error:  # noqa: BLE001
-            warnings.append(f"could not verify planned_runs vs expected_runs: {error}")
+    policy = resolve_matrix_policy(matrix)
+    try:
+        planned_runs = len(generate_experiment_config(matrix).runs)
+        for issue in validate_matrix_policy(policy, planned_runs=planned_runs):
+            message = f"{issue} for matrix {matrix.matrix_id}"
+            if policy.get("strict_matrix_policy") or bool(matrix.metadata.get("strict_readiness", False)):
+                errors.append(message)
+            else:
+                warnings.append(message)
+    except Exception as error:  # noqa: BLE001
+        warnings.append(f"could not verify matrix policy: {error}")
 
     modes = matrix.execution_modes
     if _requires_blender(modes):

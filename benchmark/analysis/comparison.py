@@ -658,6 +658,14 @@ def analyze_experiment(experiment_dir: Path | str) -> ExperimentAnalysisResult:
             raw_metadata = manifest.get("metadata")
             if isinstance(raw_metadata, dict):
                 metadata.update(raw_metadata)
+                matrix_policy = raw_metadata.get("matrix_policy")
+                if isinstance(matrix_policy, dict):
+                    if isinstance(matrix_policy.get("analysis_policy"), dict):
+                        metadata["analysis_policy"] = matrix_policy["analysis_policy"]
+                    if isinstance(matrix_policy.get("reporting"), dict):
+                        metadata["reporting"] = matrix_policy["reporting"]
+                    if isinstance(matrix_policy.get("cost"), dict):
+                        metadata["cost"] = matrix_policy["cost"]
             metadata["manifest_path"] = str(manifest_path)
             metadata["manifest_generated_at"] = manifest.get("generated_at")
             metadata["models_used"] = manifest.get("models")

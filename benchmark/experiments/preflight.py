@@ -357,6 +357,81 @@ def run_profile_preflight_for_experiment(config: ExperimentConfig) -> dict[str, 
     }
 
 
+def preflight_cfg_from_config(config: ExperimentConfig) -> dict[str, Any]:
+    """Извлекает preflight policy из metadata эксперимента (matrix source of truth)."""
+    meta = config.metadata if isinstance(config.metadata, dict) else {}
+    cfg = meta.get("preflight")
+    if isinstance(cfg, dict):
+        return cfg
+    policy = meta.get("matrix_policy")
+    if isinstance(policy, dict) and isinstance(policy.get("preflight"), dict):
+        return policy["preflight"]
+    return {}
+
+
+def run_matrix_required_preflight(
+    config: ExperimentConfig,
+    output_root: Path,
+    *,
+    preflight_cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Выполняет smoke-проверки, заданные в metadata.preflight матрицы."""
+    cfg = preflight_cfg if isinstance(preflight_cfg, dict) else preflight_cfg_from_config(config)
+    if not cfg.get("enabled", False):
+        return {"enabled": False, "ok": True, "checks": {}}
+
+    checks: dict[str, Any] = {}
+    ok = True
+
+    needs_contract = any(
+        bool(cfg.get(flag))
+        for flag in (
+            "require_tool_contract_smoke",
+            "require_snapshot_smoke",
+            "require_export_smoke",
+            "require_tool_calling_smoke",
+        )
+    )
+    if needs_contract:
+        contract_smoke = run_contract_smoke_for_experiment(config, output_root)
+        checks["mcp_contract_smoke"] = contract_smoke
+        if not contract_smoke.get("ok"):
+            ok = False
+        if cfg.get("require_export_smoke") and contract_smoke.get("ok"):
+            exports = contract_smoke.get("export_results")
+            if not exports:
+                contract_smoke["ok"] = False
+                contract_smoke["error"] = "export smoke required but export_results missing"
+                ok = False
+
+    if cfg.get("require_model_access_smoke"):
+        models = sorted({str(run.metadata.get("model_id")) for run in config.runs if run.metadata.get("model_id")})
+        needs_openrouter = any("openrouter" in str(run.agent_config_path or "") for run in config.runs)
+        api_available = bool(os.environ.get("OPENROUTER_API_KEY"))
+        model_check = {
+            "ok": api_available or not needs_openrouter,
+            "required": needs_openrouter,
+            "models": models or ["default"],
+            "api_available": api_available,
+        }
+        checks["model_access_smoke"] = model_check
+        if not model_check["ok"]:
+            ok = False
+
+    profile_preflight = run_profile_preflight_for_experiment(config)
+    checks["mcp_profile_preflight"] = profile_preflight
+    if not profile_preflight.get("ok"):
+        ok = False
+
+    return {
+        "enabled": True,
+        "ok": ok,
+        "mode": cfg.get("mode", "diagnostic"),
+        "fail_fast": bool(cfg.get("fail_fast") or cfg.get("fail_fast_on_profile_error")),
+        "checks": checks,
+    }
+
+
 def filter_config_by_profile_preflight(config: ExperimentConfig, preflight: dict[str, Any]) -> ExperimentConfig:
     failed = {
         item["profile"]

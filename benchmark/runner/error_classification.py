@@ -303,6 +303,48 @@ def error_class_for_type(error_type: str | None) -> ErrorClass | None:
     return None
 
 
+_POST_PASS_AGENT_ERRORS = frozenset({
+    "ReactInvalidAction",
+    "ReactNoProgress",
+    "ReactMaxSteps",
+})
+
+
+def is_soft_success_diagnostic(
+    *,
+    error_class: str | None = None,
+    diagnostic_only: bool = False,
+) -> bool:
+    """True, если run относится к post-validation soft diagnostic."""
+    if diagnostic_only:
+        return True
+    return str(error_class or "").strip() == ErrorClass.SOFT_SUCCESS_DIAGNOSTIC.value
+
+
+def is_hard_model_failure(
+    *,
+    is_model_failure: bool,
+    is_infra_failure: bool = False,
+    error_class: str | None = None,
+    diagnostic_only: bool = False,
+    pass_type: str | None = None,
+    scene_status: str | None = None,
+    error_type: str | None = None,
+) -> bool:
+    """True только для жёстких model/agent failures, без soft diagnostic."""
+    if not is_model_failure or is_infra_failure:
+        return False
+    if is_soft_success_diagnostic(error_class=error_class, diagnostic_only=diagnostic_only):
+        return False
+    if (
+        str(pass_type or "").strip() == "soft_pass"
+        and str(scene_status or "").strip() == "passed"
+        and str(error_type or "").strip() in _POST_PASS_AGENT_ERRORS
+    ):
+        return False
+    return True
+
+
 def _normalize_error_type(error_type: str | None) -> str | None:
     if not error_type:
         return None

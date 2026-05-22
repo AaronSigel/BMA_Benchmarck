@@ -13,6 +13,7 @@ from benchmark.analysis.models import (
     ReportConfig,
     RunAnalysisResult,
 )
+from benchmark.runner.error_classification import is_hard_model_failure, is_soft_success_diagnostic
 from benchmark.analysis.validation_metrics import (
     compute_validation_summary,
     extract_issues,
@@ -1438,20 +1439,46 @@ def _model_failures_after_infra_table(runs: list[RunAnalysisResult]) -> list[lis
     def _is_true(metric_key: str, r: RunAnalysisResult) -> bool:
         return str(r.metrics.get(metric_key, "")).strip().lower() in {"true", "1", "yes"}
 
+    def _hard_model_failure(r: RunAnalysisResult) -> bool:
+        return is_hard_model_failure(
+            is_model_failure=_is_true("is_model_failure", r),
+            is_infra_failure=_is_true("is_infra_failure", r),
+            error_class=str(r.metrics.get("error_class") or "") or None,
+            diagnostic_only=_is_true("diagnostic_only", r),
+            pass_type=str(r.pass_type or "") or None,
+            scene_status=str(r.scene_status or "") or None,
+            error_type=str(r.metrics.get("structured_error_type") or r.metrics.get("react_error_type") or "") or None,
+        )
+
+    def _soft_diagnostic(r: RunAnalysisResult) -> bool:
+        return is_soft_success_diagnostic(
+            error_class=str(r.metrics.get("error_class") or "") or None,
+            diagnostic_only=_is_true("diagnostic_only", r),
+        ) or (
+            str(r.pass_type or "") == "soft_pass"
+            and str(r.scene_status or "") == "passed"
+            and str(r.metrics.get("structured_error_type") or r.metrics.get("react_error_type") or "").strip()
+            in {"ReactMaxSteps", "ReactInvalidAction", "ReactNoProgress"}
+            and not _is_true("is_infra_failure", r)
+        )
+
     healthy = [r for r in runs if not _is_true("is_infra_failure", r)]
     return [
         ["model_failure_rate_excluding_infra", _pct(
-            sum(1 for r in healthy if _is_true("is_model_failure", r)) / len(healthy) if healthy else None
+            sum(1 for r in healthy if _hard_model_failure(r)) / len(healthy) if healthy else None
+        )],
+        ["soft_success_diagnostic_rate", _pct(
+            sum(1 for r in runs if _soft_diagnostic(r)) / len(runs) if runs else None
         )],
         ["ReactInvalidAction_model_failures", str(sum(
             1 for r in healthy
             if str(r.metrics.get("structured_error_type") or "").strip() == "ReactInvalidAction"
-            and _is_true("is_model_failure", r)
+            and _hard_model_failure(r)
         ))],
         ["ReactNoProgress_model_failures", str(sum(
             1 for r in healthy
             if str(r.metrics.get("structured_error_type") or "").strip() == "ReactNoProgress"
-            and _is_true("is_model_failure", r)
+            and _hard_model_failure(r)
         ))],
         ["DirectNoAction", str(sum(
             1 for r in healthy

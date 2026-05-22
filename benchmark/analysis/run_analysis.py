@@ -333,7 +333,7 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
             for flag in (
                 "error_class", "is_model_failure", "is_agent_failure", "is_infra_failure",
                 "is_validation_failure", "is_tool_runtime_failure", "is_scene_available",
-                "scene_passed_before_error",
+                "scene_passed_before_error", "diagnostic_only",
             ):
                 if flag in structured_error:
                     metrics[flag] = structured_error[flag]
@@ -420,8 +420,20 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
         no_progress_reason=str(no_progress_reason) if no_progress_reason else None,
         runtime_healthy=runtime_healthy,
     )
+    _always_apply_flags = frozenset({
+        "is_model_failure",
+        "is_agent_failure",
+        "is_infra_failure",
+        "is_validation_failure",
+        "is_tool_runtime_failure",
+        "is_scene_available",
+        "scene_passed_before_error",
+        "diagnostic_only",
+    })
     for key, value in classification.model_dump(mode="json").items():
-        if value is not None and value is not False:
+        if key in _always_apply_flags:
+            metrics[key] = value
+        elif value is not None and value is not False:
             metrics[key] = value
     pass_type = _classify_pass_type(
         _run_status_str,

@@ -16,6 +16,7 @@ from benchmark.analysis.models import (
     RankedRun,
     RunAnalysisResult,
 )
+from benchmark.runner.error_classification import is_hard_model_failure, is_soft_success_diagnostic
 
 
 def _avg(values: list[float]) -> float | None:
@@ -301,8 +302,29 @@ def _build_summary(results: list[RunAnalysisResult]) -> ExperimentSummary:
     infra_runs = sum(1 for r in results if bool(r.metrics.get("is_infra_failure")))
     model_failures = sum(
         1 for r in results
-        if bool(r.metrics.get("is_model_failure"))
-        and not bool(r.metrics.get("is_infra_failure"))
+        if is_hard_model_failure(
+            is_model_failure=bool(r.metrics.get("is_model_failure")),
+            is_infra_failure=bool(r.metrics.get("is_infra_failure")),
+            error_class=str(r.metrics.get("error_class") or "") or None,
+            diagnostic_only=bool(r.metrics.get("diagnostic_only")),
+            pass_type=str(r.pass_type or "") or None,
+            scene_status=str(r.scene_status or "") or None,
+            error_type=str(r.metrics.get("structured_error_type") or r.metrics.get("react_error_type") or "") or None,
+        )
+    )
+    soft_success_diagnostics = sum(
+        1 for r in results
+        if is_soft_success_diagnostic(
+            error_class=str(r.metrics.get("error_class") or "") or None,
+            diagnostic_only=bool(r.metrics.get("diagnostic_only")),
+        )
+        or (
+            str(r.pass_type or "") == "soft_pass"
+            and str(r.scene_status or "") == "passed"
+            and str(r.metrics.get("structured_error_type") or r.metrics.get("react_error_type") or "").strip()
+            in {"ReactMaxSteps", "ReactInvalidAction", "ReactNoProgress"}
+            and not bool(r.metrics.get("is_infra_failure"))
+        )
     )
     validation_failures = sum(1 for r in results if bool(r.metrics.get("is_validation_failure")))
     tool_runtime_failures = sum(1 for r in results if bool(r.metrics.get("is_tool_runtime_failure")))
@@ -336,6 +358,7 @@ def _build_summary(results: list[RunAnalysisResult]) -> ExperimentSummary:
         reported_success_rate_excluding_infra=(success_excluding_infra / total if total else None),
         infra_error_rate=(infra_runs / total if total else None),
         model_failure_rate=(model_failures / total if total else None),
+        soft_success_diagnostic_rate=(soft_success_diagnostics / total if total else None),
         validation_failure_rate=(validation_failures / total if total else None),
         tool_runtime_failure_rate=(tool_runtime_failures / total if total else None),
         no_progress_by_reason=no_progress_by_reason,

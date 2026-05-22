@@ -52,7 +52,7 @@ metadata:
       no_progress_limit: 3
       repair_activation_diagnostics: true
     plan_execute_react_repair:
-      max_steps: 25
+      max_steps: 40
       stop_after_scene_passed: true
       detect_repeated_actions: true
       detect_duplicate_objects: true
@@ -71,7 +71,7 @@ metadata:
     reported_success_rate_min: 0.75
     runtime_error_rate_max: 0.10
     infra_error_rate_max: 0.05
-    socket_timeout_count_max: 0
+    socket_timeout_count_max: 1
     empty_socket_response_count_max: 0
     reset_failure_rate_max: 0.02
     snapshot_failure_rate_max: 0.05

@@ -204,6 +204,7 @@ class ExperimentRunner:
                 log.warning("[run:%s] partial validation failed: %s", config.run_id[:8], val_error)
         agent_status = _agent_status_from_execution(summary, error, config.execution_mode)
         run_status = RunStatus.ERROR
+        scene_passed_but_agent_error = False
         if config.execution_mode in {ExecutionMode.AGENT_MCP, ExecutionMode.REMOTE_AGENT} and scene_status is SceneStatus.PASSED and agent_status in {
             AgentStatus.MAX_STEPS_REACHED,
             AgentStatus.INVALID_RESPONSE,
@@ -214,6 +215,16 @@ class ExperimentRunner:
         }:
             agent_status = AgentStatus.COMPLETED_AFTER_SCENE_PASSED
             run_status = RunStatus.PASSED
+            scene_passed_but_agent_error = True
+        if scene_passed_but_agent_error:
+            structured_error = controlled_error_payload(
+                error,
+                failure_stage=_infer_failure_stage(error),
+                enrich=True,
+                scene_status=SceneStatus.PASSED.value,
+                run_status=RunStatus.PASSED.value,
+                scene_passed_but_agent_error=True,
+            )
         _error_summary: dict = {**(summary or {})}
         if validation_result_path is not None and "validation" not in _error_summary:
             try:

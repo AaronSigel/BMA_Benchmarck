@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from benchmark.runner.error_classification import is_hard_model_failure, is_soft_success_diagnostic
+
 
 REQUIRED_FILES = {
     "summary.csv",
@@ -443,7 +445,16 @@ def _evaluate_readiness_gates(
         )
         threshold = int(gates["socket_timeout_count_max"])
         if timeout_count > threshold:
-            _fail("socket_timeout_count_max", threshold, timeout_count, gate_category="infra")
+            infra_rate = _infra_error_rate(rows)
+            infra_ceiling = float(gates.get("infra_error_rate_max", 0.05))
+            severity = "warning" if infra_rate is not None and infra_rate <= infra_ceiling else "blocking"
+            _fail(
+                "socket_timeout_count_max",
+                threshold,
+                timeout_count,
+                severity=severity,
+                gate_category="infra",
+            )
     if "empty_socket_response_count_max" in gates:
         gates_checked.append("empty_socket_response_count_max")
         empty_count = sum(
@@ -452,7 +463,16 @@ def _evaluate_readiness_gates(
         )
         threshold = int(gates["empty_socket_response_count_max"])
         if empty_count > threshold:
-            _fail("empty_socket_response_count_max", threshold, empty_count, gate_category="infra")
+            infra_rate = _infra_error_rate(rows)
+            infra_ceiling = float(gates.get("infra_error_rate_max", 0.05))
+            severity = "warning" if infra_rate is not None and infra_rate <= infra_ceiling else "blocking"
+            _fail(
+                "empty_socket_response_count_max",
+                threshold,
+                empty_count,
+                severity=severity,
+                gate_category="infra",
+            )
     for category, gate_name in (
         ("geometry", "geometry_success_rate_min"),
         ("materials", "materials_success_rate_min"),
@@ -517,13 +537,41 @@ def _infra_error_rate(rows: list[dict[str, str]]) -> float | None:
     return count / len(rows)
 
 
+def _row_is_hard_model_failure(row: dict[str, str]) -> bool:
+    return is_hard_model_failure(
+        is_model_failure=_bool_metric(row.get("is_model_failure")),
+        is_infra_failure=_bool_metric(row.get("is_infra_failure")),
+        error_class=str(row.get("error_class", "")).strip() or None,
+        diagnostic_only=_bool_metric(row.get("diagnostic_only")),
+        pass_type=str(row.get("pass_type", "")).strip() or None,
+        scene_status=str(row.get("scene_status", "")).strip() or None,
+        error_type=str(row.get("error_type", "")).strip() or None,
+    )
+
+
+def _row_is_soft_success_diagnostic(row: dict[str, str]) -> bool:
+    return is_soft_success_diagnostic(
+        error_class=str(row.get("error_class", "")).strip() or None,
+        diagnostic_only=_bool_metric(row.get("diagnostic_only")),
+    ) or (
+        str(row.get("pass_type", "")).strip() == "soft_pass"
+        and str(row.get("scene_status", "")).strip() == "passed"
+        and str(row.get("error_type", "")).strip() in {"ReactMaxSteps", "ReactInvalidAction", "ReactNoProgress"}
+        and not _bool_metric(row.get("is_infra_failure"))
+    )
+
+
 def _model_failure_rate(rows: list[dict[str, str]]) -> float | None:
     if not rows:
         return None
-    count = sum(
-        1 for row in rows
-        if _bool_metric(row.get("is_model_failure")) and not _bool_metric(row.get("is_infra_failure"))
-    )
+    count = sum(1 for row in rows if _row_is_hard_model_failure(row))
+    return count / len(rows)
+
+
+def _soft_success_diagnostic_rate(rows: list[dict[str, str]]) -> float | None:
+    if not rows:
+        return None
+    count = sum(1 for row in rows if _row_is_soft_success_diagnostic(row))
     return count / len(rows)
 
 

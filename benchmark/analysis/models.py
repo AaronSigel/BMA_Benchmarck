@@ -161,6 +161,7 @@ class ExperimentSummary(BaseModel):
     # Infrastructure / model failure rates
     infra_error_rate: float | None = Field(default=None, ge=0.0, le=1.0)
     model_failure_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    soft_success_diagnostic_rate: float | None = Field(default=None, ge=0.0, le=1.0)
     validation_failure_rate: float | None = Field(default=None, ge=0.0, le=1.0)
     tool_runtime_failure_rate: float | None = Field(default=None, ge=0.0, le=1.0)
     reported_success_rate_excluding_infra: float | None = Field(default=None, ge=0.0, le=1.0)

@@ -111,6 +111,10 @@ def apply_generation_profile(llm_config: Any, profile: dict[str, Any] | None) ->
         value = profile.get(field)
         if value is not None:
             updates[field] = value
+    if isinstance(profile.get("reasoning"), dict):
+        metadata = dict(llm_config.metadata)
+        metadata["generation_profile_reasoning"] = profile["reasoning"]
+        updates["metadata"] = metadata
     if not updates:
         return llm_config
     return llm_config.model_copy(update=updates)

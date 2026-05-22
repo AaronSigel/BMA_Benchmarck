@@ -9,7 +9,7 @@ import pytest
 
 from benchmark.agent.errors import LlmClientError, LlmResponseParseError
 from benchmark.agent.llm.base import LlmMessage, LlmToolCall
-from benchmark.agent.llm.openrouter_client import OpenRouterClient
+from benchmark.agent.llm.openrouter_client import OpenRouterClient, build_openrouter_reasoning_payload
 from benchmark.agent.models import LlmConfig, LlmProvider
 
 
@@ -143,6 +143,41 @@ def test_complete_omits_tools_when_none(monkeypatch: pytest.MonkeyPatch) -> None
         OpenRouterClient(_make_config()).complete(_messages(), tools=None)
     _, kwargs = mock_post.call_args
     assert "tools" not in kwargs["json"]
+
+
+def test_build_openrouter_reasoning_payload_disabled() -> None:
+    payload = build_openrouter_reasoning_payload(
+        {"generation_profile_reasoning": {"enabled": False, "effort": None}},
+        model="google/gemini-2.5-flash-lite",
+    )
+    assert payload == {"effort": "none"}
+
+
+def test_build_openrouter_reasoning_payload_disabled_gpt5_uses_minimal() -> None:
+    payload = build_openrouter_reasoning_payload(
+        {"generation_profile_reasoning": {"enabled": False, "effort": None}},
+        model="openai/gpt-5-mini",
+    )
+    assert payload == {"effort": "minimal"}
+
+
+def test_build_openrouter_reasoning_payload_effort() -> None:
+    payload = build_openrouter_reasoning_payload(
+        {"generation_profile_reasoning": {"enabled": True, "effort": "low"}}
+    )
+    assert payload == {"effort": "low"}
+
+
+def test_complete_sends_reasoning_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    config = _make_config(
+        model="google/gemini-2.5-flash-lite",
+        metadata={"generation_profile_reasoning": {"enabled": False, "effort": None}},
+    )
+    with patch("httpx.post", return_value=_make_response()) as mock_post:
+        OpenRouterClient(config).complete(_messages())
+    _, kwargs = mock_post.call_args
+    assert kwargs["json"]["reasoning"] == {"effort": "none"}
 
 
 def test_custom_timeout_forwarded(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -26,6 +26,19 @@ def test_apply_generation_profile_overrides_max_tokens() -> None:
     assert updated.max_tokens == 6144
 
 
+def test_apply_generation_profile_stores_reasoning_in_metadata() -> None:
+    llm = LlmConfig(provider=LlmProvider.OPENROUTER, model="test")
+    updated = apply_generation_profile(
+        llm,
+        {
+            "apply_to_all_models": True,
+            "temperature": 0.2,
+            "reasoning": {"enabled": False, "effort": None},
+        },
+    )
+    assert updated.metadata["generation_profile_reasoning"]["enabled"] is False
+
+
 def test_order_runs_stratified_interleaved_is_deterministic() -> None:
     runs = [
         RunConfig(

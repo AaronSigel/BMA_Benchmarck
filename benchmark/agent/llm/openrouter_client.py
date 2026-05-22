@@ -34,6 +34,12 @@ class OpenRouterClient:
             "top_p": self.config.top_p,
             "max_tokens": self.config.max_tokens,
         }
+        reasoning_payload = build_openrouter_reasoning_payload(
+            self.config.metadata,
+            model=self.config.model,
+        )
+        if reasoning_payload is not None:
+            payload["reasoning"] = reasoning_payload
         if tools:
             payload["tools"] = tools
 
@@ -76,6 +82,41 @@ class OpenRouterClient:
                 f"OpenRouter API key not found in environment variable {env_var!r}"
             )
         return api_key
+
+
+def _reasoning_cannot_be_disabled(model: str | None) -> bool:
+    """Модели/эндпоинты OpenRouter, где effort=none возвращает 400."""
+    if not model:
+        return False
+    lowered = model.lower()
+    return lowered.startswith("openai/gpt-5") or "/gpt-5" in lowered
+
+
+def build_openrouter_reasoning_payload(
+    metadata: dict[str, Any] | None,
+    *,
+    model: str | None = None,
+) -> dict[str, Any] | None:
+    """Собирает блок reasoning для OpenRouter из generation_profile snapshot в metadata."""
+    if not isinstance(metadata, dict):
+        return None
+    reasoning = metadata.get("generation_profile_reasoning")
+    if not isinstance(reasoning, dict):
+        generation_profile = metadata.get("generation_profile")
+        if isinstance(generation_profile, dict):
+            reasoning = generation_profile.get("reasoning")
+    if not isinstance(reasoning, dict):
+        return None
+    if reasoning.get("enabled") is False:
+        if _reasoning_cannot_be_disabled(model):
+            return {"effort": "minimal"}
+        return {"effort": "none"}
+    effort = reasoning.get("effort")
+    if effort:
+        return {"effort": effort}
+    if reasoning.get("enabled") is True:
+        return {"enabled": True}
+    return None
 
 
 def _message_to_dict(message: LlmMessage) -> dict[str, Any]:

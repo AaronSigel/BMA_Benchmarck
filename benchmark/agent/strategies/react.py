@@ -105,6 +105,7 @@ class ReactStrategy:
 
         # Resolve effective max_steps from task category (P0.6).
         effective_max_steps = _resolve_max_steps(task, agent_config)
+        effective_no_progress_limit = _resolve_no_progress_limit(task, agent_config)
 
         system_message = LlmMessage(
             role="system",
@@ -770,7 +771,7 @@ class ReactStrategy:
                                 metadata={"no_progress_detected": True, "repair_attempt": True},
                             )
                             log.info("[react:%s] step %d — no progress hint injected", trace.run_id[:8], step_num)
-                        elif consecutive_no_progress >= agent_config.no_progress_limit:
+                        elif consecutive_no_progress >= effective_no_progress_limit:
                             no_progress_reason = _classify_no_progress(
                                 tool_result_ok=tool_result.error is None,
                                 snapshot_available=val_result is not None,
@@ -872,6 +873,7 @@ class ReactStrategy:
                     "wasted_step_count": wasted_step_count,
                     "no_progress_step_count": no_progress_step_count,
                     "effective_max_steps": effective_max_steps,
+                    "effective_no_progress_limit": effective_no_progress_limit,
                     "scene_passed_but_agent_error": scene_passed_but_agent_error,
                     "early_stop_reason": early_stop_reason,
                     "validation_score_at_stop": validation_score_at_stop,
@@ -916,6 +918,14 @@ def _resolve_max_steps(task: dict[str, Any], config: AgentConfig) -> int:
     if category in _DEFAULT_CATEGORY_MAX_STEPS:
         return _DEFAULT_CATEGORY_MAX_STEPS[category]
     return 20
+
+
+def _resolve_no_progress_limit(task: dict[str, Any], config: AgentConfig) -> int:
+    """Return the effective no_progress_limit, taking task category overrides into account."""
+    category = str(task.get("category") or "").lower()
+    if config.no_progress_limit_by_category and category in config.no_progress_limit_by_category:
+        return config.no_progress_limit_by_category[category]
+    return config.no_progress_limit
 
 
 def _try_load_task(task: dict[str, Any]) -> Any:

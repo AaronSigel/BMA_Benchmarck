@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 from benchmark.agent.llm import LlmResponse, MockLlmClient
 from benchmark.agent.models import AgentConfig, AgentStepType, AgentStrategyName, LlmConfig
 from benchmark.agent.strategies import ReactStrategy
-from benchmark.agent.strategies.react import _resolve_max_steps
+from benchmark.agent.strategies.react import _resolve_max_steps, _resolve_no_progress_limit
 from benchmark.agent.tool_context import AgentToolContext
 from benchmark.agent.tool_executor import MockToolExecutor
 from benchmark.validation.models import ValidationIssue, ValidationSeverity, ValidationStatus
@@ -49,6 +49,12 @@ def test_config_max_steps_overrides_category_default() -> None:
     assert _resolve_max_steps({"category": "geometry"}, _config(max_steps=20)) == 20
     cfg = _config(max_steps=20, max_steps_by_category={"geometry": 7})
     assert _resolve_max_steps({"category": "geometry"}, cfg) == 7
+
+
+def test_config_no_progress_limit_overrides_category_default() -> None:
+    assert _resolve_no_progress_limit({"category": "export"}, _config(no_progress_limit=3)) == 3
+    cfg = _config(no_progress_limit=3, no_progress_limit_by_category={"export": 5})
+    assert _resolve_no_progress_limit({"category": "export"}, cfg) == 5
 
 
 # --- Max steps classification ---
@@ -110,6 +116,53 @@ def test_no_progress_stops_with_react_no_progress() -> None:
     assert trace.error == "ReactNoProgress"
     assert trace.metadata.get("react_error_type") == "ReactNoProgress"
     assert trace.metadata.get("react_no_progress_count", 0) >= 1
+
+
+def test_no_progress_uses_category_override_limit() -> None:
+    """Category-specific no_progress_limit should delay ReactNoProgress vs base limit."""
+    stall_result = _val_result(passed=False, score=0.5, issues=[_issue()])
+    action = '{"thought":"ok","action":{"tool":"bma_get_scene_snapshot","arguments":{}},"finish":false}'
+    llm = MockLlmClient([LlmResponse(content=action)] * 20)
+    executor = MockToolExecutor(results={"bma_get_scene_snapshot": {"objects": []}})
+    strategy = ReactStrategy()
+
+    def validator_fn(path):
+        return False, 0.5, stall_result
+
+    strategy.scene_validator_fn = validator_fn
+    base_cfg = dict(
+        max_steps=20,
+        no_progress_limit=2,
+        detect_no_progress=True,
+        detect_repeated_actions=False,
+    )
+    task = {"id": "task-1", "prompt": "Do it", "category": "export"}
+    ctx = AgentToolContext(run_id="run-1", task_id="task-1")
+
+    trace_base = strategy.run(
+        task,
+        _config(**base_cfg),
+        llm,
+        executor,
+        ctx,
+        Path("."),
+    )
+    trace_category = strategy.run(
+        task,
+        _config(**base_cfg, no_progress_limit_by_category={"export": 5}),
+        llm,
+        executor,
+        ctx,
+        Path("."),
+    )
+
+    assert trace_base.error == "ReactNoProgress"
+    assert trace_category.error == "ReactNoProgress"
+    assert trace_category.metadata.get("effective_no_progress_limit") == 5
+    assert trace_category.metadata.get("react_no_progress_count", 0) >= 5
+    assert trace_category.metadata.get("react_iterations_total", 0) > trace_base.metadata.get(
+        "react_iterations_total", 0
+    )
 
 
 # --- Wasted steps ---

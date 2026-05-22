@@ -122,7 +122,7 @@ def write_report_text_ru(analysis: ExperimentAnalysisResult, path: Path) -> None
 
 ## 7. Ограничения прогона
 
-Прогон использует фиксированный набор моделей и {repetitions} повторност{'и' if repetitions > 1 else 'ь'} матрицы; generation_profile фиксирован, sweep decoding-параметров не входит в основной эксперимент. Основной контур ограничен API-based LLM backends; Claude Code / Codex CLI рассматриваются как experimental remote-agent extension. Benchmark оценивает итоговую сцену и процесс tool-use. Стоимость берётся только из provider-reported данных OpenRouter.
+Прогон использует фиксированный набор моделей и {repetitions} повторност{'и' if repetitions > 1 else 'ь'} матрицы; generation_profile фиксирует runtime-параметры `temperature`, `top_p`, `max_tokens` и reasoning (`effort: none`, для обязательных reasoning-моделей — `minimal`); `top_k`/`seed` при null остаются на provider default. Sweep decoding-параметров не входит в основной эксперимент. Основной контур ограничен API-based LLM backends; Claude Code / Codex CLI рассматриваются как experimental remote-agent extension. Benchmark оценивает итоговую сцену и процесс tool-use. Стоимость берётся только из provider-reported данных OpenRouter.
 
 ## 8. Вывод
 
@@ -157,7 +157,7 @@ def write_readme_report(path: Path) -> None:
 
 ReAct интерпретируется по фактическому reported success rate: при высоком success (>85%) стратегия считается рабочей в validator-guided repair-контуре.
 
-Стоимость OpenRouter интерпретируется только как provider-reported cost. Ограничения: repetitions и generation_profile фиксируются в matrix config; sweep decoding-параметров не входит в основной эксперимент; Claude Code / Codex CLI — experimental extension, не основная матрица.
+Стоимость OpenRouter интерпретируется только как provider-reported cost. Ограничения: repetitions и generation_profile фиксируются в matrix config (runtime: `temperature`, `top_p`, `max_tokens`, reasoning `none`/`minimal` по модели; `top_k`/`seed` null = provider default); sweep decoding-параметров не входит в основной эксперимент; Claude Code / Codex CLI — experimental extension, не основная матрица.
 """,
         encoding="utf-8",
     )

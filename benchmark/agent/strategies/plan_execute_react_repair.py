@@ -117,7 +117,7 @@ class PlanExecuteReactRepairStrategy:
 
         from benchmark.agent.strategies.react import ReactStrategy
 
-        repair_config = _repair_config(agent_config)
+        repair_config = _repair_config(agent_config, task, val_result)
         react_strategy = ReactStrategy(
             prompt_builder=self.prompt_builder,
             tool_schema_provider=self.tool_schema_provider,
@@ -185,14 +185,35 @@ class PlanExecuteReactRepairStrategy:
         )
 
 
-def _repair_config(agent_config: AgentConfig) -> AgentConfig:
+def _repair_config(agent_config: AgentConfig, task: dict[str, Any], val_result: Any | None = None) -> AgentConfig:
+    category = str(task.get("category") or "").lower()
+    no_progress_limit = agent_config.no_progress_limit or 2
+    if category and agent_config.no_progress_limit_by_category.get(category):
+        no_progress_limit = agent_config.no_progress_limit_by_category[category]
+
+    detect_no_progress = agent_config.detect_no_progress
+    if val_result is not None and detect_no_progress:
+        from benchmark.agent.strategies.issue_action_mapper import select_top_issue
+
+        plan_score = getattr(val_result, "total_score", None)
+        top_issue = select_top_issue(getattr(val_result, "issues", []) or [])
+        top_code = getattr(top_issue, "code", None) if top_issue is not None else None
+        if (
+            isinstance(plan_score, (int, float))
+            and plan_score >= 0.95
+            and top_code in {"light_direction_mismatch", "light_rotation_mismatch"}
+        ):
+            detect_no_progress = False
+
     return agent_config.model_copy(
         update={
             "strategy": AgentStrategyName.REACT,
             "max_steps": agent_config.max_steps or _REPAIR_MAX_STEPS,
+            "max_steps_by_category": dict(agent_config.max_steps_by_category),
             "stop_after_scene_passed": True,
-            "detect_no_progress": True,
-            "no_progress_limit": agent_config.no_progress_limit or 2,
+            "detect_no_progress": detect_no_progress,
+            "no_progress_limit": no_progress_limit,
+            "no_progress_limit_by_category": dict(agent_config.no_progress_limit_by_category),
             "detect_repeated_actions": True,
             "detect_duplicate_objects": True,
         }
@@ -386,6 +407,8 @@ def _stamp_trace(
         hybrid_meta["plan_issue_count"] = plan_issue_count
     if repair_not_needed:
         hybrid_meta["repair_not_needed"] = True
+        hybrid_meta["early_stop_reason"] = "scene_passed_after_validation"
+        hybrid_meta["skipped_llm_after_passed"] = True
     if hybrid_repair_used or repair_started:
         hybrid_meta["repair_started"] = True
         hybrid_meta["repair_start_reason"] = repair_start_reason or "failed_validation"

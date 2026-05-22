@@ -137,13 +137,26 @@ def test_readiness_gate_fails_on_export_invalid_tool_response() -> None:
     gates = {"invalid_tool_response_export_max": 0}
     rows = [
         _csv_row("export_001_blend_file", "runtime_error", "InvalidJsonResponse"),
-        _csv_row("export_002_glb_file", "runtime_error", "EmptySocketResponse"),
+        _csv_row("export_002_glb_file", "runtime_error", "InvalidToolResponse"),
         _csv_row("geometry_001_basic_primitives", "clean_pass", ""),
     ]
     result = _evaluate_readiness_gates(gates, rows)
     assert result["readiness_ok"] is False
     names = [fg["name"] for fg in result["failed_gates"]]
     assert "invalid_tool_response_export_max" in names
+    failed = next(fg for fg in result["failed_gates"] if fg["name"] == "invalid_tool_response_export_max")
+    assert failed["actual"] == 2
+    assert len(failed["affected_runs"]) == 2
+
+
+def test_readiness_gate_ignores_empty_socket_on_export() -> None:
+    gates = {"invalid_tool_response_export_max": 0}
+    rows = [
+        _csv_row("export_001_blend_file", "runtime_error", "EmptySocketResponse"),
+        _csv_row("export_002_glb_file", "soft_pass", "ToolError"),
+    ]
+    result = _evaluate_readiness_gates(gates, rows)
+    assert result["readiness_ok"] is True
 
 
 def test_readiness_gate_passes_when_export_ok() -> None:

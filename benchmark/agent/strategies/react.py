@@ -158,6 +158,8 @@ class ReactStrategy:
         validation_score_at_stop: float | None = None
         issue_count_at_stop: int | None = None
         skipped_llm_after_passed = False
+        terminal_infra_error_type: str | None = None
+        terminal_infra_failure_stage: str | None = None
 
         # Build first-step checklist (P2.2) — injected before any validation is available.
         initial_step_context: dict[str, Any] | None = None
@@ -607,6 +609,13 @@ class ReactStrategy:
             last_tool_was_inspection = _is_inspection
 
             tool_result = tool_executor.call_tool(action.tool_name, action.arguments)
+            if tool_result.error:
+                tool_result = _maybe_retry_infra_tool_call(
+                    tool_executor,
+                    action.tool_name,
+                    action.arguments,
+                    tool_result,
+                )
             observation = tool_result.result if tool_result.error is None else {"error": tool_result.error}
 
             # Track actual created object name (may differ from requested due to .001 suffix).
@@ -661,6 +670,8 @@ class ReactStrategy:
                 duration_sec=tool_result.duration_sec,
                 metadata={
                     "react_repair_activation": _repair_activation,
+                    "tool_error_type": tool_result.error_type,
+                    "failure_stage": tool_result.failure_stage,
                     "react": {
                         "step_index": step_num,
                         "top_issue": _top_issue_dict,
@@ -680,6 +691,12 @@ class ReactStrategy:
             )
             if tool_result.error:
                 error_message = tool_result.error
+                if tool_result.error_type and _is_infra_tool_error(
+                    tool_result.error_type,
+                    tool_result.failure_stage,
+                ):
+                    terminal_infra_error_type = tool_result.error_type
+                    terminal_infra_failure_stage = tool_result.failure_stage
                 break
 
             # --- Scene validation check ---
@@ -791,21 +808,35 @@ class ReactStrategy:
                     previous_issue_codes = current_issue_codes
 
         if final_message is None and error_message is None:
-            error_message = "ReactMaxSteps"
-            trace = trace.add_step(
-                AgentStepType.ERROR,
-                error="ReactMaxSteps: max steps reached without scene passing",
-                metadata={"react_error_type": "ReactMaxSteps"},
-            )
+            infra_terminal = _find_terminal_infra_in_trace(trace)
+            if infra_terminal is not None:
+                error_message, terminal_infra_error_type, terminal_infra_failure_stage = infra_terminal
+                trace = trace.add_step(
+                    AgentStepType.ERROR,
+                    error=error_message,
+                    metadata={
+                        "terminal_infra_error_type": terminal_infra_error_type,
+                        "failure_stage": terminal_infra_failure_stage,
+                    },
+                )
+            else:
+                error_message = "ReactMaxSteps"
+                trace = trace.add_step(
+                    AgentStepType.ERROR,
+                    error="ReactMaxSteps: max steps reached without scene passing",
+                    metadata={"react_error_type": "ReactMaxSteps"},
+                )
 
         finished_at = datetime.datetime.now(datetime.timezone.utc)
-        _react_error_type = (
-            "ReactMaxSteps" if error_message == "ReactMaxSteps"
-            else "ReactNoProgress" if error_message == "ReactNoProgress"
-            else "ReactInvalidAction" if error_message == "ReactInvalidAction"
-            else "LlmParseError" if error_message == "LlmParseError"
-            else None
-        )
+        _react_error_type = None
+        if terminal_infra_error_type is None:
+            _react_error_type = (
+                "ReactMaxSteps" if error_message == "ReactMaxSteps"
+                else "ReactNoProgress" if error_message == "ReactNoProgress"
+                else "ReactInvalidAction" if error_message == "ReactInvalidAction"
+                else "LlmParseError" if error_message == "LlmParseError"
+                else None
+            )
         _resolved_issues = (
             len(initial_issue_codes - previous_issue_codes)
             if initial_issue_codes else 0
@@ -860,6 +891,8 @@ class ReactStrategy:
                     "react_blocked_export_count": blocked_export_count,
                     "react_max_steps_count": 1 if _react_error_type == "ReactMaxSteps" else 0,
                     "react_error_type": _react_error_type,
+                    "terminal_infra_error_type": terminal_infra_error_type,
+                    "terminal_infra_failure_stage": terminal_infra_failure_stage,
                     "react_issue_resolution_rate": (
                         _resolved_issues / initial_issue_count
                         if initial_issue_count and initial_issue_count > 0 else None
@@ -1309,3 +1342,67 @@ def _parse_native_react_action(response: LlmResponse) -> _ReactAction:
 
 def _optional_str(value: Any) -> str | None:
     return str(value) if value is not None else None
+
+
+def _is_infra_tool_error(error_type: str | None, failure_stage: str | None) -> bool:
+    from benchmark.runner.error_classification import is_infra_error_type, is_infra_parse_error
+
+    return is_infra_error_type(error_type) or is_infra_parse_error(error_type, failure_stage)
+
+
+def _mcp_adapter(tool_executor: ToolExecutor) -> Any | None:
+    from benchmark.agent.tool_executor import McpToolExecutor
+
+    if isinstance(tool_executor, McpToolExecutor):
+        return tool_executor.adapter
+    return None
+
+
+def _maybe_retry_infra_tool_call(
+    tool_executor: ToolExecutor,
+    tool_name: str,
+    arguments: dict[str, Any],
+    first_result: Any,
+) -> Any:
+    """Один agent-level retry tool call после watchdog restart при infra transient ошибке."""
+    from benchmark.agent.models import ToolCallResult
+    from benchmark.mcp.socket_watchdog import SocketFailureEvent
+    from benchmark.runner.error_classification import is_transient_infra_error_type
+
+    if not isinstance(first_result, ToolCallResult):
+        return first_result
+    if not first_result.error or not is_transient_infra_error_type(first_result.error_type):
+        return first_result
+    if first_result.metadata.get("infra_tool_retry"):
+        return first_result
+
+    adapter = _mcp_adapter(tool_executor)
+    watchdog = getattr(adapter, "_watchdog", None) if adapter is not None else None
+    if watchdog is not None and adapter is not None:
+        watchdog.on_socket_failure(
+            SocketFailureEvent(
+                error_type=str(first_result.error_type or "ToolTimeout"),
+                tool_name=tool_name,
+                message=str(first_result.error),
+                failure_stage=str(first_result.failure_stage or "tool_call"),
+                attempt=1,
+            ),
+            adapter=adapter,
+        )
+
+    retry_result = tool_executor.call_tool(tool_name, arguments)
+    if isinstance(retry_result, ToolCallResult):
+        retry_result.metadata["infra_tool_retry"] = True
+    return retry_result
+
+
+def _find_terminal_infra_in_trace(trace: AgentTrace) -> tuple[str, str, str | None] | None:
+    for step in reversed(trace.steps):
+        if step.step_type != AgentStepType.TOOL_CALL or not step.error:
+            continue
+        meta = step.metadata or {}
+        error_type = meta.get("tool_error_type")
+        failure_stage = meta.get("failure_stage")
+        if _is_infra_tool_error(error_type, failure_stage):
+            return step.error, str(error_type), failure_stage
+    return None

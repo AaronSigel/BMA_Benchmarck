@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from benchmark.agent.models import AgentConfig, AgentStrategyName, AgentTrace, LlmConfig
 from benchmark.agent.strategies.plan_execute_react_repair import (
     _merge_traces,
+    _repair_config,
     _stamp_trace,
     _validate_via_tool_with_reason,
 )
@@ -122,3 +123,30 @@ def test_validate_via_tool_preserves_snapshot_invalid_schema_reason() -> None:
     val, reason = _validate_via_tool_with_reason(executor, {"id": "task"}, __import__("pathlib").Path("snap.json"))
     assert val is None
     assert reason == "snapshot_invalid_schema"
+
+
+def test_repair_config_uses_category_limits_and_disables_no_progress_on_near_pass() -> None:
+    config = AgentConfig(
+        agent_id="hybrid-test",
+        strategy=AgentStrategyName.PLAN_EXECUTE_REACT_REPAIR,
+        llm=LlmConfig(provider="mock", model="mock"),
+        mcp_profile="minimal",
+        max_steps=25,
+        max_steps_by_category={"export": 8, "lighting": 12},
+        no_progress_limit=3,
+        no_progress_limit_by_category={"lighting": 5, "export": 5},
+    )
+    task = {"category": "lighting", "id": "lighting_003_three_point_lighting"}
+
+    repair = _repair_config(config, task)
+    assert repair.max_steps_by_category == {"export": 8, "lighting": 12}
+    assert repair.no_progress_limit == 5
+
+    issue = MagicMock()
+    issue.code = "light_direction_mismatch"
+    val_result = MagicMock()
+    val_result.total_score = 0.97
+    val_result.issues = [issue]
+
+    repair_near_pass = _repair_config(config, task, val_result)
+    assert repair_near_pass.detect_no_progress is False

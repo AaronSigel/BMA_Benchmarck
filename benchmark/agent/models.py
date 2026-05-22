@@ -127,6 +127,7 @@ class AgentConfig(BaseModel):
     detect_duplicate_objects: bool = True
     detect_no_progress: bool = True
     no_progress_limit: int = Field(default=2, ge=1)
+    no_progress_limit_by_category: dict[str, int] = Field(default_factory=dict)
     repeated_action_mode: str = "debug"
     react_action_protocol: ReactActionProtocol = ReactActionProtocol.JSON_CONTENT
     allow_python_tools: bool = False
@@ -179,6 +180,8 @@ class ToolCallResult(BaseModel):
     status: ToolCallStatus
     result: dict[str, Any] | list[Any] | str | int | float | bool | None = None
     error: str | None = None
+    error_type: str | None = None
+    failure_stage: str | None = None
     started_at: datetime.datetime | None = None
     finished_at: datetime.datetime | None = None
     duration_sec: float | None = Field(default=None, ge=0.0)

@@ -208,6 +208,12 @@ def _apply_run_overrides(agent_config: AgentConfig, config: RunConfig) -> AgentC
         if isinstance(limits, dict):
             if isinstance(limits.get("max_steps"), int):
                 updates["max_steps"] = limits["max_steps"]
+            if isinstance(limits.get("max_steps_by_category"), dict):
+                updates["max_steps_by_category"] = {
+                    str(key): int(value)
+                    for key, value in limits["max_steps_by_category"].items()
+                    if isinstance(value, int)
+                }
             for key in (
                 "stop_after_scene_passed",
                 "detect_repeated_actions",
@@ -218,6 +224,12 @@ def _apply_run_overrides(agent_config: AgentConfig, config: RunConfig) -> AgentC
             ):
                 if key in limits:
                     updates[key] = limits[key]
+            if isinstance(limits.get("no_progress_limit_by_category"), dict):
+                updates["no_progress_limit_by_category"] = {
+                    str(key): int(value)
+                    for key, value in limits["no_progress_limit_by_category"].items()
+                    if isinstance(value, int)
+                }
     if not updates:
         return agent_config
     return agent_config.model_copy(update=updates)
@@ -258,9 +270,12 @@ def _prepare_blender_scene(
                     tool_name="reset_scene",
                     message=_envelope_error_message(reset_result),
                     failure_stage="reset_scene",
-                )
+                ),
+                adapter=mcp_executor.adapter,
             )
             if action in {WatchdogAction.RESTARTED, WatchdogAction.ALLOW_RETRY}:
+                if action == WatchdogAction.RESTARTED and not watchdog.verify_after_restart(mcp_executor.adapter):
+                    return "Blender worker unhealthy after restart", None
                 reset_result = mcp_executor.adapter.reset_scene()
         if _envelope_failed(reset_result):
             warning = _envelope_error_message(reset_result)
@@ -304,7 +319,26 @@ def _capture_snapshot_to_path(tool_executor: ToolExecutor, snapshot_path: Path) 
             )
         elif snapshot_path.exists():
             last_known = snapshot_path
+            watchdog = getattr(mcp_executor.adapter, "_watchdog", None)
+            if watchdog is not None:
+                watchdog.record_snapshot_success()
             return snapshot_path
+        watchdog = getattr(mcp_executor.adapter, "_watchdog", None)
+        if watchdog is not None and _envelope_failed(result):
+            from benchmark.mcp.socket_watchdog import SocketFailureEvent, WatchdogAction
+            error_type = _envelope_error_type(result) or "SnapshotUnavailable"
+            action = watchdog.on_socket_failure(
+                SocketFailureEvent(
+                    error_type=error_type,
+                    tool_name="bma_get_scene_snapshot",
+                    message=_envelope_error_message(result),
+                    failure_stage="snapshot_collection",
+                    attempt=attempt + 1,
+                ),
+                adapter=mcp_executor.adapter,
+            )
+            if action == WatchdogAction.RESTARTED and not watchdog.verify_after_restart(mcp_executor.adapter):
+                return last_known
     return last_known
 
 
@@ -432,7 +466,14 @@ def _build_tool_executor(strategy: AgentStrategyName, config: RunConfig) -> Tool
         raw = yaml.safe_load(config.mcp_config_path.read_text(encoding="utf-8")) or {}
         mcp_config = McpServerConfig(**{k: v for k, v in raw.items() if k != "env"})
         from benchmark.mcp.socket_watchdog import BlenderSocketWatchdog
-        watchdog = BlenderSocketWatchdog(mcp_config, mcp_config_path=config.mcp_config_path)
+        worker_lifecycle = config.metadata.get("worker_lifecycle")
+        if not isinstance(worker_lifecycle, dict):
+            worker_lifecycle = {}
+        watchdog = BlenderSocketWatchdog(
+            mcp_config,
+            mcp_config_path=config.mcp_config_path,
+            worker_lifecycle=worker_lifecycle,
+        )
         adapter = ExternalBlenderMcpServerAdapter(
             mcp_config,
             watchdog=watchdog,

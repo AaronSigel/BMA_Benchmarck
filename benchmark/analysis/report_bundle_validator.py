@@ -84,6 +84,26 @@ def validate_report_bundle_result(bundle: Path | str, *, write_result: bool = Tr
             add("summary_csv_rows", "failed", expected=expected, actual=len(rows), message=f"summary.csv run count {len(rows)} != expected {expected}")
         elif expected is not None:
             add("summary_csv_rows", "passed", expected=expected, actual=len(rows))
+        if isinstance(manifest, dict):
+            metadata = manifest.get("metadata")
+            if isinstance(metadata, dict):
+                planned = metadata.get("planned_runs")
+                expected_runs = metadata.get("expected_runs")
+                if isinstance(planned, int) and isinstance(expected_runs, int) and planned != expected_runs:
+                    add(
+                        "manifest_planned_vs_expected_runs",
+                        "failed",
+                        expected=expected_runs,
+                        actual=planned,
+                        message=f"manifest planned_runs {planned} != expected_runs {expected_runs}",
+                    )
+                elif isinstance(planned, int) and isinstance(expected_runs, int):
+                    add(
+                        "manifest_planned_vs_expected_runs",
+                        "passed",
+                        expected=expected_runs,
+                        actual=planned,
+                    )
 
     if rows and isinstance(summary, dict):
         _check_total("summary.json", summary.get("total_runs"), len(rows), add)
@@ -255,10 +275,37 @@ def _evaluate_readiness_gates(
             "hybrid_repair_activation_required_for_failed_validation": True,
         }
 
-    def _fail(name: str, expected: Any, actual: Any, *, severity: str = "blocking", gate_category: str | None = None) -> None:
+    def _affected_run_entry(row: dict[str, str]) -> dict[str, str]:
+        artifact_dir = str(row.get("artifact_dir", "")).strip()
+        source_file = ""
+        if artifact_dir:
+            source_file = f"{artifact_dir}/run_result.json"
+        return {
+            "run_id": str(row.get("run_id", "")).strip(),
+            "task_id": str(row.get("task_id", "")).strip(),
+            "strategy": str(row.get("strategy", "")).strip(),
+            "agent_id": str(row.get("agent_id", "")).strip(),
+            "mcp_profile": str(row.get("mcp_profile", "")).strip(),
+            "error_type": str(row.get("error_type", "")).strip(),
+            "error_class": str(row.get("error_class", "")).strip(),
+            "is_infra_failure": str(row.get("is_infra_failure", "")).strip(),
+            "source_file": source_file,
+        }
+
+    def _fail(
+        name: str,
+        expected: Any,
+        actual: Any,
+        *,
+        severity: str = "blocking",
+        gate_category: str | None = None,
+        affected_runs: list[dict[str, str]] | None = None,
+    ) -> None:
         entry = {"name": name, "expected": expected, "actual": actual, "severity": severity}
         if gate_category:
             entry["gate_category"] = gate_category
+        if affected_runs:
+            entry["affected_runs"] = affected_runs
         if severity == "warning":
             warning_gates.append(entry)
         else:
@@ -285,32 +332,47 @@ def _evaluate_readiness_gates(
             _fail(gate_name, threshold_value, round(actual_rate, 4), severity=severity, gate_category=gate_category)
 
     # --- invalid_tool_response_export_max ---
-    # Max allowed InvalidToolResponse / EmptySocketResponse / InvalidJsonResponse on export tasks.
+    # Max allowed InvalidToolResponse / InvalidJsonResponse on export tasks (response-parse failures only).
     gate_name = "invalid_tool_response_export_max"
     if gate_name in gates:
         gates_checked.append(gate_name)
         threshold = int(gates[gate_name])
         export_rows = [r for r in rows if _task_category(r) == "export"]
-        bad_types = {"InvalidToolResponse", "InvalidJsonResponse", "EmptySocketResponse", "ToolError"}
-        invalid_count = sum(
-            1 for r in export_rows
-            if str(r.get("error_type", "")).strip() in bad_types
-        )
+        invalid_response_types = {"InvalidToolResponse", "InvalidJsonResponse"}
+
+        def _invalid_tool_response_export_row(row: dict[str, str]) -> bool:
+            if _bool_metric(row.get("is_infra_failure")):
+                return False
+            return str(row.get("error_type", "")).strip() in invalid_response_types
+
+        affected = [r for r in export_rows if _invalid_tool_response_export_row(r)]
+        invalid_count = len(affected)
         if invalid_count > threshold:
-            _fail(gate_name, threshold, invalid_count)
+            _fail(
+                gate_name,
+                threshold,
+                invalid_count,
+                affected_runs=[_affected_run_entry(r) for r in affected],
+            )
 
     # --- clean_pass_with_error_type_max ---
     gate_name = "clean_pass_with_error_type_max"
     if gate_name in gates:
         gates_checked.append(gate_name)
         threshold = int(gates[gate_name])
-        count = sum(
-            1 for r in rows
+        affected = [
+            r for r in rows
             if str(r.get("pass_type", "")).strip() == "clean_pass"
             and str(r.get("error_type", "")).strip() not in {"", "null", "None"}
-        )
+        ]
+        count = len(affected)
         if count > threshold:
-            _fail(gate_name, threshold, count)
+            _fail(
+                gate_name,
+                threshold,
+                count,
+                affected_runs=[_affected_run_entry(r) for r in affected],
+            )
 
     # --- react_max_steps_rate_max ---
     # Max fraction of ReAct runs that hit ReactMaxSteps.
@@ -457,10 +519,11 @@ def _evaluate_readiness_gates(
             )
     if "empty_socket_response_count_max" in gates:
         gates_checked.append("empty_socket_response_count_max")
-        empty_count = sum(
-            1 for r in rows
+        affected = [
+            r for r in rows
             if str(r.get("error_type", "")).strip() == "EmptySocketResponse"
-        )
+        ]
+        empty_count = len(affected)
         threshold = int(gates["empty_socket_response_count_max"])
         if empty_count > threshold:
             infra_rate = _infra_error_rate(rows)
@@ -472,6 +535,7 @@ def _evaluate_readiness_gates(
                 empty_count,
                 severity=severity,
                 gate_category="infra",
+                affected_runs=[_affected_run_entry(r) for r in affected],
             )
     for category, gate_name in (
         ("geometry", "geometry_success_rate_min"),

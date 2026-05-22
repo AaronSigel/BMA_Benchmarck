@@ -80,6 +80,31 @@ def test_run_metadata_overrides_agent_model_and_mcp_profile(tmp_path: Path) -> N
     assert config.llm.model == "qwen/qwen3-14b"
 
 
+def test_run_metadata_applies_strategy_limits_by_category(tmp_path: Path) -> None:
+    agent_path = make_agent_config(tmp_path / "agent.yaml")
+    run_config = make_run_config(tmp_path, agent_path, ExecutionMode.AGENT_MCP).model_copy(
+        update={
+            "metadata": {
+                "strategy_limits": {
+                    "direct_tool_calling": {
+                        "max_steps": 20,
+                        "max_steps_by_category": {"export": 6, "lighting": 10},
+                        "no_progress_limit": 3,
+                        "no_progress_limit_by_category": {"export": 5},
+                    }
+                }
+            }
+        }
+    )
+
+    config = _apply_run_overrides(load_agent_config(agent_path), run_config)
+
+    assert config.max_steps == 20
+    assert config.max_steps_by_category == {"export": 6, "lighting": 10}
+    assert config.no_progress_limit == 3
+    assert config.no_progress_limit_by_category == {"export": 5}
+
+
 def test_agent_mcp_requires_agent_config_path(tmp_path: Path) -> None:
     config = RunConfig(
         run_id="run-1",

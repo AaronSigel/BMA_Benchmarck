@@ -67,6 +67,9 @@ def _prefer_direction_for_rotation(expected: ExpectedLight) -> bool:
     return expected.type.upper() in {"SUN", "AREA", "SPOT"}
 
 
+_DIRECTION_GRACE_DEG = 5.0
+
+
 def _resolve_target(target: Vector3 | str | None, snapshot: SceneSnapshot) -> Vector3 | None:
     if target is None:
         return None
@@ -274,14 +277,22 @@ class LightValidator:
             expected.rotation is not None and _prefer_direction_for_rotation(expected)
         )
         direction_ok = True
+        within_grace = True
         if uses_direction:
             _, actual_dir, expected_dir, angle_deg = self._direction_score(
                 expected, actual, expected_scene, snapshot
             )
             tol = expected.direction_tolerance_deg
+            grace_tol = tol + _DIRECTION_GRACE_DEG
             direction_ok = angle_deg <= tol
+            within_grace = angle_deg <= grace_tol
             if not direction_ok:
                 target_point = _resolve_light_target(expected, expected_scene, snapshot)
+                severity = (
+                    ValidationSeverity.WARNING
+                    if within_grace
+                    else ValidationSeverity.ERROR
+                )
                 issues.append(
                     ValidationIssue(
                         code="light_direction_mismatch",
@@ -289,7 +300,7 @@ class LightValidator:
                             f"Light direction deviates {angle_deg:.1f}° from expected "
                             f"(tolerance {tol}°)."
                         ),
-                        severity=ValidationSeverity.ERROR,
+                        severity=severity,
                         expected_path=(
                             f"{expected_path}.target"
                             if expected.target is not None
@@ -305,7 +316,9 @@ class LightValidator:
                     )
                 )
 
-        if expected.rotation is not None and _prefer_direction_for_rotation(expected) and direction_ok:
+        if expected.rotation is not None and _prefer_direction_for_rotation(expected) and (
+            direction_ok or within_grace
+        ):
             euler_score = vector_tolerance_score(
                 _deg_to_rad_v3(expected.rotation), actual.rotation_euler, expected.tolerance
             )

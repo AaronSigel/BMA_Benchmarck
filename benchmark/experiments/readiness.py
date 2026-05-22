@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from benchmark.experiments.models import EnvironmentRequirement, ExperimentMatrix, ReadinessCheckResult
+from benchmark.experiments.generator import generate_experiment_config
 from benchmark.experiments.matrix import (
     ExperimentMatrixError,
     load_agent_pool,
@@ -77,6 +78,22 @@ def check_matrix_readiness(matrix: ExperimentMatrix) -> ReadinessCheckResult:
         )
 
     _check_writable_dir(matrix.output_root, "output_root_writable", errors, requirements)
+
+    expected_runs = matrix.metadata.get("expected_runs")
+    if isinstance(expected_runs, int):
+        try:
+            planned_runs = len(generate_experiment_config(matrix).runs)
+            if planned_runs != expected_runs:
+                message = (
+                    f"planned_runs ({planned_runs}) != expected_runs ({expected_runs}) "
+                    f"for matrix {matrix.matrix_id}"
+                )
+                if bool(matrix.metadata.get("strict_readiness", False)):
+                    errors.append(message)
+                else:
+                    warnings.append(message)
+        except Exception as error:  # noqa: BLE001
+            warnings.append(f"could not verify planned_runs vs expected_runs: {error}")
 
     modes = matrix.execution_modes
     if _requires_blender(modes):

@@ -37,39 +37,71 @@ def write_report_text_ru(analysis: ExperimentAnalysisResult, path: Path) -> None
     react_counts = _status_counts(react)
     react_cost = _cost_total(react)
     total_cost = _cost_total(runs)
+    repetitions = _repetitions_count(analysis)
+    react_rate = _strategy_reported_success_rate(react)
+    export_rate = _category_reported_success_rate(analysis, "export")
+    lighting_rate = _category_reported_success_rate(analysis, "lighting")
+    repetition_text = (
+        "Выполнено несколько повторений экспериментальной матрицы, что позволяет оценить устойчивость результатов между запусками. "
+        if repetitions > 1
+        else ""
+    )
+    react_text = (
+        "ReAct-стратегия показала работоспособность в режиме validator-guided repair, однако часть успешных запусков относится к soft-pass из-за ошибок завершения после прохождения валидации. "
+        if react_rate is not None and react_rate >= 0.85
+        else "ReAct сохраняется как диагностическая стратегия с ограничениями agent loop на многошаговых Blender-задачах. "
+    )
+    export_text = (
+        "Экспортные задачи больше не являются системным блокером стенда, однако strict success может быть ниже из-за soft-pass в ReAct/Hybrid. "
+        if export_rate is not None and export_rate >= 0.75
+        else "Экспортные задачи остаются чувствительной категорией и требуют отдельного анализа по strict success. "
+    )
+    lighting_text = (
+        "Категория освещения проходит минимальный readiness-порог, но задача three-point lighting остаётся более чувствительной к направлению источников света. "
+        if lighting_rate is not None and lighting_rate >= 0.70
+        else "Категория освещения требует дополнительной стабилизации validator и repair-контура. "
+    )
+    infra_text = ""
+    if s.infra_error_rate is not None and s.infra_error_rate > 0:
+        infra_text = (
+            f"Отдельно учитываются инфраструктурные ошибки Blender socket/runtime ({_pct(s.infra_error_rate)}), "
+            "которые не приравниваются к ошибкам модели. "
+            f"Model failure rate: {_pct(s.model_failure_rate)}, validation failure rate: {_pct(s.validation_failure_rate)}, "
+            f"tool runtime failure rate: {_pct(s.tool_runtime_failure_rate)}, soft success diagnostic rate: {_pct(s.soft_success_diagnostic_rate)}. "
+        )
     text = f"""# Текст для отчёта
 
 ## 1. Описание экспериментального запуска
 
-В рамках диагностического прогона была использована матрица `{analysis.experiment_id}` из {s.total_runs} запусков. Прогон включал {len(set(r.task_id for r in runs))} Blender-задач, {len(set(r.strategy for r in runs))} стратегии агента ({strategies}) и {len(set(r.mcp_profile for r in runs if r.mcp_profile))} MCP-профилей ({profiles}). В качестве модели использовалась {models}. Основной целью запуска являлась проверка воспроизводимости стенда и выявление различий между режимами выполнения, а не достижение максимального качества на всех задачах.
+В рамках диагностического прогона была использована матрица `{analysis.experiment_id}` из {s.total_runs} запусков ({repetitions} повторност{'и' if repetitions > 1 else 'ь'}). {repetition_text}Прогон включал {len(set(r.task_id for r in runs))} Blender-задач, {len(set(r.strategy for r in runs))} стратегии агента ({strategies}) и {len(set(r.mcp_profile for r in runs if r.mcp_profile))} MCP-профилей ({profiles}). В качестве модели использовалась {models}. Основной целью запуска являлась проверка воспроизводимости стенда и выявление различий между режимами выполнения.
 
 ## 2. Сводные результаты
 
-Чисто успешных запусков зафиксировано {s.clean_pass_count}, soft pass запусков - {s.soft_pass_count}, failed validation - {s.failed_validation_count or s.failed_count}, runtime error - {s.runtime_error_count or s.error_count}. Строгая доля успеха составила {_pct(s.strict_success_rate)}, отчётная доля успеха с учётом soft pass - {_pct(s.reported_success_rate)}, а доля неуспешных запусков - {_pct(s.failure_rate)}. Суммарная provider-reported стоимость OpenRouter составила {_num(total_cost, 6)} USD.
+Чисто успешных запусков зафиксировано {s.clean_pass_count}, soft pass — {s.soft_pass_count}, failed validation — {s.failed_validation_count or s.failed_count}, runtime error — {s.runtime_error_count or s.error_count}. Строгая доля успеха (all runs): {_pct(s.strict_success_rate)}, отчётная доля успеха (all runs): {_pct(s.reported_success_rate)}, strict success excluding infra: {_pct(s.strict_success_rate_excluding_infra)}, reported success excluding infra: {_pct(s.reported_success_rate_excluding_infra)}. {infra_text}Суммарная provider-reported стоимость OpenRouter составила {_num(total_cost, 6)} USD.
 
 ## 3. Сравнение стратегий
 
-Наиболее устойчивой стратегией по отчётной доле успешных запусков стала {best}. ReAct в MVP сохраняется как диагностическая стратегия: для неё выполнено {len(react)} запусков, clean pass - {react_counts["clean_pass"]}, failed validation - {react_counts["failed_validation"]}, runtime error - {react_counts["runtime_error"]}, стоимость - {_num(react_cost, 6)} USD. Низкий success rate ReAct не является ошибкой стенда, а отражает ограничения текущей реализации agent loop на многошаговых Blender-задачах.
+Наиболее устойчивой стратегией по отчётной доле успешных запусков стала {best}. {react_text}Для ReAct выполнено {len(react)} запусков, reported success — {_pct(react_rate)}, clean pass — {react_counts["clean_pass"]}, failed validation — {react_counts["failed_validation"]}, runtime error — {react_counts["runtime_error"]}, стоимость — {_num(react_cost, 6)} USD.
 
 ## 4. Сравнение MCP-профилей
 
-Сравнение MCP-профилей проводилось по одинаковой матрице задач и стратегий. Профили рассматривались как разные режимы доступности инструментов, поэтому различия в результатах интерпретируются как влияние tool surface на устойчивость агента. Лучшим профилем по отчётной доле успешных запусков стал {best_profile}.
+Сравнение MCP-профилей проводилось по одинаковой матрице задач и стратегий. Профили рассматривались как разные режимы доступности инструментов. Лучшим профилем по отчётной доле успешных запусков стал {best_profile}.
 
 ## 5. Анализ категорий задач
 
-Наиболее проблемные категории задач в данном прогоне: {weak_categories}. Эти категории следует рассматривать как основные направления дальнейшей стабилизации benchmark-сценариев и агентных стратегий.
+Наиболее проблемные категории задач в данном прогоне: {weak_categories}. {export_text}{lighting_text}Export reported success — {_pct(export_rate)}, lighting reported success — {_pct(lighting_rate)}.
 
 ## 6. Анализ ошибок
 
-Основные validation issues: {top_validation}. Основные agent issues: {top_agent}. Основные tool issues: {top_tool}. Runtime errors по типам: {error_groups}. Ошибки включены в отчётный результат и классифицированы через `pass_type` и `error_type`, поэтому они не требуют ручной переработки raw artifacts.
+Основные validation issues: {top_validation}. Основные agent issues: {top_agent}. Основные tool issues: {top_tool}. Runtime errors по типам: {error_groups}. Ошибки классифицированы через `pass_type`, `error_type` и `error_class` (model / validation / infra / soft diagnostic).
 
 ## 7. Ограничения прогона
 
-MVP-прогон использует одну модель и одну повторность, поэтому результаты отражают диагностическую картину конкретной конфигурации, а не финальную оценку всех возможных моделей и режимов. Export и Lighting остаются сложными категориями, требующими отдельной стабилизации. Benchmark оценивает не только итоговую сцену, но и процесс tool-use. Стоимость берётся только из provider-reported данных OpenRouter; внутренние формулы оценки стоимости не используются.
+Прогон использует фиксированный набор моделей и {repetitions} повторност{'и' if repetitions > 1 else 'ь'} матрицы; generation_profile фиксирован, sweep decoding-параметров не входит в основной эксперимент. Основной контур ограничен API-based LLM backends; Claude Code / Codex CLI рассматриваются как experimental remote-agent extension. Benchmark оценивает итоговую сцену и процесс tool-use. Стоимость берётся только из provider-reported данных OpenRouter.
 
 ## 8. Вывод
 
-Benchmark-стенд сформировал воспроизводимый отчётный пакет: CSV-таблицу, JSON-агрегацию, Markdown/HTML-отчёты, графики и текстовый блок для вставки в работу. Основной результат MVP состоит в автоматической подготовке данных для отчёта и прозрачной фиксации ограничений агентов, стратегий и MCP-профилей.
+Benchmark-стенд сформировал воспроизводимый отчётный пакет: CSV-таблицу, JSON-агрегацию, Markdown/HTML-отчёты, графики и текстовый блок для вставки в работу. Отчётные метрики разделены на raw (all runs) и infra-filtered срезы для отделения качества модели от стабильности runtime.
 """
     path.write_text(text, encoding="utf-8")
 
@@ -98,9 +130,9 @@ def write_readme_report(path: Path) -> None:
 
 `failed_validation` показывает проблему качества итоговой сцены. `runtime_error` показывает проблему выполнения агента, инструмента или runtime.
 
-ReAct в текущем MVP является диагностической стратегией. Его низкая доля успеха интерпретируется как результат эксперимента и ограничение текущего agent loop, а не как ошибка benchmark-стенда.
+ReAct интерпретируется по фактическому reported success rate: при высоком success (>85%) стратегия считается рабочей в validator-guided repair-контуре.
 
-Стоимость OpenRouter интерпретируется только как provider-reported cost: если провайдер не вернул стоимость, стенд не подставляет внутреннюю оценку. Ограничения MVP: используется одна модель, одна повторность, export и lighting остаются сложными категориями, результаты зависят от доступности OpenRouter и MCP/Blender runtime.
+Стоимость OpenRouter интерпретируется только как provider-reported cost. Ограничения: repetitions и generation_profile фиксируются в matrix config; sweep decoding-параметров не входит в основной эксперимент; Claude Code / Codex CLI — experimental extension, не основная матрица.
 """,
         encoding="utf-8",
     )
@@ -314,3 +346,39 @@ def _num(value: object, digits: int = 3) -> str:
     if isinstance(value, float):
         return f"{value:.{digits}f}"
     return str(value)
+
+
+def _repetitions_count(analysis: ExperimentAnalysisResult) -> int:
+    meta_rep = analysis.metadata.get("repetitions")
+    if isinstance(meta_rep, int) and meta_rep > 0:
+        return meta_rep
+    preflight = analysis.metadata.get("preflight")
+    if isinstance(preflight, dict):
+        for key in ("repetitions",):
+            value = preflight.get(key)
+            if isinstance(value, int) and value > 0:
+                return value
+    reps: set[int] = set()
+    import re
+
+    for run in analysis.runs:
+        rep = run.metrics.get("run_summary.repetition") or run.metrics.get("repetition")
+        if isinstance(rep, int) and rep > 0:
+            reps.add(rep)
+            continue
+        match = re.search(r"__r(\d+)$", run.run_id)
+        if match:
+            reps.add(int(match.group(1)))
+    return max(reps) if reps else 1
+
+
+def _strategy_reported_success_rate(runs: list) -> float | None:
+    if not runs:
+        return None
+    c = _status_counts(runs)
+    return (c["clean_pass"] + c["soft_pass"]) / len(runs)
+
+
+def _category_reported_success_rate(analysis: ExperimentAnalysisResult, category: str) -> float | None:
+    items = [r for r in analysis.runs if _category(r) == category]
+    return _strategy_reported_success_rate(items)

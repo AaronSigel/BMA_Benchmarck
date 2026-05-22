@@ -147,7 +147,7 @@ python -m bma_benchmark run-matrix \
   --config configs/matrices/diagnostic_repeat_gemini_v5.yaml
 ```
 
-Матрица `diagnostic_repeat_gemini_v5` рассчитана на 270 запусков: 18 задач, 3 стратегии, 5 MCP-профилей, 1 модель и 1 повтор. Для неё включён `report_ready_mvp`, поэтому отчёты и `report_bundle/` создаются автоматически.
+Матрица `diagnostic_repeat_gemini_v5` рассчитана на 720 запусков: 18 задач, 4 стратегии, 5 MCP-профилей, 1 модель и 2 повторности. Для неё включён `report_ready_mvp`, поэтому отчёты и `report_bundle/` создаются автоматически.
 
 ### Стабилизированный workflow
 
@@ -750,10 +750,10 @@ python -m bma_benchmark run-matrix \
   --config configs/matrices/diagnostic_repeat_gemini_v5.yaml
 ```
 
-This matrix runs 18 Blender tasks across three strategies
-(`direct_tool_calling`, `plan_and_execute`, `react`), five MCP profiles
+This matrix runs 18 Blender tasks across four strategies
+(`direct`, `plan_and_execute`, `react`, `plan_execute_react_repair`), five MCP profiles
 (`minimal`, `no_python`, `inspection_enabled`, `python_enabled`, `full`), one
-OpenRouter model (`google/gemini-2.5-flash-lite`), and one repetition: 270 runs
+OpenRouter model (`google/gemini-2.5-flash-lite`), and two repetitions: 720 runs
 total. The command creates a timestamped output directory:
 
 ```text
@@ -799,14 +799,22 @@ remain in `summary.csv`, but report tables use `pass_type`.
 
 `direct_tool_calling` issues tool calls directly, `plan_and_execute` separates
 planning from execution, and `react` uses an iterative reasoning/action loop.
-ReAct in the MVP is retained as a diagnostic strategy. A low ReAct success rate
-is not a benchmark failure; it reflects current limitations of the agent loop
-on multi-step Blender tasks.
+ReAct is evaluated in validator-guided repair mode; when reported success is high
+(>85%), it is treated as a working diagnostic/repair contour rather than a broken strategy.
 
 MCP profiles define the available tool surface. `minimal` is the smallest
 surface, `no_python` disables arbitrary Python while keeping structured BMA
 tools, `inspection_enabled` adds scene inspection, `python_enabled` enables
 Python-oriented tools, and `full` exposes the broadest profile.
+
+### Experimental scope
+
+The primary experimental contour is limited to API-based LLM backends (OpenRouter).
+Claude Code / Codex CLI are treated as an experimental remote-agent extension and
+are not part of the main benchmark matrix. `generation_profile` is fixed per matrix;
+decoding-parameter sweeps (`top_p`, `top_k`, `temperature`) are outside the main
+experiment. Diagnostic matrices use `repetitions: 2` to balance cost, duration,
+and run-to-run stability assessment.
 
 ### OpenRouter cost
 
@@ -817,6 +825,7 @@ token-to-price estimation formulas are not used for report totals.
 
 The MVP focuses on producing a reproducible report package, not on maximizing
 success rate. It intentionally preserves real failures from agents, strategies,
-tools, validators, and MCP profiles as classified benchmark results. Multi-model
-comparison, repeated statistical runs, render similarity, visual feedback loops,
+tools, validators, and MCP profiles as classified benchmark results. Infra failures
+(Blender socket/runtime) are reported separately from model and validation failures.
+Multi-model comparison beyond configured matrices, render similarity, visual feedback loops,
 and human-in-the-loop workflows are outside this MVP scope.

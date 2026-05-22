@@ -124,6 +124,8 @@ class McpToolExecutor:
     ) -> ToolCallResult:
         request = _coerce_request(tool_name, arguments)
         started_at = datetime.datetime.now(datetime.timezone.utc)
+        error_type: str | None = None
+        failure_stage: str | None = None
         try:
             self.assert_tool_allowed(request.name)
             raw_result = self.adapter.call_tool(request.name, request.arguments)
@@ -133,6 +135,10 @@ class McpToolExecutor:
                 error = result.get("error")
                 if isinstance(error, dict):
                     error_message = str(error.get("message") or error)
+                    raw_type = error.get("type")
+                    error_type = str(raw_type) if raw_type else None
+                    stage = error.get("stage") or error.get("failure_stage")
+                    failure_stage = str(stage) if stage else None
                 else:
                     error_message = str(error or f"Tool failed: {request.name}")
             else:
@@ -147,14 +153,18 @@ class McpToolExecutor:
             status = ToolCallStatus.FAILED
             error_message = str(error)
         finished_at = datetime.datetime.now(datetime.timezone.utc)
+        retry_log = self.adapter.get_retry_log() if hasattr(self.adapter, "get_retry_log") else []
         return ToolCallResult(
             name=request.name,
             status=status,
             result=result,
             error=error_message,
+            error_type=error_type,
+            failure_stage=failure_stage,
             started_at=started_at,
             finished_at=finished_at,
             duration_sec=(finished_at - started_at).total_seconds(),
+            metadata={"watchdog_retry_log": retry_log} if retry_log else {},
         )
 
     def normalize_tool_result(self, result: Any) -> dict[str, Any]:

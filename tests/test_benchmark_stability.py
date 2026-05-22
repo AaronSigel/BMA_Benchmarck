@@ -515,26 +515,26 @@ class TestMockReportReadyMatrix:
 # ---------------------------------------------------------------------------
 
 class TestDiagnosticRepeatDescription:
-    def test_description_matches_single_repetition(self):
+    def test_description_matches_two_repetitions(self):
         from benchmark.experiments.matrix import load_matrix
         matrix = load_matrix("configs/matrices/diagnostic_repeat_gemini_v5.yaml")
-        assert matrix.repetitions == 1
-        assert "two-repeat" not in matrix.description.lower()
+        assert matrix.repetitions == 2
+        assert "two-repeat" in matrix.description.lower() or "2 repetitions" in matrix.description.lower()
         assert "540" not in matrix.description
 
-    def test_description_mentions_360_runs(self):
+    def test_description_mentions_720_runs(self):
         from benchmark.experiments.matrix import load_matrix
         matrix = load_matrix("configs/matrices/diagnostic_repeat_gemini_v5.yaml")
-        assert "360" in matrix.description
+        assert "720" in matrix.description
 
-    def test_expected_runs_is_360(self):
+    def test_expected_runs_is_720(self):
         from benchmark.experiments.matrix import load_matrix
         matrix = load_matrix("configs/matrices/diagnostic_repeat_gemini_v5.yaml")
-        assert matrix.metadata["expected_runs"] == 360
+        assert matrix.metadata["expected_runs"] == 720
 
-    def test_generates_360_runs(self):
+    def test_generates_720_runs(self):
         from benchmark.experiments.generator import generate_experiment_config
         from benchmark.experiments.matrix import load_matrix
         matrix = load_matrix("configs/matrices/diagnostic_repeat_gemini_v5.yaml")
         config = generate_experiment_config(matrix)
-        assert len(config.runs) == 360
+        assert len(config.runs) == 720

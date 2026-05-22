@@ -74,6 +74,7 @@ def generate_experiment_config(matrix: ExperimentMatrix) -> ExperimentConfig:
                                         "model_id": model_id,
                                         "repetition": repetition,
                                         "strategy_limits": matrix.metadata.get("strategy_limits", {}),
+                                        "worker_lifecycle": matrix.metadata.get("worker_lifecycle", {}),
                                     },
                                 )
                             )
@@ -85,6 +86,9 @@ def generate_experiment_config(matrix: ExperimentMatrix) -> ExperimentConfig:
             "matrix_id": matrix.matrix_id,
             "title": matrix.title,
             "description": matrix.description,
+            "repetitions": matrix.repetitions,
+            "expected_runs": matrix.metadata.get("expected_runs"),
+            "worker_lifecycle": matrix.metadata.get("worker_lifecycle", {}),
         },
     )
 

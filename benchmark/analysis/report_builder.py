@@ -274,6 +274,14 @@ def build_markdown_report(
         ["soft_pass_rate", _na(round(s.soft_pass_rate, 4) if s.soft_pass_rate is not None else None)],
         ["strict_success_rate (clean only)", _na(round(s.strict_success_rate, 4) if s.strict_success_rate is not None else None)],
         ["reported_success_rate (clean+soft)", _na(round(s.reported_success_rate, 4) if s.reported_success_rate is not None else None)],
+        ["reported_success_rate_all_runs", _na(round(s.reported_success_rate_all_runs or s.reported_success_rate, 4) if (s.reported_success_rate_all_runs or s.reported_success_rate) is not None else None)],
+        ["strict_success_rate_excluding_infra", _na(round(s.strict_success_rate_excluding_infra, 4) if s.strict_success_rate_excluding_infra is not None else None)],
+        ["reported_success_rate_excluding_infra", _na(round(s.reported_success_rate_excluding_infra, 4) if s.reported_success_rate_excluding_infra is not None else None)],
+        ["infra_error_rate", _na(round(s.infra_error_rate, 4) if s.infra_error_rate is not None else None)],
+        ["model_failure_rate", _na(round(s.model_failure_rate, 4) if s.model_failure_rate is not None else None)],
+        ["validation_failure_rate", _na(round(s.validation_failure_rate, 4) if s.validation_failure_rate is not None else None)],
+        ["tool_runtime_failure_rate", _na(round(s.tool_runtime_failure_rate, 4) if s.tool_runtime_failure_rate is not None else None)],
+        ["soft_success_diagnostic_rate", _na(round(s.soft_success_diagnostic_rate, 4) if s.soft_success_diagnostic_rate is not None else None)],
         ["agent_completed_count", str(s.agent_completed_count)],
         ["agent_completed_after_scene_passed_count", str(s.agent_completed_after_scene_passed_count)],
         ["agent_incomplete_count", str(s.agent_incomplete_count)],
@@ -1422,14 +1430,22 @@ def _reliability_table(analysis: ExperimentAnalysisResult, runs: list[RunAnalysi
         if str(r.metrics.get("structured_error_type") or "").strip() == "SnapshotUnavailable"
     )
     metadata = analysis.metadata if isinstance(analysis.metadata, dict) else {}
+    watchdog = metadata.get("watchdog_counters") if isinstance(metadata.get("watchdog_counters"), dict) else {}
+    restart_reasons = watchdog.get("restart_reasons", metadata.get("restart_reasons", []))
     return [
         ["infra_error_rate", _pct(s.infra_error_rate)],
+        ["reported_success_rate_all_runs", _pct(s.reported_success_rate_all_runs or s.reported_success_rate)],
         ["reported_success_rate_excluding_infra", _pct(s.reported_success_rate_excluding_infra)],
+        ["strict_success_rate_excluding_infra", _pct(s.strict_success_rate_excluding_infra)],
+        ["model_failure_rate", _pct(s.model_failure_rate)],
+        ["validation_failure_rate", _pct(s.validation_failure_rate)],
+        ["soft_success_diagnostic_rate", _pct(s.soft_success_diagnostic_rate)],
         ["socket_timeout_count", str(timeout_count)],
         ["empty_socket_response_count", str(empty_socket_count)],
         ["reset_failure_count", str(reset_failures)],
         ["snapshot_failure_count", str(snapshot_failures)],
         ["worker_restart_count", str(metadata.get("infra_worker_restarts", s.infra_worker_restarts))],
+        ["restart_reasons", str(restart_reasons or [])],
         ["tool_runtime_failure_rate", _pct(s.tool_runtime_failure_rate)],
         ["no_progress_by_reason", str(s.no_progress_by_reason or {})],
     ]
@@ -1592,7 +1608,15 @@ def _overall_rows(analysis: ExperimentAnalysisResult) -> list[list[str]]:
         ["failed_validation", str(s.failed_validation_count or s.failed_count)],
         ["runtime_error", str(s.runtime_error_count or s.error_count)],
         ["reported_success_rate", _pct(s.reported_success_rate)],
+        ["reported_success_rate_all_runs", _pct(s.reported_success_rate_all_runs or s.reported_success_rate)],
         ["strict_success_rate", _pct(s.strict_success_rate)],
+        ["strict_success_rate_excluding_infra", _pct(s.strict_success_rate_excluding_infra)],
+        ["reported_success_rate_excluding_infra", _pct(s.reported_success_rate_excluding_infra)],
+        ["infra_error_rate", _pct(s.infra_error_rate)],
+        ["model_failure_rate", _pct(s.model_failure_rate)],
+        ["validation_failure_rate", _pct(s.validation_failure_rate)],
+        ["tool_runtime_failure_rate", _pct(s.tool_runtime_failure_rate)],
+        ["soft_success_diagnostic_rate", _pct(s.soft_success_diagnostic_rate)],
         ["failure_rate", _pct(s.failure_rate)],
         ["avg_score_completed", _num(s.average_score_completed)],
         ["avg_score_strict", _num(s.average_score_strict)],

@@ -40,6 +40,11 @@ class BatchRunner:
                 resume_status[run_config.run_id] = reason
                 resume_entries.append({"run_id": run_config.run_id, "status": reason})
             result = self.runner.run(run_config)
+            if _should_retry_run_on_infra_failure(run_config, worker_lifecycle, result):
+                _restart_worker_for_run(run_config, worker_lifecycle)
+                original = result
+                result = self.runner.run(run_config)
+                result = _annotate_infra_retry(result, original=original)
             if resume and resume_status.get(run_config.run_id) in {"rerun_missing", "rerun_incomplete", "rerun_corrupted"} and result.status.value == "error":
                 resume_status[run_config.run_id] = "rerun_failed_again"
                 resume_entries[-1]["status"] = "rerun_failed_again"
@@ -89,6 +94,7 @@ def _maybe_proactive_worker_restart(
     worker_lifecycle: dict,
 ) -> None:
     from benchmark.mcp.config import McpServerConfig
+    from benchmark.mcp.server_adapter import ExternalBlenderMcpServerAdapter
     from benchmark.mcp.socket_watchdog import BlenderSocketWatchdog, get_runs_since_last_restart
     import yaml
 
@@ -98,9 +104,74 @@ def _maybe_proactive_worker_restart(
         return
     raw = yaml.safe_load(run_config.mcp_config_path.read_text(encoding="utf-8")) or {}
     mcp_config = McpServerConfig(**{k: v for k, v in raw.items() if k != "env"})
-    watchdog = BlenderSocketWatchdog(mcp_config, mcp_config_path=run_config.mcp_config_path)
-    if watchdog.proactive_restart_if_due(every_n_runs):
+    watchdog = BlenderSocketWatchdog(
+        mcp_config,
+        mcp_config_path=run_config.mcp_config_path,
+        worker_lifecycle=worker_lifecycle,
+    )
+    adapter = ExternalBlenderMcpServerAdapter(mcp_config, watchdog=watchdog)
+    watchdog.proactive_restart_if_due(every_n_runs, adapter=adapter)
+
+
+def _run_has_infra_failure(result: RunResult) -> bool:
+    summary = result.summary if isinstance(result.summary, dict) else {}
+    structured = summary.get("structured_error")
+    if isinstance(structured, dict) and structured.get("is_infra_failure"):
+        return True
+    return False
+
+
+def _should_retry_run_on_infra_failure(
+    run_config: RunConfig,
+    worker_lifecycle: dict,
+    result: RunResult,
+) -> bool:
+    max_retries = int(worker_lifecycle.get("retry_run_on_infra_failure", 0) or 0)
+    if max_retries <= 0:
+        return False
+    if result.status.value not in {"error", "failed"}:
+        return False
+    if not _run_has_infra_failure(result):
+        return False
+    max_duration = float(worker_lifecycle.get("retry_run_max_duration_sec", 300) or 300)
+    duration = result.duration_sec if result.duration_sec is not None else 0.0
+    if duration > max_duration:
+        return False
+    return run_config.mcp_config_path is not None
+
+
+def _restart_worker_for_run(run_config: RunConfig, worker_lifecycle: dict) -> None:
+    from benchmark.mcp.config import McpServerConfig
+    from benchmark.mcp.server_adapter import ExternalBlenderMcpServerAdapter
+    from benchmark.mcp.socket_watchdog import BlenderSocketWatchdog
+    import yaml
+
+    if run_config.mcp_config_path is None:
         return
+    raw = yaml.safe_load(run_config.mcp_config_path.read_text(encoding="utf-8")) or {}
+    mcp_config = McpServerConfig(**{k: v for k, v in raw.items() if k != "env"})
+    watchdog = BlenderSocketWatchdog(
+        mcp_config,
+        mcp_config_path=run_config.mcp_config_path,
+        worker_lifecycle=worker_lifecycle,
+    )
+    adapter = ExternalBlenderMcpServerAdapter(mcp_config, watchdog=watchdog)
+    if watchdog.restart_worker(reason="infra_run_retry"):
+        watchdog.verify_after_restart(adapter)
+
+
+def _annotate_infra_retry(result: RunResult, *, original: RunResult) -> RunResult:
+    summary = dict(result.summary or {})
+    original_structured = (original.summary or {}).get("structured_error")
+    original_error_type = None
+    if isinstance(original_structured, dict):
+        original_error_type = original_structured.get("error_type")
+    summary["infra_retry"] = {
+        "attempt": 2,
+        "original_error_type": original_error_type,
+        "original_status": original.status.value,
+    }
+    return result.model_copy(update={"summary": summary})
 
 
 def _experiment_output_dir(runs: list[RunConfig]) -> Path:

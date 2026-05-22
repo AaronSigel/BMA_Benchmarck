@@ -66,7 +66,7 @@ def test_idempotent_tool_retried_on_empty_response() -> None:
     assert calls["count"] == 2
 
 
-def test_non_idempotent_tool_not_retried_without_safety_check() -> None:
+def test_export_scene_retried_once_on_empty_socket() -> None:
     cfg = McpServerConfig(profile="full", blender_host="localhost", blender_port=9876)
     adapter = ExternalBlenderMcpServerAdapter(cfg)
     calls = {"count": 0}
@@ -81,6 +81,29 @@ def test_non_idempotent_tool_not_retried_without_safety_check() -> None:
 
     with patch.object(adapter, "_socket_call_once", side_effect=_socket_once):
         result = adapter.call_tool("bma_export_scene", {"filepath": "/tmp/out.glb"})
+    assert result.get("ok") is False
+    assert calls["count"] == 2
+
+
+def test_execute_blender_code_not_retried_on_runtime_failure() -> None:
+    cfg = McpServerConfig(profile="full", blender_host="localhost", blender_port=9876)
+    adapter = ExternalBlenderMcpServerAdapter(cfg)
+    calls = {"count": 0}
+
+    def _socket_once(tool_name, params, *, attempt=1):
+        calls["count"] += 1
+        return {
+            "ok": False,
+            "tool": tool_name,
+            "error": {
+                "type": "EmptySocketResponse",
+                "message": "empty",
+                "failure_stage": "blender_python_execution",
+            },
+        }
+
+    with patch.object(adapter, "_socket_call_once", side_effect=_socket_once):
+        result = adapter.call_tool("execute_blender_code", {"code": "import bpy"})
     assert result.get("ok") is False
     assert calls["count"] == 1
 

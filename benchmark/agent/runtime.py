@@ -123,14 +123,23 @@ class AgentRuntime:
 
         if trace.error and isinstance(trace.error, str) and trace.structured_error is None:
             from benchmark.runner.controlled_errors import controlled_error_payload
-            normalized_error = trace.metadata.get("react_error_type") or trace.error
-            structured = controlled_error_payload(
-                str(normalized_error),
-                enrich=True,
-                scene_passed_but_agent_error=bool(trace.metadata.get("scene_passed_but_agent_error")),
-                early_stop_reason=trace.metadata.get("early_stop_reason"),
-                no_progress_reason=trace.metadata.get("no_progress_reason"),
-            )
+            resolved = _resolve_terminal_error_from_trace(trace)
+            if resolved is not None:
+                structured = resolved
+            else:
+                normalized_error = (
+                    trace.metadata.get("terminal_infra_error_type")
+                    or trace.metadata.get("react_error_type")
+                    or trace.error
+                )
+                structured = controlled_error_payload(
+                    str(normalized_error),
+                    enrich=True,
+                    scene_passed_but_agent_error=bool(trace.metadata.get("scene_passed_but_agent_error")),
+                    early_stop_reason=trace.metadata.get("early_stop_reason"),
+                    no_progress_reason=trace.metadata.get("no_progress_reason"),
+                    failure_stage=trace.metadata.get("terminal_infra_failure_stage"),
+                )
             trace = trace.model_copy(update={"structured_error": structured})
 
         run_artifacts_dir = artifacts_dir
@@ -271,6 +280,61 @@ def _scene_snapshot_path_from_trace(trace: AgentTrace) -> Path | None:
     if value is None:
         return None
     return Path(str(value))
+
+
+def _resolve_terminal_error_from_trace(trace: AgentTrace) -> dict[str, Any] | None:
+    """Предпочитает infra tool failure в trace вместо agent terminal errors."""
+    from benchmark.runner.controlled_errors import controlled_error_payload
+    from benchmark.runner.error_classification import is_infra_error_type, is_infra_parse_error
+
+    classification_kwargs = {
+        "scene_passed_but_agent_error": bool(trace.metadata.get("scene_passed_but_agent_error")),
+        "early_stop_reason": trace.metadata.get("early_stop_reason"),
+        "no_progress_reason": trace.metadata.get("no_progress_reason"),
+    }
+
+    terminal_infra = trace.metadata.get("terminal_infra_error_type")
+    if terminal_infra and is_infra_error_type(str(terminal_infra)):
+        payload = controlled_error_payload(
+            str(trace.error or terminal_infra),
+            enrich=True,
+            failure_stage=trace.metadata.get("terminal_infra_failure_stage"),
+            **classification_kwargs,
+        )
+        payload["error_type"] = str(terminal_infra)
+        return payload
+
+    agent_terminal_types = {"ReactMaxSteps", "ReactNoProgress", "ReactInvalidAction", "LlmParseError"}
+    react_error_type = trace.metadata.get("react_error_type")
+    prefer_tool_infra = react_error_type in agent_terminal_types if react_error_type else False
+
+    for step in reversed(trace.steps):
+        if step.step_type != AgentStepType.TOOL_CALL or not step.error:
+            continue
+        meta = step.metadata or {}
+        step_error_type = meta.get("tool_error_type")
+        step_failure_stage = meta.get("failure_stage")
+        if is_infra_error_type(step_error_type) or is_infra_parse_error(step_error_type, step_failure_stage):
+            payload = controlled_error_payload(
+                step.error,
+                enrich=True,
+                failure_stage=step_failure_stage,
+                **classification_kwargs,
+            )
+            if step_error_type:
+                payload["error_type"] = step_error_type
+            return payload
+        if prefer_tool_infra:
+            payload = controlled_error_payload(
+                step.error,
+                enrich=True,
+                failure_stage=step_failure_stage,
+                **classification_kwargs,
+            )
+            if payload.get("is_infra_failure"):
+                return payload
+
+    return None
 
 
 def _inject_scene_validator(

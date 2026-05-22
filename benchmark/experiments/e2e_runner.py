@@ -192,13 +192,19 @@ def _mark_profile_preflight(config: ExperimentConfig, preflight: dict[str, Any])
 
 
 def run_analysis(output_root: Path) -> ExperimentAnalysisResult:
-    from benchmark.analysis.comparison import analyze_experiment
+    import json
+
+    from benchmark.analysis.comparison import analyze_experiment, build_infra_reliability_payload
     from benchmark.analysis.export import write_experiment_analysis_json, write_run_metrics_csv
 
     analysis = analyze_experiment(output_root)
     write_experiment_analysis_json(analysis, output_root / "experiment_analysis.json")
     write_run_metrics_csv(analysis.runs, output_root / "summary.csv")
-    (output_root / "summary.json").write_text(analysis.summary.model_dump_json(indent=2), encoding="utf-8")
+    summary_payload = {
+        **analysis.summary.model_dump(mode="json"),
+        "infra_reliability": build_infra_reliability_payload(analysis.summary, analysis.metadata),
+    }
+    (output_root / "summary.json").write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
     return analysis
 
 

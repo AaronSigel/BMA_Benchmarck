@@ -138,6 +138,8 @@ class ExperimentSummary(BaseModel):
     soft_pass_rate: float | None = Field(default=None, ge=0.0, le=1.0)
     strict_success_rate: float | None = Field(default=None, ge=0.0, le=1.0)
     reported_success_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    reported_success_rate_all_runs: float | None = Field(default=None, ge=0.0, le=1.0)
+    strict_success_rate_excluding_infra: float | None = Field(default=None, ge=0.0, le=1.0)
 
     # Agent completion breakdown
     agent_completed_count: int = Field(default=0, ge=0)

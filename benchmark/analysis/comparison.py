@@ -252,6 +252,67 @@ def compare_models(results: list[RunAnalysisResult]) -> ComparisonReport:
 # Experiment summary computation
 # ---------------------------------------------------------------------------
 
+_INFRA_TIMEOUT_TYPES = frozenset({"ToolTimeout", "SocketTimeout"})
+_TERMINAL_INFRA_TYPES = _INFRA_TIMEOUT_TYPES | frozenset({
+    "EmptySocketResponse",
+    "BlenderWorkerUnhealthy",
+    "ResetSceneFailed",
+    "BlenderSocketUnavailable",
+    "BlenderSocketNoResponse",
+    "SocketError",
+})
+
+
+def _structured_error_type(result: RunAnalysisResult) -> str:
+    return str(
+        result.metrics.get("structured_error_type") or result.metrics.get("error_type") or ""
+    ).strip()
+
+
+def count_terminal_infra_from_runs(results: list[RunAnalysisResult]) -> dict[str, int]:
+    """Terminal infra counts from final run-level error types (readiness gate source of truth)."""
+    socket_timeouts = sum(
+        1 for r in results if _structured_error_type(r) in _INFRA_TIMEOUT_TYPES
+    )
+    empty_socket_responses = sum(
+        1 for r in results if _structured_error_type(r) == "EmptySocketResponse"
+    )
+    worker_unhealthy = sum(
+        1 for r in results if _structured_error_type(r) == "BlenderWorkerUnhealthy"
+    )
+    reset_scene_failed = sum(
+        1 for r in results if _structured_error_type(r) == "ResetSceneFailed"
+    )
+    return {
+        "socket_timeout_count": socket_timeouts,
+        "empty_socket_response_count": empty_socket_responses,
+        "worker_unhealthy_count": worker_unhealthy,
+        "reset_scene_failed_count": reset_scene_failed,
+        "terminal_infra_count": sum(
+            1 for r in results if _structured_error_type(r) in _TERMINAL_INFRA_TYPES
+        ),
+    }
+
+
+def build_infra_reliability_payload(
+    summary: ExperimentSummary,
+    metadata: dict | None = None,
+) -> dict[str, object]:
+    """Dual-layer infra metrics: terminal run failures vs watchdog event totals."""
+    meta = metadata if isinstance(metadata, dict) else {}
+    watchdog = meta.get("watchdog_counters")
+    watchdog_payload = watchdog if isinstance(watchdog, dict) else {}
+    return {
+        "terminal_socket_timeout_count": summary.infra_socket_timeouts,
+        "terminal_empty_socket_response_count": summary.infra_empty_socket_responses,
+        "terminal_worker_restart_count": summary.infra_worker_restarts,
+        "watchdog_socket_timeout_count": int(watchdog_payload.get("infra_socket_timeouts", 0) or 0),
+        "watchdog_empty_socket_response_count": int(
+            watchdog_payload.get("infra_empty_socket_responses", 0) or 0
+        ),
+        "watchdog_worker_restart_count": int(watchdog_payload.get("infra_worker_restarts", 0) or 0),
+    }
+
 
 def _build_summary(results: list[RunAnalysisResult]) -> ExperimentSummary:
     total = len(results)
@@ -333,11 +394,19 @@ def _build_summary(results: list[RunAnalysisResult]) -> ExperimentSummary:
         if _effective_pass_type(r) in {"clean_pass", "soft_pass"}
         and not bool(r.metrics.get("is_infra_failure"))
     )
+    clean_pass_excluding_infra = sum(
+        1 for r in results
+        if _effective_pass_type(r) == "clean_pass"
+        and not bool(r.metrics.get("is_infra_failure"))
+    )
+    healthy_total = total - infra_runs
     no_progress_by_reason: dict[str, int] = {}
     for r in results:
         reason = str(r.metrics.get("no_progress_reason") or "").strip()
         if reason:
             no_progress_by_reason[reason] = no_progress_by_reason.get(reason, 0) + 1
+
+    terminal_infra = count_terminal_infra_from_runs(results)
 
     return ExperimentSummary(
         total_runs=total,
@@ -355,12 +424,20 @@ def _build_summary(results: list[RunAnalysisResult]) -> ExperimentSummary:
         soft_pass_rate=(soft_pass / total if total else None),
         strict_success_rate=(clean_pass / total if total else None),
         reported_success_rate=((clean_pass + soft_pass) / total if total else None),
-        reported_success_rate_excluding_infra=(success_excluding_infra / total if total else None),
+        reported_success_rate_all_runs=((clean_pass + soft_pass) / total if total else None),
+        reported_success_rate_excluding_infra=(
+            success_excluding_infra / healthy_total if healthy_total else None
+        ),
+        strict_success_rate_excluding_infra=(
+            clean_pass_excluding_infra / healthy_total if healthy_total else None
+        ),
         infra_error_rate=(infra_runs / total if total else None),
         model_failure_rate=(model_failures / total if total else None),
         soft_success_diagnostic_rate=(soft_success_diagnostics / total if total else None),
         validation_failure_rate=(validation_failures / total if total else None),
         tool_runtime_failure_rate=(tool_runtime_failures / total if total else None),
+        infra_socket_timeouts=terminal_infra["socket_timeout_count"],
+        infra_empty_socket_responses=terminal_infra["empty_socket_response_count"],
         no_progress_by_reason=no_progress_by_reason,
         agent_completed_count=agent_completed,
         agent_completed_after_scene_passed_count=agent_completed_after,
@@ -410,11 +487,20 @@ def analyze_run_results(
     metadata: dict | None = None,
 ) -> ExperimentAnalysisResult:
     """Aggregate a list of RunAnalysisResult into an ExperimentAnalysisResult."""
+    meta = dict(metadata or {})
+    summary = _build_summary(results)
+    watchdog = meta.get("watchdog_counters")
+    if isinstance(watchdog, dict):
+        summary = summary.model_copy(
+            update={
+                "infra_worker_restarts": int(watchdog.get("infra_worker_restarts", 0) or 0),
+            }
+        )
     return ExperimentAnalysisResult(
         experiment_id=experiment_id,
         runs=results,
-        summary=_build_summary(results),
-        metadata=metadata or {},
+        summary=summary,
+        metadata=meta,
     )
 
 
@@ -617,5 +703,28 @@ def analyze_experiment(experiment_dir: Path | str) -> ExperimentAnalysisResult:
     metadata["runs_without_provider_cost"] = sum(1 for r in results if r.metrics.get("provider_cost_available") is not True)
     planned = metadata.get("planned_runs") or metadata.get("expected_runs")
     metadata["missing_artifacts"] = max(0, int(planned) - len(results)) if isinstance(planned, int) else 0
+
+    experiment_result_path = root / "experiment_result.json"
+    if experiment_result_path.exists():
+        try:
+            experiment_payload = json.loads(experiment_result_path.read_text(encoding="utf-8"))
+            experiment_summary = experiment_payload.get("summary")
+            if isinstance(experiment_summary, dict):
+                watchdog_keys = (
+                    "infra_socket_timeouts",
+                    "infra_empty_socket_responses",
+                    "infra_worker_restarts",
+                    "infra_reset_failures",
+                    "infra_snapshot_failures",
+                    "restart_reasons",
+                    "runs_since_last_restart",
+                )
+                metadata["watchdog_counters"] = {
+                    key: experiment_summary[key]
+                    for key in watchdog_keys
+                    if key in experiment_summary
+                }
+        except (OSError, json.JSONDecodeError) as exc:
+            metadata["experiment_result_error"] = str(exc)
 
     return analyze_run_results(results, experiment_id=root.name, metadata=metadata)

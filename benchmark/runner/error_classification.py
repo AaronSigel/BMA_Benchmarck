@@ -27,6 +27,19 @@ _INFRA_ERROR_TYPES = frozenset({
     "PreflightCheckFailed",
 })
 
+_TRANSIENT_INFRA_ERROR_TYPES = frozenset({
+    "EmptySocketResponse",
+    "BlenderSocketNoResponse",
+    "BlenderWorkerUnhealthy",
+    "ResetSceneFailed",
+    "SnapshotUnavailable",
+    "ToolTimeout",
+    "SocketTimeout",
+    "SocketError",
+})
+
+_INFRA_PARSE_STAGES = frozenset({"socket_response", "tool_response_parse"})
+
 _TOOL_RUNTIME_ERROR_TYPES = frozenset({
     "BlenderRuntimeError",
     "ToolExecutionFailed",
@@ -127,6 +140,16 @@ def classify_failure(
         )
 
     if no_progress_reason in {"tool_failed"}:
+        if is_infra_error_type(normalized_type) or is_infra_parse_error(normalized_type, failure_stage):
+            return FailureClassification(
+                error_class=ErrorClass.INFRA_ERROR,
+                error_type=normalized_type or "ToolExecutionFailed",
+                failure_stage=failure_stage,
+                is_infra_failure=True,
+                is_model_failure=False,
+                is_scene_available=scene_available,
+                no_progress_reason=no_progress_reason,
+            )
         return FailureClassification(
             error_class=ErrorClass.TOOL_RUNTIME_ERROR,
             error_type=normalized_type or "ToolExecutionFailed",
@@ -159,6 +182,18 @@ def classify_failure(
             is_scene_available=scene_available,
             scene_passed_before_error=True,
             diagnostic_only=True,
+            no_progress_reason=no_progress_reason,
+        )
+
+    if is_infra_parse_error(normalized_type, failure_stage):
+        return FailureClassification(
+            error_class=ErrorClass.INFRA_ERROR,
+            error_type=normalized_type,
+            failure_stage=failure_stage,
+            is_infra_failure=True,
+            is_model_failure=False,
+            is_scene_available=scene_available,
+            scene_passed_before_error=scene_passed_before,
             no_progress_reason=no_progress_reason,
         )
 
@@ -343,6 +378,24 @@ def is_hard_model_failure(
     ):
         return False
     return True
+
+
+def is_infra_error_type(error_type: str | None) -> bool:
+    normalized = _normalize_error_type(error_type)
+    return normalized in _INFRA_ERROR_TYPES if normalized else False
+
+
+def is_transient_infra_error_type(error_type: str | None) -> bool:
+    normalized = _normalize_error_type(error_type)
+    return normalized in _TRANSIENT_INFRA_ERROR_TYPES if normalized else False
+
+
+def is_infra_parse_error(error_type: str | None, failure_stage: str | None) -> bool:
+    normalized = _normalize_error_type(error_type)
+    if normalized != "InvalidJsonResponse":
+        return False
+    stage = str(failure_stage or "").strip().lower()
+    return stage in _INFRA_PARSE_STAGES
 
 
 def _normalize_error_type(error_type: str | None) -> str | None:

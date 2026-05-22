@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+
+from benchmark.analysis.comparison import analyze_run_results, count_terminal_infra_from_runs
 from benchmark.analysis.models import ExperimentAnalysisResult, ExperimentSummary, RunAnalysisResult
 from benchmark.analysis.report_builder import _model_failures_after_infra_table, _reliability_table
 from benchmark.analysis.report_bundle_validator import (
@@ -132,3 +135,97 @@ def test_socket_timeout_blocks_when_infra_rate_high() -> None:
     )
     assert result["readiness_ok"] is False
     assert any(g["name"] == "socket_timeout_count_max" for g in result["failed_gates"])
+
+
+def test_build_summary_infra_counts_match_readiness_csv() -> None:
+    runs = [
+        RunAnalysisResult(
+            run_id="r1",
+            task_id="export_001_blend_file",
+            agent_id="a1",
+            strategy="react",
+            metrics={"structured_error_type": "ToolTimeout", "is_infra_failure": True},
+        ),
+        RunAnalysisResult(
+            run_id="r2",
+            task_id="export_002_glb_file",
+            agent_id="a2",
+            strategy="react",
+            metrics={"structured_error_type": "EmptySocketResponse", "is_infra_failure": True},
+        ),
+        RunAnalysisResult(
+            run_id="r3",
+            task_id="geometry_001_basic_primitives",
+            agent_id="a3",
+            strategy="direct_tool_calling",
+            metrics={"structured_error_type": "EmptySocketResponse", "is_infra_failure": True},
+        ),
+    ]
+    analysis = analyze_run_results(runs, experiment_id="exp")
+    assert analysis.summary.infra_socket_timeouts == 1
+    assert analysis.summary.infra_empty_socket_responses == 2
+
+    csv_rows = [
+        {"error_type": "ToolTimeout"},
+        {"error_type": "EmptySocketResponse"},
+        {"error_type": "EmptySocketResponse"},
+    ]
+    terminal = count_terminal_infra_from_runs(runs)
+    assert terminal["socket_timeout_count"] == analysis.summary.infra_socket_timeouts
+    assert terminal["empty_socket_response_count"] == analysis.summary.infra_empty_socket_responses
+
+    gate_result = _evaluate_readiness_gates(
+        {"socket_timeout_count_max": 0, "empty_socket_response_count_max": 0},
+        csv_rows,
+    )
+    timeout_gate = next(g for g in gate_result["warning_gates"] if g["name"] == "socket_timeout_count_max")
+    empty_gate = next(g for g in gate_result["warning_gates"] if g["name"] == "empty_socket_response_count_max")
+    assert timeout_gate["actual"] == analysis.summary.infra_socket_timeouts
+    assert empty_gate["actual"] == analysis.summary.infra_empty_socket_responses
+
+
+def test_build_summary_infra_counts_match_readiness_csv() -> None:
+    runs = [
+        RunAnalysisResult(
+            run_id="r1",
+            task_id="export_001_blend_file",
+            agent_id="a1",
+            strategy="react",
+            metrics={"structured_error_type": "ToolTimeout", "is_infra_failure": True},
+        ),
+        RunAnalysisResult(
+            run_id="r2",
+            task_id="export_002_glb_file",
+            agent_id="a2",
+            strategy="react",
+            metrics={"structured_error_type": "EmptySocketResponse", "is_infra_failure": True},
+        ),
+        RunAnalysisResult(
+            run_id="r3",
+            task_id="geometry_001_basic_primitives",
+            agent_id="a3",
+            strategy="direct_tool_calling",
+            metrics={"structured_error_type": "EmptySocketResponse", "is_infra_failure": True},
+        ),
+    ]
+    analysis = analyze_run_results(runs, experiment_id="exp")
+    assert analysis.summary.infra_socket_timeouts == 1
+    assert analysis.summary.infra_empty_socket_responses == 2
+
+    csv_rows = [
+        {"error_type": "ToolTimeout"},
+        {"error_type": "EmptySocketResponse"},
+        {"error_type": "EmptySocketResponse"},
+    ]
+    terminal = count_terminal_infra_from_runs(runs)
+    assert terminal["socket_timeout_count"] == analysis.summary.infra_socket_timeouts
+    assert terminal["empty_socket_response_count"] == analysis.summary.infra_empty_socket_responses
+
+    gate_result = _evaluate_readiness_gates(
+        {"socket_timeout_count_max": 0, "empty_socket_response_count_max": 0},
+        csv_rows,
+    )
+    timeout_gate = next(g for g in gate_result["warning_gates"] if g["name"] == "socket_timeout_count_max")
+    empty_gate = next(g for g in gate_result["warning_gates"] if g["name"] == "empty_socket_response_count_max")
+    assert timeout_gate["actual"] == analysis.summary.infra_socket_timeouts
+    assert empty_gate["actual"] == analysis.summary.infra_empty_socket_responses

@@ -41,7 +41,14 @@ _IDEMPOTENT_TOOLS = {
     "bma_create_camera_look_at",
 }
 
-# Non-idempotent tools that may retry only with explicit safety proof.
+# Tools that may retry once via watchdog on transient socket failures.
+_RETRY_WITH_WATCHDOG_TOOLS = _IDEMPOTENT_TOOLS | {
+    "bma_export_scene",
+    "bma_get_scene_snapshot",
+    "reset_scene",
+}
+
+# Non-idempotent tools that may retry only under strict conditions.
 _NON_IDEMPOTENT_TOOLS = {"bma_export_scene", "execute_blender_code"}
 
 
@@ -190,25 +197,37 @@ class ExternalBlenderMcpServerAdapter:
 
         if tool_name == "bma_create_light" and isinstance(params, dict) and params.get("if_exists") == "update":
             result = self._socket_call_once(tool_name, params)
-            if self._should_retry_idempotent(tool_name, result):
+            if self._should_retry_with_watchdog(tool_name, result):
                 result = self._retry_with_watchdog(tool_name, params, result, attempt=2)
             return result
 
         result = self._socket_call_once(tool_name, params)
 
-        if self._should_retry_idempotent(tool_name, result):
+        if self._should_retry_with_watchdog(tool_name, result):
             result = self._retry_with_watchdog(tool_name, params, result, attempt=2)
 
         return result
 
-    def _should_retry_idempotent(self, tool_name: str, result: Any) -> bool:
-        return (
+    def _should_retry_with_watchdog(self, tool_name: str, result: Any) -> bool:
+        if not (
             isinstance(result, dict)
             and not result.get("ok")
             and isinstance(result.get("error"), dict)
-            and result["error"].get("type") in _TRANSIENT_ERROR_TYPES
-            and tool_name in _IDEMPOTENT_TOOLS
-        )
+        ):
+            return False
+        error = result["error"]
+        error_type = error.get("type")
+        if error_type not in _TRANSIENT_ERROR_TYPES:
+            return False
+        if tool_name in _RETRY_WITH_WATCHDOG_TOOLS:
+            return True
+        if tool_name == "execute_blender_code":
+            stage = str(error.get("stage") or error.get("failure_stage") or "")
+            return stage == "socket_response"
+        return False
+
+    def _should_retry_idempotent(self, tool_name: str, result: Any) -> bool:
+        return self._should_retry_with_watchdog(tool_name, result) and tool_name in _IDEMPOTENT_TOOLS
 
     def _retry_with_watchdog(
         self,
@@ -230,12 +249,18 @@ class ExternalBlenderMcpServerAdapter:
                     message=str(error.get("message") or ""),
                     failure_stage=str(error.get("stage") or error.get("failure_stage") or "tool_call"),
                     attempt=attempt - 1,
-                )
+                ),
+                adapter=self,
             )
             if action.value == "mark_infra_error":
                 error_payload = dict(error)
                 error_payload["type"] = "BlenderWorkerUnhealthy"
                 return {**first_result, "error": error_payload}
+            if action.value == "restarted" and self._watchdog is not None:
+                if not self._watchdog.verify_after_restart(self):
+                    error_payload = dict(error)
+                    error_payload["type"] = "BlenderWorkerUnhealthy"
+                    return {**first_result, "error": error_payload}
         retry_result = self._socket_call_once(tool_name, params, attempt=attempt)
         self._log_retry(tool_name, attempt, error_type)
         return retry_result
@@ -410,7 +435,7 @@ class ExternalBlenderMcpServerAdapter:
                     "agent_id": ctx.get("agent_id"),
                     "mcp_profile": ctx.get("mcp_profile") or self._config.profile,
                     "attempt": attempt,
-                    "retry_allowed": tool_name in _IDEMPOTENT_TOOLS,
+                    "retry_allowed": tool_name in _RETRY_WITH_WATCHDOG_TOOLS,
                     "raw_preview": "",
                 },
                 error_type="ToolTimeout",

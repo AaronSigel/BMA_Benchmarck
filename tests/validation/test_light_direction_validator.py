@@ -138,6 +138,23 @@ def test_area_light_direction_passes_with_different_euler() -> None:
     assert not direction_issues, f"Unexpected direction issues: {[i.message for i in direction_issues]}"
 
 
+def test_area_light_direction_within_grace_is_warning_not_blocking() -> None:
+    """Deviation slightly above tolerance but within grace band is WARNING, not ERROR."""
+    rx = math.radians(17.0)
+    snapshot = _snapshot("AREA", (0.0, 0.0, 5.0), (rx, 0.0, 0.0))
+    task = _task_with_light(
+        "AREA",
+        location=(0.0, 0.0, 5.0),
+        target=(0.0, 0.0, 0.0),
+        direction_tolerance_deg=15.0,
+    )
+    result = LightValidator().validate(task, snapshot)
+    direction_issues = [i for i in result.issues if i.code == "light_direction_mismatch"]
+    assert direction_issues, "Expected light_direction_mismatch within grace band"
+    assert direction_issues[0].severity.value == "warning"
+    assert result.status.value == "passed"
+
+
 def test_area_light_wrong_direction_fails() -> None:
     """AREA light pointing sideways (not toward target) must fail direction check.
 

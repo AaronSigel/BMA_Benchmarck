@@ -3,7 +3,8 @@
 Key invariants:
 - bma_set_transform / bma_set_material / bma_assign_material retry once on
   EmptySocketResponse, SocketTimeout, SocketError.
-- Non-idempotent tools (bma_create_light, bma_export_scene) do NOT retry.
+- Non-idempotent tools (bma_create_light without if_exists=update) do NOT retry.
+- bma_export_scene retries once on transient socket failures via watchdog policy.
 - bma_create_object with if_exists=update retries once on transient failures.
 - A second transient failure is returned as-is (no infinite retry).
 - A non-transient error (ToolError, ExportFailed) is never retried.
@@ -137,6 +138,21 @@ def test_create_light_does_not_retry_on_transient():
     # Should NOT have retried — first (failed) result returned directly
     assert result["ok"] is False
     assert mock_sc.call_count == 1
+
+
+def test_export_scene_retries_on_empty_socket_and_succeeds():
+    adapter = _make_adapter()
+    call_results = [
+        _transient_envelope("bma_export_scene", "EmptySocketResponse"),
+        _success_envelope("bma_export_scene"),
+    ]
+
+    with patch.object(adapter, "_socket_call_once", side_effect=call_results) as mock_sc, \
+         patch("benchmark.mcp.profiles.is_tool_allowed", return_value=True):
+        result = adapter.call_tool("bma_export_scene", {"filepath": "/tmp/scene.blend", "format": "BLEND"})
+
+    assert result["ok"] is True
+    assert mock_sc.call_count == 2
 
 
 # ---------------------------------------------------------------------------

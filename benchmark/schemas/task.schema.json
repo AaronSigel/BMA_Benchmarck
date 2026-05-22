@@ -271,6 +271,21 @@
         "rotation": {
           "$ref": "#/$defs/NullableVector3"
         },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NullableVector3"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "direction_tolerance_deg": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 10.0
+        },
         "energy": {
           "type": [
             "number",

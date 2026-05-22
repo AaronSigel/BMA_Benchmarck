@@ -20,6 +20,7 @@ jobs:
         run: python -m pip install -e '.[test]'
 
       # Интеграция с реальным Blender: pytest -m mcp (локально при запущенном blender-mcp).
+      # Совпадает с addopts в pyproject.toml + исключение mcp (без live API / LLM e2e).
       - name: Run tests
-        run: pytest -m "not mcp"
+        run: pytest -m "not llm and not remote_agent and not agent_integration and not e2e and not api_e2e and not mcp_e2e and not remote_agent_e2e and not mcp"
 

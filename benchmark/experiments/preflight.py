@@ -504,7 +504,7 @@ def run_openrouter_model_smoke_for_experiment(
             response = client.complete(messages, tools=tool_schemas, timeout_sec=timeout_sec)
 
             if require_tool_call:
-                tool_calls = _extract_tool_calls(response)
+                tool_calls = _extract_tool_calls(response).tool_calls
                 if not tool_calls:
                     raise ValueError("model returned no tool calls or JSON action")
                 invalid = [call.name for call in tool_calls if call.name not in allowed_tools]

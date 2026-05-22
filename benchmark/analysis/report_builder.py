@@ -1628,6 +1628,13 @@ def _overall_rows(analysis: ExperimentAnalysisResult) -> list[list[str]]:
 def build_markdown_report(analysis: ExperimentAnalysisResult, config: ReportConfig) -> str:
     runs = analysis.runs
     lines = [f"# {config.title}", "", f"**Experiment:** `{analysis.experiment_id}`", ""]
+    metadata = analysis.metadata if isinstance(analysis.metadata, dict) else {}
+    if metadata.get("merged"):
+        from benchmark.analysis.report_bundle import _merge_provenance_text
+
+        provenance = _merge_provenance_text(metadata).strip()
+        if provenance:
+            lines.extend([provenance, ""])
     preflight_rows = _preflight_rows(analysis.metadata)
     if preflight_rows:
         lines.extend(["## Preflight Summary", "", _md_table(["check", "status"], preflight_rows)])

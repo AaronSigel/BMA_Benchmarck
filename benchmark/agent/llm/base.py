@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field, field_validator
@@ -65,6 +66,34 @@ class LlmResponse(BaseModel):
 
     def has_action(self) -> bool:
         return bool(self.tool_calls) or self.json_action() is not None
+
+
+_JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.IGNORECASE | re.DOTALL)
+
+
+def parse_json_from_content(content: str | None) -> Any:
+    """Извлекает JSON из content: fenced blocks, чистый JSON или встроенный фрагмент."""
+    if content is None:
+        return None
+    text = content.strip()
+    fence = _JSON_FENCE_RE.match(text)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char not in "[{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        return value
+    return None
 
 
 @runtime_checkable

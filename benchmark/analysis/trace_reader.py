@@ -111,6 +111,21 @@ def discover_run_artifacts(root: Path | str) -> list[Path]:
     """
     root_path = Path(root)
     found: set[Path] = set()
+
+    def _register_run_dir(path: Path) -> None:
+        if path == root_path:
+            return
+        if (
+            (path / _AGENT_TRACE_FILENAME).exists()
+            or (path / _RUN_RESULT_FILENAME).exists()
+            or (path / _ARTIFACT_MANIFEST_FILENAME).exists()
+        ):
+            found.add(path)
+
+    for child in root_path.iterdir():
+        if child.is_dir() or child.is_symlink():
+            _register_run_dir(child)
+
     for candidate in root_path.rglob(_AGENT_TRACE_FILENAME):
         found.add(candidate.parent)
     for candidate in root_path.rglob(_RUN_RESULT_FILENAME):

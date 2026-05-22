@@ -196,6 +196,9 @@ class TestUnclassifiedErrorNotUsedForKnownFailures:
         ("No response from Blender socket", ControlledErrorType.BLENDER_SOCKET_NO_RESPONSE),
         ("repeated the same action three times", ControlledErrorType.REACT_INVALID_ACTION),
         ("no_progress_detected after 3 steps", ControlledErrorType.REACT_NO_PROGRESS),
+        ("Plan-and-execute response must be a JSON object with a plan list", ControlledErrorType.PLAN_PARSE_ERROR),
+        ("Plan-and-execute response must contain a non-empty plan list", ControlledErrorType.PLAN_SCHEMA_ERROR),
+        ("plan[0].tool must be a non-empty string", ControlledErrorType.PLAN_SCHEMA_ERROR),
     ])
     def test_known_errors_not_unclassified(self, message: str, expected: ControlledErrorType):
         result = normalize_error(message)
@@ -357,6 +360,52 @@ class TestResumeReportFormat:
         data = json.loads((tmp_path / "resume_report.json").read_text())
         assert "resume_enabled" in data
         assert "total_runs" in data
+
+
+def test_merge_experiment_runs_links_base_and_replacement(tmp_path: Path) -> None:
+    from benchmark.experiments.merge_runs import merge_experiment_runs
+
+    base = tmp_path / "base"
+    replacement = tmp_path / "replacement"
+    output = tmp_path / "merged"
+    base.mkdir()
+    replacement.mkdir()
+
+    def _write_run(root: Path, run_id: str) -> None:
+        run_dir = root / run_id
+        run_dir.mkdir()
+        (run_dir / "run_result.json").write_text("{}", encoding="utf-8")
+
+    for idx in range(3):
+        _write_run(base, f"matrix__task_{idx}__plan_execute_openrouter__minimal__model__r1")
+    _write_run(base, "matrix__task_0__direct_openrouter__minimal__model__r1")
+    for idx in range(2):
+        _write_run(replacement, f"matrix__task_{idx}__direct_openrouter__minimal__model__r1")
+
+    (base / "manifest.json").write_text(json.dumps({"matrix_id": "matrix", "metadata": {}}), encoding="utf-8")
+    (replacement / "manifest.json").write_text(
+        json.dumps({"matrix_id": "matrix_direct", "agent_ids": ["direct_openrouter"], "metadata": {}}),
+        encoding="utf-8",
+    )
+
+    result = merge_experiment_runs(
+        base=base,
+        replacement=replacement,
+        output=output,
+        replace_agent="direct_openrouter",
+        expected_replacement_runs=2,
+        expected_base_non_replaced_runs=3,
+        expected_total_runs=5,
+        rebuild_reports=False,
+    )
+
+    assert result["total_runs"] == 5
+    assert (output / "manifest.json").exists()
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["metadata"]["merged"] is True
+    assert not (output / "matrix__task_0__direct_openrouter__minimal__model__r1").is_symlink() or (
+        output / "matrix__task_0__direct_openrouter__minimal__model__r1"
+    ).exists()
 
 
 # ---------------------------------------------------------------------------

@@ -164,6 +164,39 @@ class TestRunAnalysisResult:
 
         assert str(nested / "agent_trace.json") in result.artifacts
 
+    def test_reanalysis_reclassifies_unclassified_plan_error(self, tmp_path: Path):
+        from benchmark.analysis.run_analysis import analyze_run
+        from benchmark.analysis.trace_reader import RunArtifactBundle
+        from benchmark.runner.models import ExecutionMode, RunResult, RunStatus
+
+        structured = {
+            "error_type": "UnclassifiedError",
+            "message": "Plan-and-execute response must contain a non-empty plan list",
+            "source": "agent",
+            "failure_stage": "agent_execution",
+            "raw_error": "Plan-and-execute response must contain a non-empty plan list",
+        }
+        run_result = RunResult(
+            run_id="r-plan",
+            task_id="task",
+            status=RunStatus.ERROR,
+            execution_mode=ExecutionMode.AGENT_MCP,
+            validation_result_path=None,
+            scene_snapshot_path=None,
+            artifacts_dir=tmp_path,
+            total_score=0.0,
+            overall_status="failed",
+            started_at="2026-05-16T10:00:00Z",
+            finished_at="2026-05-16T10:00:01Z",
+            error="Plan-and-execute response must contain a non-empty plan list",
+            structured_error=structured,
+            summary={"structured_error": structured},
+        )
+
+        result = analyze_run(RunArtifactBundle(run_dir=tmp_path, run_result=run_result))
+
+        assert result.metrics.get("structured_error_type") == "PlanSchemaError"
+
 
 # ---------------------------------------------------------------------------
 # ExperimentSummary

@@ -91,6 +91,23 @@ def main() -> int:
         print(f"total_runs_delta: {result['total_runs']['delta']}")
         return 0
 
+    if args.command == "merge-runs":
+        from benchmark.experiments.merge_runs import merge_experiment_runs
+
+        result = merge_experiment_runs(
+            base=args.base,
+            replacement=args.replacement,
+            output=args.output,
+            replace_agent=args.replace_agent,
+            replacement_reason=args.replacement_reason,
+            rebuild_reports=not args.no_report,
+        )
+        print(f"merged: {result['output_root']}")
+        print(f"total_runs: {result['total_runs']}")
+        if result.get("report_bundle"):
+            print(f"report_bundle: {result['report_bundle']}")
+        return 0
+
     if args.command == "list-strategies":
         from benchmark.agent.strategies.registry import STRATEGY_REGISTRY
 
@@ -143,6 +160,14 @@ def _parser() -> argparse.ArgumentParser:
     compare.add_argument("bundle_a", type=Path)
     compare.add_argument("bundle_b", type=Path)
     compare.add_argument("--output", type=Path)
+
+    merge_runs = sub.add_parser("merge-runs")
+    merge_runs.add_argument("--base", type=Path, required=True)
+    merge_runs.add_argument("--replacement", type=Path, required=True)
+    merge_runs.add_argument("--replace-agent", type=str, required=True)
+    merge_runs.add_argument("--output", type=Path, required=True)
+    merge_runs.add_argument("--replacement-reason", type=str, default=None)
+    merge_runs.add_argument("--no-report", action="store_true")
 
     sub.add_parser("list-strategies")
     return parser

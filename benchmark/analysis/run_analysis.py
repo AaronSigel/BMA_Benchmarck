@@ -18,6 +18,67 @@ from benchmark.runner.models import RunResult, RunStatus
 from benchmark.validation.models import SceneValidationResult, ValidationStatus
 
 
+def _maybe_refresh_structured_error(
+    structured_error: dict[str, Any] | None,
+    *,
+    fallback_message: str | None = None,
+) -> dict[str, Any] | None:
+    """Переклассифицирует stored UnclassifiedError по обновлённой taxonomy."""
+    if structured_error is None and not fallback_message:
+        return None
+    from benchmark.runner.controlled_errors import controlled_error_payload
+
+    current_type = str((structured_error or {}).get("error_type") or "").strip()
+    message = str(
+        (structured_error or {}).get("message")
+        or (structured_error or {}).get("raw_error")
+        or fallback_message
+        or ""
+    ).strip()
+    if not message:
+        return structured_error
+
+    if current_type and current_type != "UnclassifiedError":
+        return structured_error
+
+    refreshed = controlled_error_payload(
+        message,
+        source=(structured_error or {}).get("source") or "agent",
+        failure_stage=(structured_error or {}).get("failure_stage"),
+        enrich=True,
+        scene_passed_but_agent_error=bool((structured_error or {}).get("scene_passed_but_agent_error")),
+        early_stop_reason=(structured_error or {}).get("early_stop_reason"),
+        no_progress_reason=(structured_error or {}).get("no_progress_reason"),
+    )
+    return refreshed
+
+
+def _apply_structured_error_metrics(metrics: dict[str, Any], structured_error: dict[str, Any]) -> None:
+    error_type = structured_error.get("error_type")
+    source = structured_error.get("source")
+    if isinstance(error_type, str) and error_type:
+        metrics["structured_error_type"] = error_type
+        metrics[f"error.{error_type}"] = int(metrics.get(f"error.{error_type}", 0) or 0) + 1
+    if isinstance(source, str) and source:
+        metrics["structured_error_source"] = source
+    failure_stage = structured_error.get("failure_stage")
+    if isinstance(failure_stage, str) and failure_stage:
+        metrics["failure_stage"] = failure_stage
+    for flag in (
+        "error_class",
+        "is_model_failure",
+        "is_agent_failure",
+        "is_infra_failure",
+        "is_validation_failure",
+        "is_tool_runtime_failure",
+        "is_scene_available",
+        "scene_passed_before_error",
+        "diagnostic_only",
+    ):
+        if flag in structured_error:
+            metrics[flag] = structured_error[flag]
+
+
 # ---------------------------------------------------------------------------
 # Success determination
 # ---------------------------------------------------------------------------
@@ -319,38 +380,24 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
             if isinstance(val, (float, str, int, bool)):
                 metrics.setdefault(f"run_summary.{key}", val)
         structured_error = (run_result.summary or {}).get("structured_error")
+        if structured_error is None and isinstance(run_result.structured_error, dict):
+            structured_error = run_result.structured_error
+        structured_error = _maybe_refresh_structured_error(
+            structured_error if isinstance(structured_error, dict) else None,
+            fallback_message=run_result.error,
+        )
         if isinstance(structured_error, dict):
-            error_type = structured_error.get("error_type")
-            source = structured_error.get("source")
-            if isinstance(error_type, str) and error_type:
-                metrics["structured_error_type"] = error_type
-                metrics[f"error.{error_type}"] = int(metrics.get(f"error.{error_type}", 0) or 0) + 1
-            if isinstance(source, str) and source:
-                metrics["structured_error_source"] = source
-            failure_stage = structured_error.get("failure_stage")
-            if isinstance(failure_stage, str) and failure_stage:
-                metrics["failure_stage"] = failure_stage
-            for flag in (
-                "error_class", "is_model_failure", "is_agent_failure", "is_infra_failure",
-                "is_validation_failure", "is_tool_runtime_failure", "is_scene_available",
-                "scene_passed_before_error", "diagnostic_only",
-            ):
-                if flag in structured_error:
-                    metrics[flag] = structured_error[flag]
+            _apply_structured_error_metrics(metrics, structured_error)
     if trace is not None and trace.structured_error is not None:
         if trace.metadata.get("scene_passed_but_agent_error") or trace.metadata.get("early_stop_reason"):
             pass
         else:
-            error_type = trace.structured_error.get("error_type")
-            source = trace.structured_error.get("source")
-            failure_stage = trace.structured_error.get("failure_stage")
-            if isinstance(error_type, str) and error_type and "structured_error_type" not in metrics:
-                metrics.setdefault("structured_error_type", error_type)
-                metrics[f"error.{error_type}"] = int(metrics.get(f"error.{error_type}", 0) or 0) + 1
-            if isinstance(source, str) and source:
-                metrics.setdefault("structured_error_source", source)
-            if isinstance(failure_stage, str) and failure_stage:
-                metrics.setdefault("failure_stage", failure_stage)
+            refreshed_trace_error = _maybe_refresh_structured_error(
+                trace.structured_error,
+                fallback_message=trace.error if isinstance(trace.error, str) else None,
+            )
+            if isinstance(refreshed_trace_error, dict) and "structured_error_type" not in metrics:
+                _apply_structured_error_metrics(metrics, refreshed_trace_error)
     elif trace is not None and isinstance(trace.error, dict):
         error_type = trace.error.get("error_type")
         source = trace.error.get("source")

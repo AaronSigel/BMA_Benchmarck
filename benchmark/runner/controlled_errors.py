@@ -13,6 +13,8 @@ class ControlledErrorType(str, Enum):
     REACT_NON_STRICT_RESPONSE = "ReactNonStrictResponse"
     REACT_BLOCKED_EXPORT = "ReactBlockedExport"
     DIRECT_NO_ACTION = "DirectNoAction"
+    PLAN_PARSE_ERROR = "PlanParseError"
+    PLAN_SCHEMA_ERROR = "PlanSchemaError"
     LLM_PARSE_ERROR = "LlmParseError"
     INVALID_TOOL_CALL = "InvalidToolCall"
     INVALID_ARGUMENTS = "InvalidArguments"
@@ -121,6 +123,24 @@ def normalize_error(
         error_type = ControlledErrorType.DIRECT_NO_ACTION
         inferred_source = explicit_source or ControlledErrorSource.AGENT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
+    elif "plan-and-execute response must be a json object with a plan list" in text:
+        error_type = ControlledErrorType.PLAN_PARSE_ERROR
+        inferred_source = explicit_source or ControlledErrorSource.AGENT
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
+    elif "plan-and-execute response must contain a non-empty plan list" in text:
+        error_type = ControlledErrorType.PLAN_SCHEMA_ERROR
+        inferred_source = explicit_source or ControlledErrorSource.AGENT
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
+    elif "plan[" in text and (
+        ".step must be" in text
+        or ".tool must be" in text
+        or ".arguments must be" in text
+        or ".description must be" in text
+        or "must be an object" in text
+    ):
+        error_type = ControlledErrorType.PLAN_SCHEMA_ERROR
+        inferred_source = explicit_source or ControlledErrorSource.AGENT
+        inferred_stage = _stage(failure_stage) or ControlledFailureStage.AGENT_EXECUTION
     elif "no tool call or json action returned by llm" in text or "failed to parse" in text or "did not include action" in text or "no action found" in text or "llmresponseparseerror" in text or "llmparseerror" in text or "reactnonstrictresponse" in text:
         error_type = ControlledErrorType.LLM_PARSE_ERROR
         inferred_source = explicit_source or ControlledErrorSource.AGENT
@@ -183,7 +203,7 @@ def normalize_error(
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
     elif "invalid tool call" in text or "tool is not allowed" in text or "unknown tool" in text or "tool not found" in text or "not allowed in this profile" in text or "tooldisablederror" in text:
         error_type = ControlledErrorType.INVALID_TOOL_CALL
-        inferred_source = explicit_source or ControlledErrorSource.TOOL
+        inferred_source = explicit_source or ControlledErrorSource.AGENT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL
     elif "export" in text or ".glb" in text or ".blend" in text:
         error_type = ControlledErrorType.EXPORT_UNAVAILABLE
@@ -201,7 +221,7 @@ def normalize_error(
         error_type = ControlledErrorType.PREFLIGHT_CHECK_FAILED
         inferred_source = explicit_source or ControlledErrorSource.PREFLIGHT
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.PREFLIGHT
-    elif "blender" in text or "crash" in text or "blenderruntimeerror" in text:
+    elif "blender" in text or "crash" in text or "blenderruntimeerror" in text or "bpy_struct" in text:
         error_type = ControlledErrorType.BLENDER_RUNTIME_ERROR
         inferred_source = explicit_source or ControlledErrorSource.BLENDER
         inferred_stage = _stage(failure_stage) or ControlledFailureStage.TOOL_CALL

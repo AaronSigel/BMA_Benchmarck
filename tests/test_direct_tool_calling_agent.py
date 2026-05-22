@@ -129,9 +129,34 @@ def test_direct_tool_calling_strategy_blocks_forbidden_tool() -> None:
 
     assert trace.success is False
     assert trace.error is not None
-    assert "not allowed" in trace.error
+    assert "InvalidToolCall" in trace.error
+    assert trace.structured_error is not None
+    assert trace.structured_error["error_type"] == "InvalidToolCall"
     assert trace.steps[-1].step_type == AgentStepType.ERROR
-    assert trace.steps[1].tool_name == "execute_blender_code"
+    assert executor.calls == []
+
+
+def test_direct_tool_calling_strategy_blocks_unknown_json_tool() -> None:
+    llm = MockLlmClient(
+        [
+            LlmResponse(content='{"tool_name": "nonexistent_tool", "arguments": {}}'),
+        ]
+    )
+    executor = MockToolExecutor(results={"get_scene_info": {"objects": []}})
+
+    trace = DirectToolCallingStrategy().run(
+        {"id": "task-1", "prompt": "Inspect"},
+        make_config(),
+        llm,
+        executor,
+        AgentToolContext(run_id="run-1", task_id="task-1"),
+        Path("."),
+    )
+
+    assert trace.success is False
+    assert "InvalidToolCall" in (trace.error or "")
+    assert executor.calls == []
+    assert trace.steps[-1].metadata.get("original_action") is not None
 
 
 def test_runtime_selects_direct_tool_calling_strategy() -> None:

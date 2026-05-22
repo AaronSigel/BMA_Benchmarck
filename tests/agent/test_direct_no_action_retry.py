@@ -23,9 +23,67 @@ def _config() -> AgentConfig:
 
 def test_direct_parses_json_action_from_content() -> None:
     response = LlmResponse(content='{"tool_name":"bma_create_object","arguments":{"name":"Cube","type":"MESH_CUBE"}}')
-    calls = _extract_tool_calls(response)
+    calls = _extract_tool_calls(response).tool_calls
     assert len(calls) == 1
     assert calls[0].name == "bma_create_object"
+
+
+def test_direct_parses_nested_action_tool_name() -> None:
+    response = LlmResponse(
+        content='{"thought":"x","action":{"tool_name":"bma_create_object","arguments":{}},"finish":false}'
+    )
+    calls = _extract_tool_calls(response).tool_calls
+    assert len(calls) == 1
+    assert calls[0].name == "bma_create_object"
+
+
+def test_direct_parses_nested_action_tool() -> None:
+    response = LlmResponse(content='{"action":{"tool":"get_scene_info","arguments":{}}}')
+    calls = _extract_tool_calls(response).tool_calls
+    assert len(calls) == 1
+    assert calls[0].name == "get_scene_info"
+
+
+def test_direct_parses_top_level_tool_key() -> None:
+    response = LlmResponse(content='{"tool":"get_scene_info","arguments":{}}')
+    calls = _extract_tool_calls(response).tool_calls
+    assert len(calls) == 1
+    assert calls[0].name == "get_scene_info"
+
+
+def test_direct_parses_tool_calls_list() -> None:
+    response = LlmResponse(
+        content='{"tool_calls":[{"tool_name":"get_scene_info","arguments":{}},{"tool_name":"get_object_info","arguments":{"object_name":"Cube"}}]}'
+    )
+    calls = _extract_tool_calls(response).tool_calls
+    assert [call.name for call in calls] == ["get_scene_info", "get_object_info"]
+
+
+def test_direct_parses_actions_list() -> None:
+    response = LlmResponse(content='{"actions":[{"tool_name":"get_scene_info","arguments":{}}]}')
+    calls = _extract_tool_calls(response).tool_calls
+    assert len(calls) == 1
+    assert calls[0].name == "get_scene_info"
+
+
+def test_direct_parses_fenced_json() -> None:
+    response = LlmResponse(content='```json\n{"tool_name":"get_scene_info","arguments":{}}\n```')
+    calls = _extract_tool_calls(response).tool_calls
+    assert len(calls) == 1
+    assert calls[0].name == "get_scene_info"
+
+
+def test_direct_parses_prose_wrapped_json() -> None:
+    response = LlmResponse(content='Here is the action: {"tool_name":"get_scene_info","arguments":{}} thanks')
+    calls = _extract_tool_calls(response).tool_calls
+    assert len(calls) == 1
+    assert calls[0].name == "get_scene_info"
+
+
+def test_direct_skips_action_without_tool_name() -> None:
+    response = LlmResponse(content='{"thought":"no tool"}')
+    calls = _extract_tool_calls(response).tool_calls
+    assert calls == []
 
 
 def test_direct_retries_once_on_empty_action() -> None:

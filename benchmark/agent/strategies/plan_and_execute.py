@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import datetime
-import json
-import re
 import uuid
 from pathlib import Path
 from typing import Any
 
 from benchmark.agent.errors import AgentRuntimeError, LlmResponseParseError
-from benchmark.agent.llm.base import LlmClient, LlmMessage, LlmResponse
+from benchmark.agent.llm.base import LlmClient, LlmMessage, LlmResponse, parse_json_from_content
 from benchmark.agent.models import AgentConfig, AgentStepType, AgentTrace, ToolCallStatus
 from benchmark.agent.prompts import PromptBuilder, _AGENT_HIDDEN_TOOLS
 from benchmark.agent.tool_context import AgentToolContext, ToolSchemaProvider
@@ -75,6 +73,9 @@ class PlanAndExecuteStrategy:
         try:
             plan = _parse_plan(response)
         except LlmResponseParseError as error:
+            from benchmark.runner.controlled_errors import controlled_error_payload
+
+            structured_error = controlled_error_payload(str(error), source="agent")
             trace = trace.add_step(
                 AgentStepType.ERROR,
                 error=str(error),
@@ -90,6 +91,7 @@ class PlanAndExecuteStrategy:
                     "error": str(error),
                     "finished_at": finished_at,
                     "duration_sec": (finished_at - started_at).total_seconds(),
+                    "structured_error": structured_error,
                 }
             )
         trace = trace.add_step(
@@ -193,38 +195,11 @@ def _json_action(response: LlmResponse) -> dict[str, Any] | None:
     if isinstance(action, dict):
         return action
 
-    parsed = _parse_json_from_content(response.content)
+    parsed = parse_json_from_content(response.content)
     if isinstance(parsed, dict):
         return parsed
     if isinstance(parsed, list):
         return {"plan": parsed}
-    return None
-
-
-_JSON_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.IGNORECASE | re.DOTALL)
-
-
-def _parse_json_from_content(content: str | None) -> Any:
-    if content is None:
-        return None
-    text = content.strip()
-    fence = _JSON_FENCE_RE.match(text)
-    if fence:
-        text = fence.group(1).strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(text):
-        if char not in "[{":
-            continue
-        try:
-            value, _ = decoder.raw_decode(text[index:])
-        except json.JSONDecodeError:
-            continue
-        return value
     return None
 
 

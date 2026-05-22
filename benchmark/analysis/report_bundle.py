@@ -48,6 +48,8 @@ def write_report_text_ru(analysis: ExperimentAnalysisResult, path: Path) -> None
     path.parent.mkdir(parents=True, exist_ok=True)
     runs = analysis.runs
     s = analysis.summary
+    metadata = analysis.metadata if isinstance(analysis.metadata, dict) else {}
+    provenance_text = _merge_provenance_text(metadata)
     models = ", ".join(sorted({r.model for r in runs if r.model})) or "N/A"
     strategies = ", ".join(sorted({r.strategy for r in runs if r.strategy})) or "N/A"
     profiles = ", ".join(sorted({r.mcp_profile for r in runs if r.mcp_profile})) or "N/A"
@@ -95,7 +97,7 @@ def write_report_text_ru(analysis: ExperimentAnalysisResult, path: Path) -> None
             f"tool runtime failure rate: {_pct(s.tool_runtime_failure_rate)}, soft success diagnostic rate: {_pct(s.soft_success_diagnostic_rate)}. "
         )
     text = f"""# Текст для отчёта
-
+{provenance_text}
 ## 1. Описание экспериментального запуска
 
 В рамках диагностического прогона была использована матрица `{analysis.experiment_id}` из {s.total_runs} запусков ({repetitions} повторност{'и' if repetitions > 1 else 'ь'}). {repetition_text}Прогон включал {len(set(r.task_id for r in runs))} Blender-задач, {len(set(r.strategy for r in runs))} стратегии агента ({strategies}) и {len(set(r.mcp_profile for r in runs if r.mcp_profile))} MCP-профилей ({profiles}). В качестве модели использовалась {models}. Основной целью запуска являлась проверка воспроизводимости стенда и выявление различий между режимами выполнения.
@@ -129,6 +131,24 @@ def write_report_text_ru(analysis: ExperimentAnalysisResult, path: Path) -> None
 Benchmark-стенд сформировал воспроизводимый отчётный пакет: CSV-таблицу, JSON-агрегацию, Markdown/HTML-отчёты, графики и текстовый блок для вставки в работу. Отчётные метрики разделены на raw (all runs) и infra-filtered срезы для отделения качества модели от стабильности runtime.
 """
     path.write_text(text, encoding="utf-8")
+
+
+def _merge_provenance_text(metadata: dict[str, Any]) -> str:
+    if not metadata.get("merged"):
+        return ""
+    base_run_id = metadata.get("base_run_id", "N/A")
+    replacement_run_id = metadata.get("replacement_run_id", "N/A")
+    replaced = ", ".join(metadata.get("replaced_agent_ids") or [])
+    reason = metadata.get("replacement_reason") or "N/A"
+    merge_timestamp = metadata.get("merge_timestamp", "N/A")
+    return (
+        "## Dataset provenance\n\n"
+        "Финальный benchmark dataset собран merge-утилитой из двух прогонов без полного rerun 3600 runs. "
+        f"Base run: `{base_run_id}`. Replacement run: `{replacement_run_id}`. "
+        f"Replaced agent axis: {replaced or 'N/A'}. "
+        f"Direct baseline проанализирован как rerun axis after parser normalization. "
+        f"Merge timestamp: {merge_timestamp}. Причина замены: {reason}\n\n"
+    )
 
 
 def write_readme_report(path: Path) -> None:

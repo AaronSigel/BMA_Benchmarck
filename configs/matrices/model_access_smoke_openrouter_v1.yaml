@@ -54,7 +54,7 @@ metadata:
   preflight:
     enabled: true
     mode: diagnostic
-    fail_fast: false
+    fail_fast: true
     require_export_smoke: true
     require_tool_contract_smoke: true
     require_snapshot_smoke: true

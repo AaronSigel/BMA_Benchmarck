@@ -60,6 +60,8 @@ _AGENT_ERROR_TYPES = frozenset({
     "ReactNonStrictResponse",
     "ReactBlockedExport",
     "DirectNoAction",
+    "PlanParseError",
+    "PlanSchemaError",
     "LlmParseError",
     "InvalidToolCall",
     "InvalidArguments",

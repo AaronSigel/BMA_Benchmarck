@@ -174,6 +174,23 @@ python -m bma_benchmark build-report --input artifacts/experiments/<run>
 python -m bma_benchmark validate-report-bundle artifacts/experiments/<run>/report_bundle
 ```
 
+`build-report` также добавляет в `report_bundle/` доказательные артефакты валидации и примеров сцен:
+
+```text
+report_bundle/validator_audit/
+report_bundle/scene_examples/
+```
+
+Их можно пересобрать отдельно:
+
+```bash
+python -m bma_benchmark audit-validators --tasks-dir tasks --out artifacts/validator_audit
+
+python -m bma_benchmark build-scene-gallery \
+  --input artifacts/experiments/<run> \
+  --out artifacts/experiments/<run>/report_bundle/scene_examples
+```
+
 `validate-report-bundle` возвращает exit code `0` только для валидного пакета. Результат проверки сохраняется в:
 
 ```text

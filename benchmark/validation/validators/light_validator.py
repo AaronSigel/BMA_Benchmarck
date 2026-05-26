@@ -6,6 +6,7 @@ from typing import Any
 from benchmark.blender.models import LightSnapshot, SceneSnapshot, Vector3 as BlenderVector3
 from benchmark.tasks.models import BenchmarkTask, ExpectedLight, ExpectedScene, Vector3
 from benchmark.validation.matcher import SceneMatcher
+from benchmark.validation.checks import check_row, json_value
 from benchmark.validation.models import (
     MetricScore,
     ValidationIssue,
@@ -129,6 +130,7 @@ class LightValidator:
         type_scores: list[float] = []
         transform_scores: list[float] = []
         energy_scores: list[float] = []
+        check_table = []
         available_lights = list(snapshot.lights)
 
         for expected_index, expected in enumerate(expected_lights):
@@ -137,6 +139,17 @@ class LightValidator:
             if actual is None:
                 issue = self._missing_issue(expected, expected_path)
                 issues.append(issue)
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="light exists",
+                    entity_ref=expected.name or expected.type,
+                    field="light",
+                    expected=expected.model_dump(mode="json", exclude_none=True),
+                    actual=None,
+                    passed=False,
+                    score=0.0,
+                    issue=issue,
+                ))
                 existence_scores.append(0.0)
                 type_scores.append(0.0)
                 transform_scores.append(0.0 if self._has_transform_expectations(expected) else 1.0)
@@ -147,14 +160,39 @@ class LightValidator:
             actual_index = snapshot.lights.index(actual)
             actual_path = f"snapshot.lights[{actual_index}]"
             existence_scores.append(1.0)
+            check_table.append(check_row(
+                validator_name=self.name,
+                check_name="light exists",
+                entity_ref=expected.name or actual.name,
+                field="light",
+                expected=expected.name or expected.type,
+                actual=actual.name,
+                passed=True,
+                score=1.0,
+            ))
 
             type_score = 1.0 if expected.type.upper() == actual.type.upper() else 0.0
             type_scores.append(type_score)
             if type_score < 1.0:
-                issues.append(self._type_mismatch_issue(expected, actual, expected_path, actual_path))
+                issue = self._type_mismatch_issue(expected, actual, expected_path, actual_path)
+                issues.append(issue)
+            else:
+                issue = None
+            check_table.append(check_row(
+                validator_name=self.name,
+                check_name="type",
+                entity_ref=expected.name or actual.name,
+                field="type",
+                expected=expected.type,
+                actual=actual.type,
+                passed=type_score == 1.0,
+                score=type_score,
+                issue=issue,
+            ))
 
             transform_score = self._transform_score(expected, actual, task.expected_scene, snapshot)
             transform_scores.append(transform_score)
+            before = len(issues)
             self._append_transform_issues(
                 expected,
                 actual,
@@ -164,11 +202,67 @@ class LightValidator:
                 task.expected_scene,
                 snapshot,
             )
+            transform_issue_by_field = {
+                str(issue.expected_path).rsplit(".", 1)[-1]: issue
+                for issue in issues[before:]
+            }
+            for field in ("location", "rotation"):
+                if getattr(expected, field) is None:
+                    continue
+                field_score = (
+                    vector_tolerance_score(expected.location, actual.location, expected.tolerance)
+                    if field == "location"
+                    else vector_tolerance_score(_deg_to_rad_v3(expected.rotation), actual.rotation_euler, expected.tolerance)
+                )
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name=field,
+                    entity_ref=expected.name or actual.name,
+                    field=field,
+                    expected=json_value(_deg_to_rad_v3(expected.rotation) if field == "rotation" else expected.location),
+                    actual=json_value(actual.rotation_euler if field == "rotation" else actual.location),
+                    tolerance=expected.tolerance,
+                    passed=field_score == 1.0,
+                    score=field_score,
+                    issue=transform_issue_by_field.get(field),
+                ))
+            if expected.target is not None:
+                dir_score, actual_dir, expected_dir, angle_deg = self._direction_score(
+                    expected, actual, task.expected_scene, snapshot
+                )
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="target direction",
+                    entity_ref=expected.name or actual.name,
+                    field="target",
+                    expected={"direction": list(expected_dir), "target": json_value(expected.target)},
+                    actual={"direction": list(actual_dir), "angle_deg": round(angle_deg, 3)},
+                    tolerance=expected.direction_tolerance_deg,
+                    passed=dir_score == 1.0,
+                    score=dir_score,
+                    issue=transform_issue_by_field.get("target") or transform_issue_by_field.get("rotation"),
+                ))
 
             energy_score = self._energy_score(expected, actual)
             energy_scores.append(energy_score)
             if energy_score < 1.0:
-                issues.append(self._energy_mismatch_issue(expected, actual, expected_path, actual_path))
+                issue = self._energy_mismatch_issue(expected, actual, expected_path, actual_path)
+                issues.append(issue)
+            else:
+                issue = None
+            if expected.energy is not None:
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="energy",
+                    entity_ref=expected.name or actual.name,
+                    field="energy",
+                    expected=expected.energy,
+                    actual=actual.energy,
+                    tolerance=max(abs(expected.energy) * expected.tolerance, 1.0),
+                    passed=energy_score == 1.0,
+                    score=energy_score,
+                    issue=issue,
+                ))
 
         metrics = [
             self._metric("light_existence_score", existence_scores, 0.4),
@@ -185,6 +279,7 @@ class LightValidator:
             score=score,
             issues=issues,
             metrics=metrics,
+            check_table=check_table,
         )
 
     def _metric(self, name: str, scores: list[float], weight: float) -> MetricScore:

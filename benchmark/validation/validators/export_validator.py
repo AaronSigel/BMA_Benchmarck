@@ -4,6 +4,7 @@ from pathlib import Path
 
 from benchmark.blender.models import SceneSnapshot
 from benchmark.tasks.models import BenchmarkTask, ExpectedExport
+from benchmark.validation.checks import check_row
 from benchmark.validation.models import (
     MetricScore,
     ValidationIssue,
@@ -43,10 +44,11 @@ class ExportValidator:
         root = Path(artifacts_dir) if artifacts_dir is not None else Path(".")
         issues: list[ValidationIssue] = []
         scores: list[float] = []
+        check_table = []
 
         for expected_index, expected in enumerate(expected_exports):
             expected_path = f"expected_scene.exports[{expected_index}]"
-            export_score = self._validate_expected_export(expected, root, expected_path, issues)
+            export_score = self._validate_expected_export(expected, root, expected_path, issues, check_table)
             scores.append(export_score)
 
         score = sum(scores) / len(scores)
@@ -64,6 +66,7 @@ class ExportValidator:
                     issues=issues,
                 )
             ],
+            check_table=check_table,
         )
 
     def _validate_expected_export(
@@ -72,24 +75,91 @@ class ExportValidator:
         artifacts_dir: Path,
         expected_path: str,
         issues: list[ValidationIssue],
+        check_table: list,
     ) -> float:
         export_format = expected.format.lower()
         if export_format not in SUPPORTED_EXPORT_FORMATS:
-            issues.append(self._unsupported_format_issue(expected, expected_path))
+            issue = self._unsupported_format_issue(expected, expected_path)
+            issues.append(issue)
+            check_table.append(check_row(
+                validator_name=self.name,
+                check_name="file exists",
+                entity_ref=expected.filename or expected.format,
+                field="path",
+                expected=expected.model_dump(mode="json", exclude_none=True),
+                actual=None,
+                passed=False,
+                score=0.0,
+                issue=issue,
+            ))
             return 0.0
 
         candidates = self._candidate_paths(expected, artifacts_dir)
         existing_candidates = [candidate for candidate in candidates if candidate.exists()]
         if not existing_candidates:
             if expected.must_exist:
-                issues.append(self._missing_issue(expected, candidates, expected_path))
+                issue = self._missing_issue(expected, candidates, expected_path)
+                issues.append(issue)
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="file exists",
+                    entity_ref=expected.filename or expected.format,
+                    field="path",
+                    expected=[str(path) for path in candidates],
+                    actual=None,
+                    passed=False,
+                    score=0.0,
+                    issue=issue,
+                ))
                 return 0.0
+            check_table.append(check_row(
+                validator_name=self.name,
+                check_name="file exists",
+                entity_ref=expected.filename or expected.format,
+                field="path",
+                expected=[str(path) for path in candidates],
+                actual=None,
+                passed=True,
+                score=1.0,
+            ))
             return 1.0
 
         best_candidate = existing_candidates[0]
+        check_table.append(check_row(
+            validator_name=self.name,
+            check_name="file exists",
+            entity_ref=expected.filename or expected.format,
+            field="path",
+            expected=[str(path) for path in candidates],
+            actual=str(best_candidate),
+            passed=True,
+            score=1.0,
+        ))
         if best_candidate.stat().st_size <= 0:
-            issues.append(self._empty_file_issue(expected, best_candidate, expected_path))
+            issue = self._empty_file_issue(expected, best_candidate, expected_path)
+            issues.append(issue)
+            check_table.append(check_row(
+                validator_name=self.name,
+                check_name="file size",
+                entity_ref=expected.filename or expected.format,
+                field="file_size_bytes",
+                expected=">0",
+                actual=best_candidate.stat().st_size,
+                passed=False,
+                score=0.0,
+                issue=issue,
+            ))
             return 0.0
+        check_table.append(check_row(
+            validator_name=self.name,
+            check_name="file size",
+            entity_ref=expected.filename or expected.format,
+            field="file_size_bytes",
+            expected=">0",
+            actual=best_candidate.stat().st_size,
+            passed=True,
+            score=1.0,
+        ))
         return 1.0
 
     def _candidate_paths(self, expected: ExpectedExport, artifacts_dir: Path) -> list[Path]:

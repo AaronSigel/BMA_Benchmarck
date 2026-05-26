@@ -3,6 +3,7 @@
 from benchmark.validation.models import (
     MetricScore,
     SceneValidationResult,
+    ValidationCheckRow,
     ValidationIssue,
     ValidationSeverity,
     ValidationStatus,
@@ -12,6 +13,7 @@ from benchmark.validation.models import (
 __all__ = [
     "MetricScore",
     "SceneValidationResult",
+    "ValidationCheckRow",
     "ValidationIssue",
     "ValidationSeverity",
     "ValidationStatus",

@@ -67,6 +67,17 @@ class ValidationMetric(BaseModel):
     score: float = Field(ge=0.0, le=1.0)
     status: str
     issue_count: int = Field(default=0, ge=0)
+    criterion_name: str | None = None
+    checked_entity: str | None = None
+    checked_field: str | None = None
+    expected_path: str | None = None
+    actual_path: str | None = None
+    expected_value: Any | None = None
+    actual_value: Any | None = None
+    tolerance: float | None = None
+    weight: float | None = None
+    required: bool | None = None
+    scoring_rule: str | None = None
 
 
 class ErrorRecord(BaseModel):

@@ -15,6 +15,7 @@ from typing import Any
 from benchmark.blender.models import SceneSnapshot
 from benchmark.tasks.models import BenchmarkTask, ExpectedExport, ExpectedMaterial, ExpectedObject
 from benchmark.validation.matcher import BLENDER_SUFFIX_RE, SceneMatcher, normalize_name
+from benchmark.validation.checks import check_row
 from benchmark.validation.models import (
     MetricScore,
     ValidationIssue,
@@ -69,6 +70,7 @@ class GlbImportBackValidator:
         root = Path(artifacts_dir) if artifacts_dir is not None else Path(".")
         issues: list[ValidationIssue] = []
         scores: list[float] = []
+        check_table = []
         diagnostics: dict[str, Any] = {
             "imported_object_count": 0,
             "expected_object_count": len(task.expected_scene.objects),
@@ -81,7 +83,7 @@ class GlbImportBackValidator:
 
         for expected_index, expected in enumerate(expected_exports):
             expected_path = f"expected_scene.exports[{expected_index}]"
-            score, export_diag = self._validate_one(task, expected, root, expected_path, issues)
+            score, export_diag = self._validate_one(task, expected, root, expected_path, issues, check_table)
             scores.append(score)
             diagnostics.update(export_diag)
 
@@ -102,6 +104,7 @@ class GlbImportBackValidator:
                     issues=issues,
                 )
             ],
+            check_table=check_table,
         )
 
     def _validate_one(
@@ -111,6 +114,7 @@ class GlbImportBackValidator:
         artifacts_dir: Path,
         expected_path: str,
         issues: list[ValidationIssue],
+        check_table: list,
     ) -> tuple[float, dict[str, Any]]:
         diagnostics: dict[str, Any] = {
             "imported_object_count": 0,
@@ -125,13 +129,25 @@ class GlbImportBackValidator:
         path = next((candidate for candidate in candidates if candidate.exists()), None)
         if path is None:
             if expected.must_exist:
-                issues.append(_issue(
+                issue = _issue(
                     "export_import_missing",
                     "Expected GLB export file was not found for import-back validation.",
                     expected_path,
                     None,
                     expected.model_dump(mode="json", exclude_none=True),
                     [str(candidate) for candidate in candidates],
+                )
+                issues.append(issue)
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="import success",
+                    entity_ref=expected.filename or expected.format,
+                    field="glb",
+                    expected=[str(candidate) for candidate in candidates],
+                    actual=None,
+                    passed=False,
+                    score=0.0,
+                    issue=issue,
                 ))
                 diagnostics["import_error_type"] = "export_import_missing"
                 return 0.0, diagnostics
@@ -139,20 +155,32 @@ class GlbImportBackValidator:
 
         file_size = path.stat().st_size
         if file_size < self.min_file_size_bytes:
-            issues.append(_issue(
+            issue = _issue(
                 "export_import_file_too_small",
                 f"GLB export is too small to be a valid import target: {path}.",
                 expected_path,
                 str(path),
                 {"min_file_size_bytes": self.min_file_size_bytes},
                 {"file_size_bytes": file_size},
+            )
+            issues.append(issue)
+            check_table.append(check_row(
+                validator_name=self.name,
+                check_name="import success",
+                entity_ref=expected.filename or expected.format,
+                field="glb",
+                expected={"min_file_size_bytes": self.min_file_size_bytes},
+                actual={"path": str(path), "file_size_bytes": file_size},
+                passed=False,
+                score=0.0,
+                issue=issue,
             ))
             diagnostics["import_error_type"] = "export_import_file_too_small"
             return 0.0, diagnostics
         try:
             imported = self.importer(path)
         except Exception as error:
-            issues.append(_issue(
+            issue = _issue(
                 "export_import_failed",
                 f"GLB import-back validation failed: {error}",
                 expected_path,
@@ -163,9 +191,31 @@ class GlbImportBackValidator:
                     "import_error_message": str(error),
                     "expected_object_count": len(task.expected_scene.objects),
                 },
+            )
+            issues.append(issue)
+            check_table.append(check_row(
+                validator_name=self.name,
+                check_name="import success",
+                entity_ref=expected.filename or expected.format,
+                field="glb",
+                expected="importable GLB",
+                actual={"import_error_type": type(error).__name__, "message": str(error)},
+                passed=False,
+                score=0.0,
+                issue=issue,
             ))
             diagnostics["import_error_type"] = type(error).__name__
             return 0.0, diagnostics
+        check_table.append(check_row(
+            validator_name=self.name,
+            check_name="import success",
+            entity_ref=expected.filename or expected.format,
+            field="glb",
+            expected=str(path),
+            actual="imported",
+            passed=True,
+            score=1.0,
+        ))
 
         diagnostics["imported_object_count"] = len(imported.objects)
         expected_names = {
@@ -191,6 +241,53 @@ class GlbImportBackValidator:
             (bounds_score, 0.1),
         ]
         score = weighted_average(sub_scores)
+        check_table.extend([
+            check_row(
+                validator_name=self.name,
+                check_name="mesh count",
+                entity_ref=expected.filename or expected.format,
+                field="object_count",
+                expected=len(task.expected_scene.objects),
+                actual=len(imported.objects),
+                passed=mesh_count_score == 1.0,
+                score=mesh_count_score,
+                issue=_last_issue(issues, "export_import_mesh_count_mismatch"),
+            ),
+            check_row(
+                validator_name=self.name,
+                check_name="expected names",
+                entity_ref=expected.filename or expected.format,
+                field="object_names",
+                expected=[obj.name or obj.type for obj in task.expected_scene.objects],
+                actual=[obj.name for obj in imported.objects],
+                passed=objects_score == 1.0,
+                score=objects_score,
+                issue=_last_issue(issues, "export_import_object_missing"),
+            ),
+            check_row(
+                validator_name=self.name,
+                check_name="duplicate names",
+                entity_ref=expected.filename or expected.format,
+                field="object_names",
+                expected=0,
+                actual=max(0, len([BLENDER_SUFFIX_RE.sub("", obj.name) for obj in imported.objects]) - len(set(BLENDER_SUFFIX_RE.sub("", obj.name) for obj in imported.objects))),
+                passed=duplicate_score == 1.0,
+                score=duplicate_score,
+                issue=_last_issue(issues, "export_import_duplicate_names"),
+            ),
+            check_row(
+                validator_name=self.name,
+                check_name="material presence",
+                entity_ref=expected.filename or expected.format,
+                field="materials",
+                expected=[m.name for m in task.expected_scene.materials],
+                actual=[m.name for m in imported.materials],
+                passed=material_score == 1.0,
+                score=material_score,
+                issue=_last_issue(issues, "export_import_material_lost_after_export")
+                or _last_issue(issues, "export_import_material_parameters_mismatch"),
+            ),
+        ])
         return score, diagnostics
 
     def _mesh_count_score(
@@ -367,6 +464,10 @@ def _candidate_paths(expected: ExpectedExport, artifacts_dir: Path) -> list[Path
         artifacts_dir / relative
         for relative in STANDARD_EXPORT_CANDIDATES.get(expected.format.lower(), [])
     ]
+
+
+def _last_issue(issues: list[ValidationIssue], code: str) -> ValidationIssue | None:
+    return next((issue for issue in reversed(issues) if issue.code == code), None)
 
 
 def _material_parameter_mismatch(expected: ExpectedMaterial, actual) -> list[str]:

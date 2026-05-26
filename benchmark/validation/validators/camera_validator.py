@@ -9,6 +9,7 @@ from benchmark.tasks.models import BenchmarkTask, ExpectedCamera, Vector3
 def _deg_to_rad_v3(v: Vector3) -> BlenderVector3:
     return BlenderVector3(x=math.radians(v.x), y=math.radians(v.y), z=math.radians(v.z))
 from benchmark.validation.matcher import SceneMatcher
+from benchmark.validation.checks import check_row, json_value
 from benchmark.validation.models import (
     MetricScore,
     ValidationIssue,
@@ -41,6 +42,7 @@ class CameraValidator:
         direction_scores: list[float] = []
         focal_length_scores: list[float] = []
         active_scores: list[float] = []
+        check_table = []
         available_cameras = list(snapshot.cameras)
 
         for expected_index, expected in enumerate(expected_cameras):
@@ -50,6 +52,17 @@ class CameraValidator:
             if actual is None:
                 issue = self._missing_issue(expected, expected_path)
                 issues.append(issue)
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="camera exists",
+                    entity_ref=expected.name or "camera",
+                    field="camera",
+                    expected=expected.model_dump(mode="json", exclude_none=True),
+                    actual=None,
+                    passed=False,
+                    score=0.0,
+                    issue=issue,
+                ))
                 existence_scores.append(0.0)
                 transform_scores.append(0.0 if self._has_transform_expectations(expected) else 1.0)
                 direction_scores.append(0.0 if expected.target is not None else 1.0)
@@ -61,28 +74,108 @@ class CameraValidator:
             actual_index = snapshot.cameras.index(actual)
             actual_path = f"snapshot.cameras[{actual_index}]"
             existence_scores.append(1.0)
+            check_table.append(check_row(
+                validator_name=self.name,
+                check_name="camera exists",
+                entity_ref=expected.name or actual.name,
+                field="camera",
+                expected=expected.name or "camera",
+                actual=actual.name,
+                passed=True,
+                score=1.0,
+            ))
 
             transform_score = self._transform_score(expected, actual)
             transform_scores.append(transform_score)
+            before = len(issues)
             self._append_transform_issues(expected, actual, expected_path, actual_path, issues)
+            transform_issue_by_field = {
+                str(issue.expected_path).rsplit(".", 1)[-1]: issue
+                for issue in issues[before:]
+            }
+            for field in ("location", "rotation"):
+                if getattr(expected, field) is None or (field == "rotation" and expected.target is not None):
+                    continue
+                field_score = (
+                    vector_tolerance_score(expected.location, actual.location, expected.tolerance)
+                    if field == "location"
+                    else vector_tolerance_score(_deg_to_rad_v3(expected.rotation), actual.rotation_euler, expected.tolerance)
+                )
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name=field,
+                    entity_ref=expected.name or actual.name,
+                    field=field,
+                    expected=json_value(_deg_to_rad_v3(expected.rotation) if field == "rotation" else expected.location),
+                    actual=json_value(actual.rotation_euler if field == "rotation" else actual.location),
+                    tolerance=expected.tolerance,
+                    passed=field_score == 1.0,
+                    score=field_score,
+                    issue=transform_issue_by_field.get(field),
+                ))
 
             direction_score = self._direction_score(expected, actual, snapshot)
             direction_scores.append(direction_score)
             if direction_score < 1.0:
-                issues.append(self._direction_mismatch_issue(expected, actual, snapshot, expected_path, actual_path))
+                issue = self._direction_mismatch_issue(expected, actual, snapshot, expected_path, actual_path)
+                issues.append(issue)
+            else:
+                issue = None
+            if expected.target is not None:
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="target direction",
+                    entity_ref=expected.name or actual.name,
+                    field="target",
+                    expected=_target_expected_value(expected.target, _resolve_target(expected.target, snapshot)),
+                    actual=json_value(actual.rotation_euler),
+                    tolerance=expected.direction_tolerance_deg,
+                    passed=direction_score == 1.0,
+                    score=direction_score,
+                    issue=issue,
+                ))
 
             focal_length_score = self._focal_length_score(expected, actual)
             focal_length_scores.append(focal_length_score)
             if focal_length_score < 1.0:
-                issues.append(
-                    self._focal_length_mismatch_issue(expected, actual, expected_path, actual_path)
-                )
+                issue = self._focal_length_mismatch_issue(expected, actual, expected_path, actual_path)
+                issues.append(issue)
+            else:
+                issue = None
+            if expected.focal_length is not None:
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="lens",
+                    entity_ref=expected.name or actual.name,
+                    field="lens",
+                    expected=expected.focal_length,
+                    actual=actual.lens,
+                    tolerance=expected.tolerance,
+                    passed=focal_length_score == 1.0,
+                    score=focal_length_score,
+                    issue=issue,
+                ))
 
             active_score = 1.0
             if require_active and not actual.is_active:
                 active_score = 0.0
-                issues.append(self._active_camera_mismatch_issue(expected, actual, expected_path, actual_path))
+                issue = self._active_camera_mismatch_issue(expected, actual, expected_path, actual_path)
+                issues.append(issue)
+            else:
+                issue = None
             active_scores.append(active_score)
+            if require_active:
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="active camera",
+                    entity_ref=expected.name or actual.name,
+                    field="is_active",
+                    expected=True,
+                    actual=actual.is_active,
+                    passed=active_score == 1.0,
+                    score=active_score,
+                    issue=issue,
+                ))
 
         metrics = [
             self._metric("camera_existence_score", existence_scores, 0.3),
@@ -99,6 +192,7 @@ class CameraValidator:
             score=score,
             issues=issues,
             metrics=metrics,
+            check_table=check_table,
         )
 
     def _metric(self, name: str, scores: list[float], weight: float) -> MetricScore:

@@ -3,6 +3,7 @@
 from benchmark.blender.models import ObjectSnapshot, SceneSnapshot
 from benchmark.tasks.models import BenchmarkTask, ExpectedObject
 from benchmark.validation.matcher import SceneMatcher, normalize_name
+from benchmark.validation.checks import check_row
 from benchmark.validation.models import (
     MetricScore,
     ValidationIssue,
@@ -30,6 +31,7 @@ class ObjectValidator:
             )
 
         issues: list[ValidationIssue] = []
+        check_table = []
         found_count = 0
         type_match_count = 0
         primitive_expected_count = 0
@@ -41,27 +43,91 @@ class ObjectValidator:
             expected_path = f"expected_scene.objects[{expected_index}]"
 
             if actual is None:
-                issues.append(self._missing_issue(expected, expected_path))
+                issue = self._missing_issue(expected, expected_path)
+                issues.append(issue)
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="object exists",
+                    entity_ref=expected.name or expected.type,
+                    field="object",
+                    expected=expected.model_dump(mode="json", exclude_none=True),
+                    actual=None,
+                    passed=False,
+                    score=0.0,
+                    issue=issue,
+                ))
                 continue
 
             found_count += 1
             available_objects.remove(actual)
             actual_index = snapshot.objects.index(actual)
             actual_path = f"snapshot.objects[{actual_index}]"
+            check_table.append(check_row(
+                validator_name=self.name,
+                check_name="object exists",
+                entity_ref=expected.name or actual.name,
+                field="object",
+                expected=expected.name or expected.type,
+                actual=actual.name,
+                passed=True,
+                score=1.0,
+            ))
 
             if self._type_matches(expected, actual):
                 type_match_count += 1
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="object type",
+                    entity_ref=expected.name or actual.name,
+                    field="type",
+                    expected=expected.type,
+                    actual=actual.type,
+                    passed=True,
+                    score=1.0,
+                ))
             else:
-                issues.append(self._type_mismatch_issue(expected, actual, expected_path, actual_path))
+                issue = self._type_mismatch_issue(expected, actual, expected_path, actual_path)
+                issues.append(issue)
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="object type",
+                    entity_ref=expected.name or actual.name,
+                    field="type",
+                    expected=expected.type,
+                    actual=actual.type,
+                    passed=False,
+                    score=0.0,
+                    issue=issue,
+                ))
 
             if expected.primitive is not None:
                 primitive_expected_count += 1
                 if self._primitive_matches(expected, actual):
                     primitive_match_count += 1
+                    check_table.append(check_row(
+                        validator_name=self.name,
+                        check_name="primitive hint",
+                        entity_ref=expected.name or actual.name,
+                        field="primitive",
+                        expected=expected.primitive,
+                        actual=actual.primitive_hint,
+                        passed=True,
+                        score=1.0,
+                    ))
                 else:
-                    issues.append(
-                        self._primitive_mismatch_issue(expected, actual, expected_path, actual_path)
-                    )
+                    issue = self._primitive_mismatch_issue(expected, actual, expected_path, actual_path)
+                    issues.append(issue)
+                    check_table.append(check_row(
+                        validator_name=self.name,
+                        check_name="primitive hint",
+                        entity_ref=expected.name or actual.name,
+                        field="primitive",
+                        expected=expected.primitive,
+                        actual=actual.primitive_hint,
+                        passed=False,
+                        score=0.0,
+                        issue=issue,
+                    ))
 
         object_existence_score = found_count / len(expected_objects)
         type_score = type_match_count / found_count if found_count else 0.0
@@ -102,6 +168,7 @@ class ObjectValidator:
                     passed=primitive_score == 1.0,
                 ),
             ],
+            check_table=check_table,
         )
 
     def _missing_issue(self, expected: ExpectedObject, expected_path: str) -> ValidationIssue:

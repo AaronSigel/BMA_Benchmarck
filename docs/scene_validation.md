@@ -104,6 +104,18 @@ successfully.
     }
   ],
   "issues": [],
+  "check_table": [
+    {
+      "validator_name": "object_validator",
+      "check_name": "object exists",
+      "entity_ref": "Cube",
+      "field": "object",
+      "expected": "Cube",
+      "actual": "Cube",
+      "passed": true,
+      "score": 1.0
+    }
+  ],
   "summary": {
     "validators_total": 6,
     "validators_run": 2,
@@ -118,6 +130,17 @@ successfully.
     }
   }
 }
+```
+
+`check_table` is optional for backward compatibility and is omitted in older
+validation artifacts. New validation runs populate it with compact,
+explainable rows for object, transform, material, light, camera, export and
+GLB import-back checks.
+
+Validator inventory artifacts can be generated without Blender:
+
+```bash
+python -m bma_benchmark audit-validators --tasks-dir tasks --out artifacts/validator_audit
 ```
 
 Statuses are:

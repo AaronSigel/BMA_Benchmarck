@@ -11,6 +11,7 @@ def _deg_to_rad_v3(v: Vector3) -> BlenderVector3:
     """Convert a Vector3 in degrees to a BlenderVector3 in radians."""
     return BlenderVector3(x=math.radians(v.x), y=math.radians(v.y), z=math.radians(v.z))
 from benchmark.validation.matcher import SceneMatcher
+from benchmark.validation.checks import check_row, json_value
 from benchmark.validation.models import (
     MetricScore,
     ValidationIssue,
@@ -34,6 +35,7 @@ class TransformValidator:
         available_objects = [obj for obj in snapshot.objects if obj.type.upper() == "MESH"]
         issues: list[ValidationIssue] = []
         metric_scores: list[MetricScore] = []
+        check_table = []
 
         for expected_index, expected in enumerate(expected_objects):
             fields = self._expected_transform_fields(expected)
@@ -43,8 +45,21 @@ class TransformValidator:
             expected_path = f"expected_scene.objects[{expected_index}]"
             actual = self.matcher.match_expected_object(expected, available_objects)
             if actual is None:
-                issues.append(self._missing_issue(expected, expected_path))
+                issue = self._missing_issue(expected, expected_path)
+                issues.append(issue)
                 for field in fields:
+                    check_table.append(check_row(
+                        validator_name=self.name,
+                        check_name=field,
+                        entity_ref=expected.name or expected.type,
+                        field=field,
+                        expected=json_value(self._expected_value(expected, field)),
+                        actual=None,
+                        tolerance=expected.tolerance,
+                        passed=False,
+                        score=0.0,
+                        issue=issue,
+                    ))
                     metric_scores.append(
                         MetricScore(
                             name=f"{field}_score",
@@ -66,6 +81,20 @@ class TransformValidator:
                     issue = self._mismatch_issue(expected, actual, field, expected_path, actual_path)
                     issues.append(issue)
                     field_issues.append(issue)
+                else:
+                    issue = None
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name=field,
+                    entity_ref=expected.name or actual.name,
+                    field=field,
+                    expected=json_value(_deg_to_rad_v3(self._expected_value(expected, field)) if field == "rotation" else self._expected_value(expected, field)),
+                    actual=json_value(self._actual_value(actual, field)),
+                    tolerance=expected.tolerance,
+                    passed=field_score == 1.0,
+                    score=field_score,
+                    issue=issue,
+                ))
 
                 metric_scores.append(
                     MetricScore(
@@ -92,6 +121,7 @@ class TransformValidator:
             score=score,
             issues=issues,
             metrics=metric_scores,
+            check_table=check_table,
         )
 
     def _expected_transform_fields(self, expected: ExpectedObject) -> list[TransformField]:

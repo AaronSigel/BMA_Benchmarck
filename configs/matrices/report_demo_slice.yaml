@@ -1,0 +1,115 @@
+matrix_id: report_demo_slice
+title: Report demo slice
+description: >
+  Small demonstration slice for report visual evidence:
+  5 tasks × 5 models × 4 strategies × 1 MCP profile × 1 repetition = 100 runs.
+
+tasks:
+  ids:
+    - geometry_002_positions
+    - materials_004_multiple_objects
+    - lighting_003_three_point_lighting
+    - camera_003_composition_view
+    - export_002_glb_file
+
+agents:
+  ids:
+    - direct_openrouter
+    - plan_execute_openrouter
+    - react_openrouter
+    - plan_execute_react_repair_openrouter
+  config_root: configs/agents
+
+mcp_profiles:
+  - full
+
+models:
+  ids:
+    - google/gemini-2.5-flash-lite
+    - openai/gpt-5-mini
+    - deepseek/deepseek-chat-v3.1
+    - qwen/qwen3-coder
+    - mistralai/mistral-small-3.2-24b-instruct
+
+execution_modes:
+  - agent_mcp
+
+repetitions: 1
+
+output_root: artifacts/experiments/report_demo_slice
+report_config_path: configs/reports/default_report.yaml
+
+metadata:
+  purpose: report_demo_slice_visual_evidence
+  expected_runs: 100
+  report_ready_mvp: true
+  timestamp_output_root: false
+
+  generation_profile:
+    id: balanced_tool_use_v1
+    apply_to_all_models: true
+    temperature: 0.2
+    top_p: 0.9
+    top_k: null
+    max_tokens: 6144
+    seed: null
+    reasoning:
+      enabled: false
+      effort: null
+      max_reasoning_tokens: null
+
+  preflight:
+    enabled: true
+    mode: diagnostic
+    fail_fast: false
+    require_export_smoke: true
+    require_tool_contract_smoke: true
+    require_snapshot_smoke: true
+    require_model_access_smoke: true
+    require_tool_calling_smoke: true
+    model_smoke:
+      mcp_profile: full
+      probe_tool: bma_get_scene_snapshot
+      timeout_sec: 60
+
+  strategy_limits:
+    direct_tool_calling:
+      max_steps: 20
+    plan_and_execute:
+      max_steps: 40
+    react:
+      max_steps: 25
+      max_steps_by_category:
+        export: 35
+        lighting: 25
+      stop_after_scene_passed: true
+      detect_repeated_actions: true
+      detect_duplicate_objects: true
+      detect_no_progress: true
+      no_progress_limit: 3
+      no_progress_limit_by_category:
+        export: 5
+        lighting: 5
+      repair_activation_diagnostics: true
+    plan_execute_react_repair:
+      max_steps: 40
+      max_steps_by_category:
+        export: 50
+        lighting: 40
+      stop_after_scene_passed: true
+      detect_repeated_actions: true
+      detect_duplicate_objects: true
+      detect_no_progress: true
+      no_progress_limit: 3
+      no_progress_limit_by_category:
+        export: 5
+        lighting: 5
+      repair_activation_diagnostics: true
+
+  worker_lifecycle:
+    restart_every_n_runs: 30
+    restart_on_tool_timeout: true
+    restart_on_empty_socket_response: true
+    restart_on_reset_failure: true
+    restart_on_consecutive_snapshot_failures: 2
+    health_check_after_restart: true

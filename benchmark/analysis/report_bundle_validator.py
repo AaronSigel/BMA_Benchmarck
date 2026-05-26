@@ -32,6 +32,26 @@ REQUIRED_FIGURES = {
     "cost_by_strategy.png",
 }
 
+REQUIRED_VALIDATOR_AUDIT_FILES = {
+    "validator_audit/validator_inventory.csv",
+    "validator_audit/validator_inventory.json",
+    "validator_audit/validator_audit.md",
+    "validator_audit/validator_limitations.md",
+}
+
+REQUIRED_SCENE_EXAMPLE_FILES = {
+    "scene_examples/scene_examples.json",
+    "scene_examples/scene_examples.csv",
+    "scene_examples/scene_examples.md",
+}
+
+RECOMMENDED_SCENE_EXAMPLE_IMAGES = {
+    "scene_examples/clean_pass_examples.png",
+    "scene_examples/soft_pass_examples.png",
+    "scene_examples/failed_validation_examples.png",
+    "scene_examples/mixed_scene_examples.png",
+}
+
 
 def validate_report_bundle(bundle: Path | str) -> list[str]:
     return [check["message"] for check in validate_report_bundle_result(bundle, write_result=False)["checks"] if check["status"] == "failed"]
@@ -55,6 +75,16 @@ def validate_report_bundle_result(bundle: Path | str, *, write_result: bool = Tr
             add(f"required_file:{name}", "failed", message=f"missing required file: {name}")
         else:
             add(f"required_file:{name}", "passed")
+    for name in sorted(REQUIRED_VALIDATOR_AUDIT_FILES):
+        if not (root / name).is_file():
+            add(f"required_file:{name}", "failed", message=f"missing required file: {name}")
+        else:
+            add(f"required_file:{name}", "passed")
+    for name in sorted(REQUIRED_SCENE_EXAMPLE_FILES):
+        if not (root / name).is_file():
+            add(f"required_file:{name}", "failed", message=f"missing required file: {name}")
+        else:
+            add(f"required_file:{name}", "passed")
     figures_dir = root / "figures"
     if not figures_dir.is_dir():
         add("figures_directory", "failed", message="missing figures directory")
@@ -73,8 +103,29 @@ def validate_report_bundle_result(bundle: Path | str, *, write_result: bool = Tr
     analysis = _read_json(root / "experiment_analysis.json", errors)
     manifest = _read_json(root / "manifest.json", errors)
     run_manifest_index = _read_json(root / "run_artifact_manifests.json", errors)
+    validator_inventory = _read_json(root / "validator_audit/validator_inventory.json", errors)
+    scene_examples = _read_json(root / "scene_examples/scene_examples.json", errors)
+    _read_required_csv(root / "validator_audit/validator_inventory.csv", errors)
+    _read_required_csv(root / "scene_examples/scene_examples.csv", errors)
     for error in errors:
         add("read_json_or_csv", "failed", message=error)
+    if isinstance(validator_inventory, dict):
+        add("validator_inventory_json_readable", "passed")
+    if isinstance(scene_examples, dict):
+        add("scene_examples_json_readable", "passed")
+        missing_images = [
+            name for name in sorted(RECOMMENDED_SCENE_EXAMPLE_IMAGES)
+            if not (root / name).is_file()
+        ]
+        if missing_images:
+            add(
+                "scene example images missing",
+                "warning",
+                missing=missing_images,
+                message="scene metadata generated only",
+            )
+        else:
+            add("scene_example_images", "passed")
 
     if rows:
         add("summary_csv_readable", "passed", actual=len(rows))
@@ -129,7 +180,10 @@ def validate_report_bundle_result(bundle: Path | str, *, write_result: bool = Tr
 
     if isinstance(manifest, dict) and isinstance(manifest.get("report_bundle_files"), list):
         declared = sorted(str(item) for item in manifest["report_bundle_files"])
-        missing_declared = sorted(item for item in declared if not (root / item).is_file())
+        missing_declared = sorted(
+            item for item in declared
+            if not (root / item).is_file() and item not in RECOMMENDED_SCENE_EXAMPLE_IMAGES
+        )
         if missing_declared:
             add("manifest_paths_exist", "failed", message=f"manifest references missing files: {', '.join(missing_declared)}")
         else:
@@ -256,6 +310,17 @@ def validate_report_bundle_result(bundle: Path | str, *, write_result: bool = Tr
 
 def _read_summary_rows(path: Path, errors: list[str]) -> list[dict[str, str]]:
     if not path.exists():
+        return []
+
+
+def _read_required_csv(path: Path, errors: list[str]) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    try:
+        with path.open("r", newline="", encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"failed to read {path.name}: {exc}")
         return []
     try:
         with path.open("r", newline="", encoding="utf-8") as fh:

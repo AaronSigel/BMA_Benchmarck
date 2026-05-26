@@ -69,6 +69,31 @@ def main() -> int:
         print(f"report: {report}")
         return 0
 
+    if args.command == "audit-validators":
+        from bma_benchmark.validation_audit.collector import collect_validator_audit
+        from bma_benchmark.validation_audit.writers import write_validator_audit
+
+        report = collect_validator_audit(args.tasks_dir)
+        write_validator_audit(report, args.out)
+        print(f"validator_audit: {args.out}")
+        print(f"rows: {len(report.rows)}")
+        return 0
+
+    if args.command == "build-scene-gallery":
+        from bma_benchmark.reporting.scene_examples.cli import build_scene_gallery
+
+        return build_scene_gallery(args.input, args.out, args.examples_per_status)
+
+    if args.command == "build-evidence-pack":
+        from bma_benchmark.reporting.evidence_pack.cli import main as evidence_main
+
+        return evidence_main([
+            "--experiment", str(args.experiment),
+            "--out", str(args.out),
+            *(["--config", str(args.config)] if args.config else []),
+            *(["--tasks-dir", str(args.tasks_dir)] if args.tasks_dir else []),
+        ])
+
     if args.command in {"validate-report-bundle", "validate-bundle"}:
         from benchmark.analysis.report_bundle_validator import validate_report_bundle_result
 
@@ -149,6 +174,21 @@ def _parser() -> argparse.ArgumentParser:
     build_report = sub.add_parser("build-report")
     build_report.add_argument("--input", type=Path, required=True)
     build_report.add_argument("--config", type=Path, default=Path("configs/reports/default_report.yaml"))
+
+    audit_validators = sub.add_parser("audit-validators")
+    audit_validators.add_argument("--tasks-dir", type=Path, required=True)
+    audit_validators.add_argument("--out", type=Path, required=True)
+
+    scene_gallery = sub.add_parser("build-scene-gallery")
+    scene_gallery.add_argument("--input", type=Path, required=True)
+    scene_gallery.add_argument("--out", type=Path, required=True)
+    scene_gallery.add_argument("--examples-per-status", type=int, default=4)
+
+    evidence_pack = sub.add_parser("build-evidence-pack")
+    evidence_pack.add_argument("--experiment", type=Path, required=True)
+    evidence_pack.add_argument("--out", type=Path, default=Path("artifacts/report_evidence_pack"))
+    evidence_pack.add_argument("--config", type=Path, default=None)
+    evidence_pack.add_argument("--tasks-dir", type=Path, default=Path("tasks"))
 
     validate = sub.add_parser("validate-report-bundle")
     validate.add_argument("bundle", type=Path)

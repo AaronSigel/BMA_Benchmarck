@@ -73,6 +73,11 @@ class SceneValidator:
             for result in validator_results
             for issue in result.issues
         ]
+        check_table = [
+            row
+            for result in validator_results
+            for row in result.check_table
+        ]
         contamination_summary, contamination_issues = self._scene_contamination_summary(task, snapshot)
         issues.extend(contamination_issues)
         issue_counts = Counter(issue.code for issue in issues)
@@ -94,6 +99,7 @@ class SceneValidator:
             validators=validator_results,
             issues=issues,
             summary=summary,
+            check_table=check_table,
         )
 
     def _run_validator(

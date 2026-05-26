@@ -248,9 +248,28 @@ def create_report_bundle(output_root: Path, analysis: ExperimentAnalysisResult, 
     else:
         (bundle / "manifest.json").write_text(json.dumps({"experiment_id": analysis.experiment_id}, indent=2), encoding="utf-8")
     _write_run_manifest_index(output_root, bundle)
-    _augment_bundle_manifest(bundle)
     write_readme_report(bundle / "README_REPORT.md")
+    _write_extended_bundle_artifacts(output_root, bundle)
+    _augment_bundle_manifest(bundle)
     return bundle
+
+
+def _write_extended_bundle_artifacts(output_root: Path, bundle: Path) -> None:
+    try:
+        from bma_benchmark.reporting.scene_examples.discovery import discover_runs
+        from bma_benchmark.reporting.scene_examples.models import SceneExampleSelectionConfig
+        from bma_benchmark.reporting.scene_examples.selection import select_scene_examples
+        from bma_benchmark.reporting.scene_examples.writers import write_scene_examples
+        from bma_benchmark.validation_audit.collector import collect_validator_audit
+        from bma_benchmark.validation_audit.writers import write_validator_audit
+
+        audit = collect_validator_audit(Path("tasks"))
+        write_validator_audit(audit, bundle / "validator_audit")
+        examples = select_scene_examples(discover_runs(output_root), SceneExampleSelectionConfig())
+        write_scene_examples(examples, bundle / "scene_examples")
+    except Exception as exc:  # noqa: BLE001
+        warning_path = bundle / "extended_artifacts_warning.txt"
+        warning_path.write_text(f"failed to build extended report artifacts: {exc}\n", encoding="utf-8")
 
 
 def _write_run_manifest_index(output_root: Path, bundle: Path) -> None:

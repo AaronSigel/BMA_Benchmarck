@@ -5,6 +5,7 @@ from typing import Literal
 from benchmark.blender.models import MaterialSnapshot, ObjectSnapshot, SceneSnapshot
 from benchmark.tasks.models import BenchmarkTask, ColorRGBA, ExpectedMaterial, ExpectedObject
 from benchmark.validation.matcher import SceneMatcher, name_similarity
+from benchmark.validation.checks import check_row
 from benchmark.validation.models import (
     MetricScore,
     ValidationIssue,
@@ -26,9 +27,10 @@ class MaterialValidator:
     def validate(self, task: BenchmarkTask, snapshot: SceneSnapshot) -> ValidatorResult:
         issues: list[ValidationIssue] = []
         metric_scores: list[MetricScore] = []
+        check_table = []
 
-        material_metrics = self._validate_expected_materials(task, snapshot, issues)
-        assignment_metric = self._validate_object_material_assignments(task, snapshot, issues)
+        material_metrics = self._validate_expected_materials(task, snapshot, issues, check_table)
+        assignment_metric = self._validate_object_material_assignments(task, snapshot, issues, check_table)
 
         if material_metrics[0] is not None:
             metric_scores.append(material_metrics[0])
@@ -53,6 +55,7 @@ class MaterialValidator:
             score=score,
             issues=issues,
             metrics=metric_scores,
+            check_table=check_table,
         )
 
     def _validate_expected_materials(
@@ -60,6 +63,7 @@ class MaterialValidator:
         task: BenchmarkTask,
         snapshot: SceneSnapshot,
         issues: list[ValidationIssue],
+        check_table: list,
     ) -> tuple[MetricScore | None, MetricScore | None]:
         expected_materials = task.expected_scene.materials
         if not expected_materials:
@@ -77,11 +81,32 @@ class MaterialValidator:
                 issue = self._material_missing_issue(expected, expected_path)
                 issues.append(issue)
                 existence_issues.append(issue)
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="material exists",
+                    entity_ref=expected.name,
+                    field="material",
+                    expected=expected.name,
+                    actual=None,
+                    passed=False,
+                    score=0.0,
+                    issue=issue,
+                ))
                 continue
 
             found_count += 1
             actual_index = snapshot.materials.index(actual)
             actual_path = f"snapshot.materials[{actual_index}]"
+            check_table.append(check_row(
+                validator_name=self.name,
+                check_name="material exists",
+                entity_ref=expected.name,
+                field="material",
+                expected=expected.name,
+                actual=actual.name,
+                passed=True,
+                score=1.0,
+            ))
             for parameter in self._expected_parameters(expected):
                 parameter_score = self._parameter_score(expected, actual, parameter)
                 parameter_scores.append(parameter_score)
@@ -95,6 +120,20 @@ class MaterialValidator:
                     )
                     issues.append(issue)
                     parameter_issues.append(issue)
+                else:
+                    issue = None
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name=parameter,
+                    entity_ref=expected.name,
+                    field=parameter,
+                    expected=self._json_value(getattr(expected, parameter)),
+                    actual=self._json_value(getattr(actual, parameter)),
+                    tolerance=expected.tolerance,
+                    passed=parameter_score == 1.0,
+                    score=parameter_score,
+                    issue=issue,
+                ))
 
         existence_score = found_count / len(expected_materials)
         parameter_score = (
@@ -120,6 +159,7 @@ class MaterialValidator:
         task: BenchmarkTask,
         snapshot: SceneSnapshot,
         issues: list[ValidationIssue],
+        check_table: list,
     ) -> MetricScore | None:
         expected_objects = [
             (index, expected)
@@ -141,6 +181,17 @@ class MaterialValidator:
                 issues.append(issue)
                 assignment_issues.append(issue)
                 assignment_scores.append(0.0)
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="assignment",
+                    entity_ref=expected.name or expected.type,
+                    field="material",
+                    expected=expected.material,
+                    actual=None,
+                    passed=False,
+                    score=0.0,
+                    issue=issue,
+                ))
                 continue
 
             available_objects.remove(actual)
@@ -149,11 +200,32 @@ class MaterialValidator:
 
             if self._material_slot_matches(expected.material or "", actual):
                 assignment_scores.append(1.0)
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="assignment",
+                    entity_ref=expected.name or actual.name,
+                    field="material",
+                    expected=expected.material,
+                    actual=list(actual.material_slots),
+                    passed=True,
+                    score=1.0,
+                ))
             else:
                 issue = self._object_material_missing_issue(expected, actual, expected_path, actual_path)
                 issues.append(issue)
                 assignment_issues.append(issue)
                 assignment_scores.append(0.0)
+                check_table.append(check_row(
+                    validator_name=self.name,
+                    check_name="assignment",
+                    entity_ref=expected.name or actual.name,
+                    field="material",
+                    expected=expected.material,
+                    actual=list(actual.material_slots),
+                    passed=False,
+                    score=0.0,
+                    issue=issue,
+                ))
 
         score = sum(assignment_scores) / len(assignment_scores)
         return MetricScore(

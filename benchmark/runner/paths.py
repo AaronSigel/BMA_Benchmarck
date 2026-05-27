@@ -40,6 +40,18 @@ class RunArtifactLayout:
     def result_blend(self) -> Path:
         return self.run_dir() / "result.blend"
 
+    def final_scene_blend(self) -> Path:
+        return self.run_dir() / "final_scene.blend"
+
+    def final_scene_not_available_json(self) -> Path:
+        return self.run_dir() / "final_scene_not_available.json"
+
+    def viewport_png(self) -> Path:
+        return self.run_dir() / "viewport.png"
+
+    def final_render_png(self) -> Path:
+        return self.run_dir() / "final_render.png"
+
     def logs_dir(self) -> Path:
         return self.run_dir() / "logs"
 

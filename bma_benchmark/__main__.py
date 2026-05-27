@@ -87,11 +87,35 @@ def main() -> int:
     if args.command == "build-evidence-pack":
         from bma_benchmark.reporting.evidence_pack.cli import main as evidence_main
 
-        return evidence_main([
+        evidence_argv = [
             "--experiment", str(args.experiment),
             "--out", str(args.out),
             *(["--config", str(args.config)] if args.config else []),
             *(["--tasks-dir", str(args.tasks_dir)] if args.tasks_dir else []),
+        ]
+        if args.render_missing_with_blender:
+            evidence_argv.append("--render-missing-with-blender")
+        if args.blender_bin:
+            evidence_argv.extend(["--blender-bin", str(args.blender_bin)])
+        if args.render_mode:
+            evidence_argv.extend(["--render-mode", str(args.render_mode)])
+        if args.render_timeout_sec is not None:
+            evidence_argv.extend(["--render-timeout-sec", str(args.render_timeout_sec)])
+        return evidence_main(evidence_argv)
+
+    if args.command == "check-visual-artifacts":
+        from bma_benchmark.reporting.visual_artifacts.cli import main as visual_main
+
+        return visual_main(["--experiment", str(args.experiment)])
+
+    if args.command == "export-validator-article-pack":
+        from bma_benchmark.reporting.article_exports_validator.cli import main as export_main
+
+        return export_main([
+            "--main-experiment", str(args.main_experiment),
+            "--evidence-pack", str(args.evidence_pack),
+            "--render-experiment", str(args.render_experiment),
+            "--out", str(args.out),
         ])
 
     if args.command in {"validate-report-bundle", "validate-bundle"}:
@@ -189,6 +213,35 @@ def _parser() -> argparse.ArgumentParser:
     evidence_pack.add_argument("--out", type=Path, default=Path("artifacts/report_evidence_pack"))
     evidence_pack.add_argument("--config", type=Path, default=None)
     evidence_pack.add_argument("--tasks-dir", type=Path, default=Path("tasks"))
+    evidence_pack.add_argument("--render-missing-with-blender", action="store_true")
+    evidence_pack.add_argument("--blender-bin", type=str, default="blender")
+    evidence_pack.add_argument(
+        "--render-mode",
+        choices=["viewport", "render", "both"],
+        default="viewport",
+    )
+    evidence_pack.add_argument("--render-timeout-sec", type=int, default=120)
+
+    check_visual = sub.add_parser("check-visual-artifacts")
+    check_visual.add_argument("--experiment", type=Path, required=True)
+
+    export_validator = sub.add_parser("export-validator-article-pack")
+    export_validator.add_argument(
+        "--main-experiment",
+        type=Path,
+        default=Path("artifacts/experiments/final_multimodel_openrouter_v1_merged"),
+    )
+    export_validator.add_argument(
+        "--evidence-pack",
+        type=Path,
+        default=Path("artifacts/report_evidence_pack"),
+    )
+    export_validator.add_argument(
+        "--render-experiment",
+        type=Path,
+        default=Path("artifacts/experiments/report_demo_slice"),
+    )
+    export_validator.add_argument("--out", type=Path, default=Path("article_exports_validator"))
 
     validate = sub.add_parser("validate-report-bundle")
     validate.add_argument("bundle", type=Path)

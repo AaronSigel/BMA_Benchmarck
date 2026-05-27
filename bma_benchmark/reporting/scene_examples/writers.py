@@ -82,7 +82,9 @@ def render_scene_images(examples: list[SceneExample], out_dir: Path) -> list[Pat
         "mixed_scene_examples.png": examples,
     }
     for name, group in groups.items():
-        paths.append(build_contact_sheet(group, out_dir / name, name.replace("_", " ").replace(".png", "")))
+        sheet_path = build_contact_sheet(group, out_dir / name, name.replace("_", " ").replace(".png", ""))
+        if sheet_path is not None:
+            paths.append(sheet_path)
     return paths
 
 

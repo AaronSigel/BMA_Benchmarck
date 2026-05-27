@@ -19,6 +19,7 @@ from benchmark.validation.models import (
     ValidationStatus,
     ValidatorResult,
 )
+from benchmark.validation.skip import skip_row
 from benchmark.validation.scoring import vector_tolerance_score, weighted_average
 
 TransformField = Literal["location", "rotation", "scale", "dimensions"]
@@ -47,27 +48,20 @@ class TransformValidator:
             if actual is None:
                 issue = self._missing_issue(expected, expected_path)
                 issues.append(issue)
+                object_label = expected.name or expected.type
                 for field in fields:
-                    check_table.append(check_row(
+                    expected_display = self._format_expected_field(expected, field)
+                    check_table.append(skip_row(
                         validator_name=self.name,
                         check_name=field,
-                        entity_ref=expected.name or expected.type,
+                        entity_ref=object_label,
                         field=field,
-                        expected=json_value(self._expected_value(expected, field)),
-                        actual=None,
-                        tolerance=expected.tolerance,
-                        passed=False,
-                        score=0.0,
+                        expected=expected_display,
                         issue=issue,
+                        message=(
+                            f"Skipped because required object {object_label} was not found"
+                        ),
                     ))
-                    metric_scores.append(
-                        MetricScore(
-                            name=f"{field}_score",
-                            score=0.0,
-                            passed=False,
-                            issues=[issues[-1]],
-                        )
-                    )
                 continue
 
             available_objects.remove(actual)
@@ -106,6 +100,15 @@ class TransformValidator:
                 )
 
         if not metric_scores:
+            if issues:
+                return ValidatorResult(
+                    name=self.name,
+                    status=ValidationStatus.FAILED,
+                    score=0.0,
+                    issues=issues,
+                    metrics=[],
+                    check_table=check_table,
+                )
             return ValidatorResult(
                 name=self.name,
                 status=ValidationStatus.SKIPPED,
@@ -123,6 +126,14 @@ class TransformValidator:
             metrics=metric_scores,
             check_table=check_table,
         )
+
+    def _format_expected_field(self, expected: ExpectedObject, field: TransformField) -> str:
+        value = self._expected_value(expected, field)
+        if field == "dimensions" and value is not None:
+            return f"x={value.x},y={value.y},z={value.z}"
+        if field == "location" and value is not None:
+            return f"x={value.x},y={value.y},z={value.z}"
+        return json_value(value)
 
     def _expected_transform_fields(self, expected: ExpectedObject) -> list[TransformField]:
         fields: list[TransformField] = []

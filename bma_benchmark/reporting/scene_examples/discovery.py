@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from bma_benchmark.reporting.scene_examples.image_finder import find_scene_image
+from bma_benchmark.reporting.scene_examples.image_finder import find_scene_images
 from bma_benchmark.reporting.scene_examples.models import RunArtifactRef
 
 
@@ -52,14 +52,12 @@ def _build_ref(run_dir: Path, summary: dict[str, str]) -> RunArtifactRef:
     manifest = _read_json(run_dir / "artifact_manifest.json") or {}
     metrics = _read_json(run_dir / "metrics.json") or {}
     validation = _read_json(run_dir / "validation_result.json") or {}
-    image, missing_reason = find_scene_image(run_dir)
+    render_path, viewport_path, missing_reason = find_scene_images(run_dir)
     artifacts = manifest.get("artifacts") if isinstance(manifest, dict) else {}
     files = manifest.get("files") if isinstance(manifest, dict) else []
 
     task_id = _first(summary.get("task_id"), run_result.get("task_id"), manifest.get("task_id"))
     pass_type = _first(summary.get("pass_type"), manifest.get("status"), _pass_type_from_run(run_result, validation))
-    render_path = image if image and "viewport" not in image.name.lower() else None
-    viewport_path = image if image and "viewport" in image.name.lower() else None
 
     return RunArtifactRef(
         run_id=str(_first(summary.get("run_id"), run_result.get("run_id"), manifest.get("run_id"), run_dir.name)),
@@ -76,7 +74,10 @@ def _build_ref(run_dir: Path, summary: dict[str, str]) -> RunArtifactRef:
         validation_result_path=_existing_path(run_dir, artifacts, "validation_result", "validation_result.json"),
         render_path=render_path,
         viewport_path=viewport_path,
-        blend_path=_find_file(run_dir, files, ".blend"),
+        blend_path=_find_file(run_dir, files, ".blend") or _first_existing([
+            run_dir / "final_scene.blend",
+            run_dir / "result.blend",
+        ]),
         glb_path=_find_file(run_dir, files, ".glb") or _first_existing([run_dir / "exports/result.glb", run_dir / "result.glb"]),
         artifact_manifest=manifest if isinstance(manifest, dict) else {},
         run_result=run_result if isinstance(run_result, dict) else {},
@@ -169,12 +170,29 @@ def _category_from_task(task_id: Any) -> str | None:
 def _pass_type_from_run(run_result: dict[str, Any], validation: dict[str, Any]) -> str | None:
     if run_result.get("pass_type"):
         return str(run_result["pass_type"])
+    from benchmark.analysis.pass_type_rules import apply_export_pass_type_guard
+
     status = str(run_result.get("status") or "").lower()
     val_status = str(validation.get("overall_status") or run_result.get("overall_status") or "").lower()
+    task_id = str(run_result.get("task_id") or validation.get("task_id") or "")
+    issues = [
+        issue if isinstance(issue, dict) else {"code": getattr(issue, "code", "")}
+        for issue in validation.get("issues") or []
+    ]
+    scores = validation.get("summary", {}).get("scores", {}) if isinstance(validation.get("summary"), dict) else {}
     if status == "passed" and val_status == "passed":
-        return "clean_pass"
-    if status == "passed" and val_status == "warning":
-        return "soft_pass"
-    if val_status == "failed":
-        return "failed_validation"
-    return status or None
+        pass_type = "clean_pass"
+    elif status == "passed" and val_status == "warning":
+        pass_type = "soft_pass"
+    elif val_status == "failed":
+        pass_type = "failed_validation"
+    else:
+        return status or None
+    return apply_export_pass_type_guard(
+        pass_type,
+        task_id,
+        issues,
+        object_score=scores.get("scene_score"),
+        export_score=scores.get("export_score"),
+        import_back_score=scores.get("import_back_score"),
+    )

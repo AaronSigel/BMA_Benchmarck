@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -98,6 +99,7 @@ class AgentExecutionBackend(ExecutionBackend):
             )
         except Exception as error:
             scene_snapshot_path = _auto_capture_snapshot(tool_executor, output_dir)
+            _auto_save_final_scene(tool_executor, output_dir)
             return ExecutionResult(
                 ok=False,
                 scene_snapshot_path=scene_snapshot_path,
@@ -124,6 +126,10 @@ class AgentExecutionBackend(ExecutionBackend):
                 log.info("[task:%s] scene snapshot captured: %s", config.task_id, scene_snapshot_path)
             else:
                 log.warning("[task:%s] auto-capture failed: no snapshot produced", config.task_id)
+
+        final_blend_path = _auto_save_final_scene(tool_executor, output_dir)
+        if final_blend_path:
+            log.info("[task:%s] final scene saved: %s", config.task_id, final_blend_path)
 
         trace_path = _copy_trace_to_run_root(result.trace_path, output_dir)
         agent_run_result = result
@@ -155,6 +161,7 @@ class AgentExecutionBackend(ExecutionBackend):
             "strategy": agent_config.strategy.value,
             "pre_run_snapshot_path": str(pre_run_snapshot_path) if pre_run_snapshot_path else None,
             "post_run_snapshot_captured": captured_post_run_snapshot,
+            "final_scene_blend_path": str(final_blend_path) if final_blend_path else None,
         }
         if result.ok and scene_snapshot_path is None:
             metadata["warning"] = "agent did not produce scene_snapshot_path"
@@ -261,6 +268,50 @@ def _auto_capture_snapshot(tool_executor: ToolExecutor, output_dir: Path) -> Pat
     """Capture a full SceneSnapshot as harness infrastructure."""
     snapshot_path = output_dir / "scene_snapshot.json"
     return _capture_snapshot_to_path(tool_executor, snapshot_path)
+
+
+def _auto_save_final_scene(tool_executor: ToolExecutor, output_dir: Path) -> Path | None:
+    """Save the final Blender scene as harness infrastructure."""
+    blend_path = output_dir / "final_scene.blend"
+    marker_path = output_dir / "final_scene_not_available.json"
+    saved = _save_final_scene_to_path(tool_executor, blend_path)
+    if saved is not None:
+        if marker_path.exists():
+            marker_path.unlink()
+        return saved
+    if not marker_path.exists():
+        marker_path.write_text(
+            json.dumps(
+                {
+                    "reason": "Blender runtime was not available after agent execution",
+                    "stage": "save_final_scene",
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    return None
+
+
+def _save_final_scene_to_path(tool_executor: ToolExecutor, blend_path: Path) -> Path | None:
+    mcp_executor = _mcp_executor(tool_executor)
+    if mcp_executor is None:
+        return None
+    blend_path.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in range(2):
+        try:
+            result = mcp_executor.adapter.save_final_scene(blend_path)
+        except Exception as error:
+            log.warning("final scene save failed (attempt %d): %s", attempt + 1, error)
+            result = {"ok": False, "error": {"type": "SaveSceneFailed", "message": str(error)}}
+        if not _envelope_failed(result) and blend_path.is_file() and blend_path.stat().st_size > 0:
+            return blend_path
+        log.warning(
+            "final scene save warning (attempt %d): %s",
+            attempt + 1,
+            _envelope_error_message(result) if isinstance(result, dict) else "unknown",
+        )
+    return None
 
 
 def _prepare_blender_scene(

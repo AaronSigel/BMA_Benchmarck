@@ -241,14 +241,17 @@ def _write_validator_expected_actual(
         "task_id",
         "validator_name",
         "check_name",
+        "object",
         "entity_ref",
         "field",
         "expected",
         "actual",
+        "status",
         "tolerance",
         "passed",
         "score",
         "issue_code",
+        "message",
         "severity",
     ]
     with path.open("w", newline="", encoding="utf-8") as fh:
@@ -263,20 +266,26 @@ def _write_validator_expected_actual(
             for row in rows:
                 if not isinstance(row, dict):
                     continue
+                status = row.get("status")
+                if status is None:
+                    status = "pass" if row.get("passed") else "fail"
                 writer.writerow({
                     "example_id": example_id,
                     "run_id": ex.run_id,
                     "task_id": ex.task_id,
                     "validator_name": row.get("validator_name"),
                     "check_name": row.get("check_name"),
+                    "object": row.get("entity_ref"),
                     "entity_ref": row.get("entity_ref"),
                     "field": row.get("field"),
                     "expected": row.get("expected"),
                     "actual": row.get("actual"),
+                    "status": status,
                     "tolerance": row.get("tolerance"),
                     "passed": row.get("passed"),
                     "score": row.get("score"),
                     "issue_code": row.get("issue_code"),
+                    "message": row.get("message"),
                     "severity": row.get("severity"),
                 })
     return path

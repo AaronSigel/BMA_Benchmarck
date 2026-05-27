@@ -29,5 +29,5 @@ def test_selection_includes_pass_types_priority_and_is_deterministic() -> None:
     second = select_scene_examples(list(reversed(runs)), config)
 
     assert {example.pass_type for example in first.examples} == {"clean_pass", "soft_pass", "failed_validation"}
-    assert first.examples[0].task_id == "camera_003_composition_view"
+    assert first.examples[0].task_id == "materials_004_multiple_objects"
     assert [e.run_id for e in first.examples] == [e.run_id for e in second.examples]

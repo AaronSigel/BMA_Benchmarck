@@ -12,6 +12,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=Path("artifacts/report_evidence_pack"))
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--tasks-dir", type=Path, default=Path("tasks"))
+    parser.add_argument("--render-missing-with-blender", action="store_true")
+    parser.add_argument("--blender-bin", type=str, default="blender")
+    parser.add_argument(
+        "--render-mode",
+        choices=["viewport", "render", "both"],
+        default="viewport",
+    )
+    parser.add_argument("--render-timeout-sec", type=int, default=120)
     args = parser.parse_args(argv)
 
     result = build_evidence_pack(
@@ -19,9 +27,14 @@ def main(argv: list[str] | None = None) -> int:
         args.out,
         config_path=args.config,
         tasks_root=args.tasks_dir,
+        render_missing_with_blender=args.render_missing_with_blender,
+        blender_bin=args.blender_bin,
+        render_mode=args.render_mode,
+        render_timeout_sec=args.render_timeout_sec,
     )
     print(f"evidence_pack: {args.out}")
     print(f"demo_runs_found: {result.get('demo_runs_found')}")
+    print(f"visual_evidence_complete: {result.get('visual_evidence_complete')}")
     print(f"completeness: {args.out / 'completeness_check.json'}")
     return 0
 

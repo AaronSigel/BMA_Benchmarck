@@ -14,7 +14,7 @@ from benchmark.tasks.models import (
     SuccessCriterion,
     TaskCategory,
 )
-from benchmark.validation.models import ValidationStatus
+from benchmark.validation.models import CheckStatus, ValidationStatus
 from benchmark.validation.validators.object_validator import ObjectValidator
 
 
@@ -162,6 +162,18 @@ def test_object_validator_reports_primitive_mismatch() -> None:
     assert result.issues[0].expected_path == "expected_scene.objects[0].primitive"
     assert result.issues[0].actual_path == "snapshot.objects[0].primitive_hint"
     assert result.issues[0].message
+
+
+def test_object_exists_row_uses_exists_not_object_dump() -> None:
+    task = task_with_objects(
+        [ExpectedObject(name="Lowpoly_House", type="MESH", primitive="cube")]
+    )
+    result = ObjectValidator().validate(task, scene_snapshot([]))
+    exists_row = next(row for row in result.check_table if row.check_name == "object exists")
+    assert exists_row.expected == "exists"
+    assert exists_row.actual == "not_found"
+    assert exists_row.entity_ref == "Lowpoly_House"
+    assert exists_row.status is CheckStatus.FAIL
 
 
 def test_object_validator_does_not_penalize_absent_primitive_expectations() -> None:

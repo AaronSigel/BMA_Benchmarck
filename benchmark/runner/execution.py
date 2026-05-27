@@ -128,6 +128,11 @@ class BlenderSmokeBackend(ExecutionBackend):
         if validation_error is not None:
             return _error_result(output_dir, validation_error, snapshot_path)
 
+        result_blend = output_dir / "result.blend"
+        final_blend = output_dir / "final_scene.blend"
+        if result_blend.is_file() and not final_blend.exists():
+            shutil.copy2(result_blend, final_blend)
+
         output_files = [Path(path) for path in command_result.output_files]
         for path in [input_json, output_json, snapshot_path]:
             if path not in output_files:

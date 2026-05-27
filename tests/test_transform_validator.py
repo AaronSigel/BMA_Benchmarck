@@ -128,6 +128,25 @@ def test_transform_validator_score_decreases_for_large_distance() -> None:
     assert result.issues[0].actual_path == "snapshot.objects[0].location"
 
 
+def test_transform_validator_skips_dependent_checks_when_object_missing() -> None:
+    from benchmark.tasks.models import Vector3 as TaskVector3
+
+    task = task_with_objects(
+        [
+            ExpectedObject(
+                name="Lowpoly_House",
+                type="MESH",
+                dimensions=TaskVector3(x=1.2, y=1.0, z=1.2),
+            )
+        ]
+    )
+    result = TransformValidator().validate(task, scene_snapshot([]))
+    dim_row = next(row for row in result.check_table if row.check_name == "dimensions")
+    assert dim_row.status.value == "skip"
+    assert dim_row.actual == "n/a"
+    assert dim_row.entity_ref == "Lowpoly_House"
+
+
 def test_transform_validator_reports_missing_object() -> None:
     task = task_with_objects(
         [

@@ -61,6 +61,16 @@ def build_run_artifact_manifest(
         ),
         "validation_result_not_available": _entry(run_dir, "validation_result_not_available.json", required=False),
         "metrics": _entry(run_dir, "metrics.json", required=True),
+        "final_blend": _entry(
+            run_dir,
+            "final_scene.blend",
+            required=False,
+            not_available_reason=_not_available_reason(run_dir, "final_scene", result, error_payload),
+        ),
+        "final_scene_not_available": _entry(run_dir, "final_scene_not_available.json", required=False),
+        "final_render": _entry(run_dir, "final_render.png", required=False),
+        "viewport": _entry(run_dir, "viewport.png", required=False),
+        "glb_export": _glb_export(run_dir),
         "exports": _exports(run_dir),
         "exports_not_available": _entry(run_dir, "exports_not_available.json", required=False),
     }
@@ -102,7 +112,7 @@ def validate_run_artifact_manifest(run_dir: Path | str) -> tuple[bool, list[str]
     except Exception as exc:  # noqa: BLE001
         return False, [f"artifact_manifest.json invalid: {exc}"]
     for name, entry in manifest.artifacts.items():
-        if name == "exports" or isinstance(entry, list):
+        if name in {"exports", "glb_export"} or isinstance(entry, list):
             continue
         if entry.required and not (run_path / entry.path).is_file():
             errors.append(f"required artifact missing: {entry.path}")
@@ -116,6 +126,24 @@ def _entry(run_dir: Path, relative: str, *, required: bool, not_available_reason
         exists=exists,
         required=required,
         not_available_reason=None if exists else not_available_reason,
+    )
+
+
+def _glb_export(run_dir: Path) -> ArtifactEntry:
+    exports_dir = run_dir / "exports"
+    if exports_dir.exists():
+        for path in sorted(exports_dir.rglob("*.glb")):
+            if path.is_file():
+                rel = str(path.relative_to(run_dir))
+                return ArtifactEntry(path=rel, exists=True, required=False, not_available_reason=None)
+    fallback = run_dir / "result.glb"
+    if fallback.is_file():
+        return ArtifactEntry(path=str(fallback.name), exists=True, required=False, not_available_reason=None)
+    return ArtifactEntry(
+        path="exports/result.glb",
+        exists=False,
+        required=False,
+        not_available_reason="no GLB export found",
     )
 
 

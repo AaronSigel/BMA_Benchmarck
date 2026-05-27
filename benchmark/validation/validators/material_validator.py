@@ -13,6 +13,7 @@ from benchmark.validation.models import (
     ValidationStatus,
     ValidatorResult,
 )
+from benchmark.validation.skip import skip_row
 from benchmark.validation.scoring import clamp_score, tolerance_score, weighted_average
 
 MaterialParameter = Literal["base_color", "roughness", "metallic"]
@@ -180,17 +181,17 @@ class MaterialValidator:
                 issue = self._object_missing_issue(expected, expected_path)
                 issues.append(issue)
                 assignment_issues.append(issue)
-                assignment_scores.append(0.0)
-                check_table.append(check_row(
+                object_label = expected.name or expected.type
+                check_table.append(skip_row(
                     validator_name=self.name,
                     check_name="assignment",
-                    entity_ref=expected.name or expected.type,
+                    entity_ref=object_label,
                     field="material",
                     expected=expected.material,
-                    actual=None,
-                    passed=False,
-                    score=0.0,
                     issue=issue,
+                    message=(
+                        f"Skipped because required object {object_label} was not found"
+                    ),
                 ))
                 continue
 
@@ -227,6 +228,13 @@ class MaterialValidator:
                     issue=issue,
                 ))
 
+        if not assignment_scores:
+            return MetricScore(
+                name="object_material_assignment_score",
+                score=1.0,
+                passed=True,
+                issues=assignment_issues,
+            )
         score = sum(assignment_scores) / len(assignment_scores)
         return MetricScore(
             name="object_material_assignment_score",

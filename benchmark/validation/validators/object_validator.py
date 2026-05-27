@@ -5,12 +5,14 @@ from benchmark.tasks.models import BenchmarkTask, ExpectedObject
 from benchmark.validation.matcher import SceneMatcher, normalize_name
 from benchmark.validation.checks import check_row
 from benchmark.validation.models import (
+    CheckStatus,
     MetricScore,
     ValidationIssue,
     ValidationSeverity,
     ValidationStatus,
     ValidatorResult,
 )
+from benchmark.validation.skip import is_exact_name_match
 from benchmark.validation.scoring import weighted_average
 
 
@@ -45,16 +47,20 @@ class ObjectValidator:
             if actual is None:
                 issue = self._missing_issue(expected, expected_path)
                 issues.append(issue)
+                object_label = expected.name or expected.type
                 check_table.append(check_row(
                     validator_name=self.name,
                     check_name="object exists",
-                    entity_ref=expected.name or expected.type,
+                    entity_ref=object_label,
                     field="object",
-                    expected=expected.model_dump(mode="json", exclude_none=True),
-                    actual=None,
+                    expected="exists",
+                    actual="not_found",
                     passed=False,
                     score=0.0,
+                    status=CheckStatus.FAIL,
+                    weight=2.0,
                     issue=issue,
+                    message=f"Required object {object_label} was not found",
                 ))
                 continue
 
@@ -62,15 +68,21 @@ class ObjectValidator:
             available_objects.remove(actual)
             actual_index = snapshot.objects.index(actual)
             actual_path = f"snapshot.objects[{actual_index}]"
+            object_label = expected.name or actual.name
+            exact_name = is_exact_name_match(expected, actual.name)
+            existence_actual = actual.name if exact_name else f"found: {actual.name}"
             check_table.append(check_row(
                 validator_name=self.name,
                 check_name="object exists",
-                entity_ref=expected.name or actual.name,
+                entity_ref=object_label,
                 field="object",
-                expected=expected.name or expected.type,
-                actual=actual.name,
+                expected="exists",
+                actual=existence_actual,
                 passed=True,
                 score=1.0,
+                status=CheckStatus.PASS,
+                matched_object=None if exact_name else actual.name,
+                match_reason=None if exact_name else "name_similarity",
             ))
 
             if self._type_matches(expected, actual):

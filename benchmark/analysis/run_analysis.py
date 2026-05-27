@@ -15,6 +15,7 @@ from benchmark.analysis.validation_metrics import (
     extract_issues,
 )
 from benchmark.runner.models import RunResult, RunStatus
+from benchmark.analysis.pass_type_rules import apply_export_pass_type_guard
 from benchmark.validation.models import SceneValidationResult, ValidationStatus
 
 
@@ -487,6 +488,10 @@ def analyze_run(bundle: RunArtifactBundle) -> RunAnalysisResult:
         _scene_status_str,
         _agent_status_str,
         issues,
+        task_id=task_id,
+        object_score=val_summary.object_score,
+        export_score=val_summary.export_score,
+        import_back_score=val_summary.export_import_score,
         error_type=str(metrics.get("structured_error_type") or "") or None,
         error_class=str(metrics.get("error_class") or "") or None,
         is_infra_failure=bool(metrics.get("is_infra_failure")),
@@ -525,6 +530,10 @@ def _classify_pass_type(
     agent_status: str | None,
     issues: list[dict[str, Any]],
     *,
+    task_id: str | None = None,
+    object_score: float | None = None,
+    export_score: float | None = None,
+    import_back_score: float | None = None,
     error_type: str | None = None,
     error_class: str | None = None,
     is_infra_failure: bool = False,
@@ -540,16 +549,29 @@ def _classify_pass_type(
         return "runtime_error"
     if scene_status == "passed":
         if run_status == "passed" and agent_ok and not issues and not has_error_type:
-            return "clean_pass"
-        return "soft_pass"
-    if scene_status == "warning":
+            pass_type = "clean_pass"
+        else:
+            pass_type = "soft_pass"
+    elif scene_status == "warning":
         if run_status in {"passed", "failed", "error"} or agent_status:
-            return "soft_pass"
-    if run_status == "error" or run_status is None or scene_status in {None, "not_available", "skipped"}:
+            pass_type = "soft_pass"
+        else:
+            pass_type = "runtime_error"
+    elif run_status == "error" or run_status is None or scene_status in {None, "not_available", "skipped"}:
         return "runtime_error"
-    if scene_status == "failed":
-        return "failed_validation"
-    return "runtime_error"
+    elif scene_status == "failed":
+        pass_type = "failed_validation"
+    else:
+        return "runtime_error"
+
+    return apply_export_pass_type_guard(
+        pass_type,
+        task_id,
+        issues,
+        object_score=object_score,
+        export_score=export_score,
+        import_back_score=import_back_score,
+    )
 
 
 def _import_back_metric_value(value: Any) -> float | str | int | bool:

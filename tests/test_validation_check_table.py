@@ -75,6 +75,24 @@ def test_validation_result_contains_check_table() -> None:
     assert any(row.validator_name == "object_validator" for row in result.check_table)
 
 
+def test_check_table_supports_status_field() -> None:
+    from benchmark.validation.checks import check_row
+    from benchmark.validation.models import CheckStatus
+
+    row = check_row(
+        validator_name="transform_validator",
+        check_name="dimensions",
+        entity_ref="Cube",
+        field="dimensions",
+        expected="x=1,y=1,z=1",
+        actual="n/a",
+        passed=False,
+        status=CheckStatus.SKIP,
+    )
+    assert row.status is CheckStatus.SKIP
+    assert row.actual == "n/a"
+
+
 def test_check_table_does_not_break_old_validation_result_json() -> None:
     old_json = """{"task_id":"t","overall_status":"passed","total_score":1.0,"validators":[],"issues":[],"summary":{}}"""
 

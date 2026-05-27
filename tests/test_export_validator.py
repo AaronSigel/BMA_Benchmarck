@@ -74,6 +74,28 @@ def test_export_validator_passes_existing_non_empty_standard_blend(tmp_path: Pat
     assert result.issues == []
 
 
+def test_export_validator_glb_missing_reports_not_found(tmp_path: Path) -> None:
+    task = task_with_exports(
+        [ExpectedExport(format="glb", filename="exports/result.glb", must_exist=True)]
+    )
+    result = ExportValidator().validate(task, scene_snapshot(), tmp_path)
+    exists_row = next(row for row in result.check_table if row.check_name == "file exists")
+    assert exists_row.entity_ref == "export"
+    assert exists_row.actual == "not_found"
+    assert result.status is ValidationStatus.FAILED
+
+
+def test_export_validator_empty_glb_fails_non_empty_check(tmp_path: Path) -> None:
+    write_file(tmp_path / "exports" / "result.glb", b"")
+    task = task_with_exports(
+        [ExpectedExport(format="glb", filename="exports/result.glb", must_exist=True)]
+    )
+    result = ExportValidator().validate(task, scene_snapshot(), tmp_path)
+    size_row = next(row for row in result.check_table if row.check_name == "file size")
+    assert size_row.passed is False
+    assert result.issues
+
+
 def test_export_validator_passes_existing_non_empty_standard_glb(tmp_path: Path) -> None:
     write_file(tmp_path / "exports" / "result.glb", b"glb")
     task = task_with_exports([ExpectedExport(format="glb")])

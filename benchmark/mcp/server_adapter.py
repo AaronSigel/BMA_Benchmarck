@@ -621,6 +621,35 @@ class ExternalBlenderMcpServerAdapter:
             result={"path": str(output_path)},
         )
 
+    def save_final_scene(self, output_path: Path | str) -> dict[str, Any]:
+        """Save the current Blender scene as harness infrastructure."""
+        code = _save_scene_code(Path(output_path))
+        raw = self.execute_code_unrestricted(code, operation="save_final_scene")
+        if isinstance(raw, dict) and raw.get("ok") is False:
+            return raw
+        if isinstance(raw, dict) and raw.get("warning"):
+            return _tool_envelope(
+                "save_final_scene",
+                ok=False,
+                result={"failure_stage": "save_final_scene", "stage": "save_final_scene"},
+                error_type="SaveSceneFailed",
+                error_message=str(raw.get("warning")),
+            )
+        path = Path(output_path)
+        if not path.is_file() or path.stat().st_size == 0:
+            return _tool_envelope(
+                "save_final_scene",
+                ok=False,
+                result={"failure_stage": "save_final_scene", "stage": "save_final_scene"},
+                error_type="SaveSceneFailed",
+                error_message="save_scene did not produce a blend file",
+            )
+        return _tool_envelope(
+            "save_final_scene",
+            ok=True,
+            result={"path": str(output_path)},
+        )
+
     def _call_get_scene_snapshot(self) -> dict[str, Any]:
         """Return full SceneSnapshot via collect_snapshot (not lightweight get_scene_info)."""
         import tempfile
@@ -920,6 +949,21 @@ def _collect_snapshot_code(output_path: Path) -> str:
         "import json as _j\n"
         f"_snap = collect_snapshot({{'output_path': {str(output_path)!r}}})\n"
         "print(_j.dumps(_snap))\n"
+    )
+
+
+def _save_scene_code(output_path: Path) -> str:
+    import inspect as _inspect
+
+    from benchmark.blender.scripts.save_scene import save_scene as _save_scene
+
+    module = _inspect.getmodule(_save_scene)
+    source = _inspect.getsource(module)
+    return (
+        f"{source}\n"
+        "import json as _j\n"
+        f"_save = save_scene({{'path': {str(output_path)!r}}})\n"
+        "print(_j.dumps(_save))\n"
     )
 
 

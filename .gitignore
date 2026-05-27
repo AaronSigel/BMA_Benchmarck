@@ -1,6 +1,7 @@
 venv/
 artifacts/
 artifacts-data/
+article_exports_validator/
 blender_agent_benchmark.egg-info
 blender-mcp-bma/
 __pycache__/

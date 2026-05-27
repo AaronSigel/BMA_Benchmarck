@@ -36,6 +36,10 @@ COMMANDS = {
     ),
     "save_scene": ("benchmark.blender.scripts.save_scene", "save_scene"),
     "render_scene": ("benchmark.blender.scripts.render_scene", "render_scene"),
+    "render_report_scene": (
+        "benchmark.blender.scripts.render_report_scene",
+        "render_report_scene",
+    ),
     "export_scene": ("benchmark.blender.scripts.export_scene", "export_scene"),
 }
 

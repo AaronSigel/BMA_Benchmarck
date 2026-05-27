@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 
 from benchmark.experiments.matrix import load_matrix
@@ -13,8 +12,11 @@ from bma_benchmark.reporting.evidence_pack.readme import write_readme
 from bma_benchmark.reporting.evidence_pack.sanity import run_validator_sanity_suite
 from bma_benchmark.reporting.evidence_pack.selection import select_evidence_examples
 from bma_benchmark.reporting.evidence_pack.tables import write_evidence_tables
+from bma_benchmark.reporting.rendering.blender_renderer import render_scene_artifacts
 from bma_benchmark.reporting.scene_examples.discovery import discover_runs
-from bma_benchmark.reporting.scene_examples.models import SceneExampleSelectionConfig
+from bma_benchmark.reporting.scene_examples.image_finder import find_scene_images
+from bma_benchmark.reporting.scene_examples.models import SceneExample, SceneExampleSelectionConfig
+from bma_benchmark.reporting.scene_examples.selection import _example as scene_example_from_run
 from bma_benchmark.reporting.scene_examples.writers import render_scene_images
 
 
@@ -24,11 +26,16 @@ def build_evidence_pack(
     *,
     config_path: Path | None = None,
     tasks_root: Path = Path("tasks"),
+    render_missing_with_blender: bool = False,
+    blender_bin: str = "blender",
+    render_mode: str = "viewport",
+    render_timeout_sec: int = 120,
 ) -> dict:
     """Собирает artifacts/report_evidence_pack из результатов демо-среза."""
     experiment_dir = Path(experiment_dir)
     out_dir = Path(out_dir)
     matrix = load_matrix(config_path) if config_path else None
+    visual_warnings: list[str] = []
 
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "figures").mkdir(exist_ok=True)
@@ -42,6 +49,27 @@ def build_evidence_pack(
     selection_config = SceneExampleSelectionConfig(examples_per_status=6)
     bundle = select_evidence_examples(runs, selection_config)
 
+    if render_missing_with_blender:
+        for example in bundle.examples:
+            if example.render_path or example.viewport_path:
+                continue
+            result = render_scene_artifacts(
+                example.run_dir,
+                blender_bin=blender_bin,
+                mode=render_mode,
+                timeout_sec=render_timeout_sec,
+                task_id=example.task_id,
+            )
+            _refresh_example_images(example, example.run_dir)
+            if result.status == "failed":
+                example.render_missing_reason = result.reason or "render failed"
+    else:
+        for example in bundle.examples:
+            if not (example.render_path or example.viewport_path):
+                example.render_missing_reason = example.render_missing_reason or (
+                    "no render/viewport image found"
+                )
+
     cards_dir = out_dir / "selected_examples" / "cards"
     render_scene_images(bundle.examples, cards_dir)
 
@@ -53,7 +81,17 @@ def build_evidence_pack(
         matrix,
         sanity_result,
     )
-    figure_paths = render_evidence_figures(bundle.examples, out_dir / "figures")
+    validator_pool = [
+        scene_example_from_run(run, "validator figure pool")
+        for run in runs
+        if run.viewport_path or run.render_path
+    ]
+    figure_paths = render_evidence_figures(
+        bundle.examples,
+        out_dir / "figures",
+        validator_pool=validator_pool,
+        warnings=visual_warnings,
+    )
     _copy_selected_logs(bundle.examples, out_dir / "logs")
     _link_experiment(experiment_dir, out_dir / "demo_slice")
 
@@ -63,15 +101,6 @@ def build_evidence_pack(
         config_path=config_path,
         matrix=matrix,
     )
-    write_readme(
-        out_dir / "README.md",
-        manifest=manifest,
-        experiment_dir=experiment_dir,
-        out_dir=out_dir,
-        bundle=bundle,
-        sanity_result=sanity_result,
-        table_paths=table_paths,
-    )
     completeness = write_completeness_check(
         out_dir,
         runs=runs,
@@ -80,8 +109,29 @@ def build_evidence_pack(
         figure_paths=figure_paths,
         table_paths=table_paths,
         expected_runs=matrix.metadata.get("expected_runs", 100) if matrix else 100,
+        visual_warnings=visual_warnings,
+    )
+    write_readme(
+        out_dir / "README.md",
+        manifest=manifest,
+        experiment_dir=experiment_dir,
+        out_dir=out_dir,
+        bundle=bundle,
+        sanity_result=sanity_result,
+        table_paths=table_paths,
+        completeness=completeness,
     )
     return completeness
+
+
+def _refresh_example_images(example: SceneExample, run_dir: Path) -> None:
+    render_path, viewport_path, reason = find_scene_images(run_dir)
+    example.render_path = render_path
+    example.viewport_path = viewport_path
+    if render_path or viewport_path:
+        example.render_missing_reason = None
+    elif reason:
+        example.render_missing_reason = reason
 
 
 def _copy_selected_logs(examples, logs_dir: Path) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from benchmark.validation.models import ValidationCheckRow, ValidationIssue
+from benchmark.validation.models import CheckStatus, ValidationCheckRow, ValidationIssue
 
 
 def json_value(value: Any) -> Any:
@@ -24,8 +24,19 @@ def check_row(
     tolerance: float | None = None,
     passed: bool,
     score: float | None = None,
+    status: CheckStatus | None = None,
+    weight: float | None = None,
+    message: str | None = None,
+    matched_object: str | None = None,
+    match_reason: str | None = None,
     issue: ValidationIssue | None = None,
 ) -> ValidationCheckRow:
+    resolved_status = status
+    if resolved_status is None:
+        resolved_status = CheckStatus.PASS if passed else CheckStatus.FAIL
+    resolved_score = score
+    if resolved_status is CheckStatus.SKIP:
+        resolved_score = None
     return ValidationCheckRow(
         validator_name=validator_name,
         check_name=check_name,
@@ -35,7 +46,12 @@ def check_row(
         actual=json_value(actual),
         tolerance=tolerance,
         passed=passed,
-        score=score,
+        score=resolved_score,
+        status=resolved_status,
+        weight=weight,
+        message=message or (issue.message if issue is not None else None),
+        matched_object=matched_object,
+        match_reason=match_reason,
         issue_code=issue.code if issue is not None else None,
         severity=issue.severity if issue is not None else None,
     )

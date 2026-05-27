@@ -33,8 +33,17 @@ VALIDATOR_METRIC_ALIASES: dict[str, set[str]] = {
     "light_validator": {"light_existence", "lighting_correctness", "parameter_correctness"},
     "camera_validator": {"camera_existence", "camera_correctness", "target_visibility"},
     "export_validator": {"export_validity"},
-    "glb_import_back_validator": {"export_validity"},
+    "glb_import_back_validator": {"export_import_validity", "export_validity"},
 }
+
+_SCENE_VALIDATOR_NAMES = frozenset({
+    "object_validator",
+    "transform_validator",
+    "material_validator",
+    "light_validator",
+    "camera_validator",
+})
+_EXPORT_VALIDATOR_NAMES = frozenset({"export_validator", "glb_import_back_validator"})
 
 
 class SceneValidator:
@@ -90,6 +99,7 @@ class SceneValidator:
         summary = self._summary(validator_results, active_results, task.success_criteria)
         summary["issues_total"] = int(summary["issues_total"]) + len(contamination_issues)
         summary["issue_counts"] = dict(sorted(issue_counts.items()))
+        summary["render_source"] = "final_scene"
         summary.update(contamination_summary)
 
         return SceneValidationResult(
@@ -126,7 +136,21 @@ class SceneValidator:
             for criterion in success_criteria
             if criterion.metric in aliases or criterion.metric == validator_name
         ]
-        return sum(matched_weights) if matched_weights else DEFAULT_VALIDATOR_WEIGHT
+        if not matched_weights:
+            return DEFAULT_VALIDATOR_WEIGHT
+        total = sum(matched_weights)
+        if (
+            validator_name in _EXPORT_VALIDATOR_NAMES
+            and any(criterion.metric == "export_validity" for criterion in success_criteria)
+        ):
+            export_validity_weight = sum(
+                criterion.weight
+                for criterion in success_criteria
+                if criterion.metric == "export_validity"
+            )
+            if export_validity_weight > 0:
+                return export_validity_weight / len(_EXPORT_VALIDATOR_NAMES)
+        return total
 
     def _has_required_error(
         self,
@@ -157,12 +181,45 @@ class SceneValidator:
             return ValidationStatus.PASSED
         return ValidationStatus.WARNING
 
+    def _component_score(
+        self,
+        validator_results: list[ValidatorResult],
+        names: frozenset[str],
+        success_criteria: list[SuccessCriterion],
+    ) -> float | None:
+        subset = [result for result in validator_results if result.name in names and result.status is not ValidationStatus.SKIPPED]
+        if not subset:
+            return None
+        return weighted_average(
+            [
+                (result.score, self._validator_weight(result.name, success_criteria))
+                for result in subset
+            ]
+        )
+
     def _summary(
         self,
         validator_results: list[ValidatorResult],
         active_results: list[ValidatorResult],
         success_criteria: list[SuccessCriterion],
     ) -> dict[str, object]:
+        scene_score = self._component_score(validator_results, _SCENE_VALIDATOR_NAMES, success_criteria)
+        export_score = self._component_score(
+            validator_results,
+            frozenset({"export_validator"}),
+            success_criteria,
+        )
+        import_back_score = self._component_score(
+            validator_results,
+            frozenset({"glb_import_back_validator"}),
+            success_criteria,
+        )
+        final_score = weighted_average(
+            [
+                (result.score, self._validator_weight(result.name, success_criteria))
+                for result in active_results
+            ]
+        )
         return {
             "validators_total": len(validator_results),
             "validators_run": len(active_results),
@@ -188,6 +245,12 @@ class SceneValidator:
             "weights": {
                 result.name: self._validator_weight(result.name, success_criteria)
                 for result in active_results
+            },
+            "scores": {
+                "scene_score": scene_score,
+                "export_score": export_score,
+                "import_back_score": import_back_score,
+                "final_score": final_score,
             },
         }
 

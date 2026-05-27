@@ -17,6 +17,12 @@ class ValidationSeverity(str, Enum):
     ERROR = "error"
 
 
+class CheckStatus(str, Enum):
+    PASS = "pass"
+    FAIL = "fail"
+    SKIP = "skip"
+
+
 class ValidationIssue(BaseModel):
     code: str
     message: str
@@ -55,6 +61,11 @@ class ValidationCheckRow(BaseModel):
     tolerance: float | None = None
     passed: bool
     score: float | None = Field(default=None, ge=0.0, le=1.0)
+    status: CheckStatus | None = None
+    weight: float | None = Field(default=None, ge=0.0)
+    message: str | None = None
+    matched_object: str | None = None
+    match_reason: str | None = None
     issue_code: str | None = None
     severity: ValidationSeverity | None = None
 
